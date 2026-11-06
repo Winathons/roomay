@@ -4,6 +4,10 @@
 
 The initial scaffold currently renders **Hello from roomay**. Real hospitality workflows, guest identity verification, and Workpeg data integration are planned but not implemented yet.
 
+WOR-8 Phase A adds an [offline hotel model](docs/hotel-model.md), synthetic fixtures
+and pure rule tests. Hosted tables and persistence remain unverified under WOR-6.
+Run `python -m unittest discover -s tests -v` to verify the offline rules.
+
 ## Project structure
 
 ```text
