@@ -163,6 +163,7 @@ def room_eligibility(data, reservation_id, room_id, *, check_in=False,
 
     today is an explicit hotel-local date, never the machine clock. No mutation.
     Occupied rooms conservatively fail even for future allocation until checkout.
+    Confirmed assignments cannot change through this check, in either mode.
     """
     index = validate_snapshot(data)
     if reservation_id not in index["reservations"] or room_id not in index["rooms"]:
@@ -172,6 +173,8 @@ def room_eligibility(data, reservation_id, room_id, *, check_in=False,
     reasons = []
     if booking["status"] == "cancelled":
         reasons.append("cancelled")
+    if booking["status"] == "confirmed" and booking["room_id"] != room_id:
+        reasons.append("confirmed_reservation_assigned_elsewhere")
     if not room["enabled"]:
         reasons.append("room_disabled")
     if room["room_type_id"] != booking["room_type_id"]:

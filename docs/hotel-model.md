@@ -89,6 +89,12 @@ unassigned room-type inventory and overbooking require later explicit workflows.
   of the requested type, arrival <= today < departure, ready housekeeping, no active
   stay, no overlapping confirmed reservation and no overlapping active block.
   A reservation already used for any stay cannot be checked in again.
+- In both allocation and check-in mode, a confirmed booking assigned to a different
+  room returns `confirmed_reservation_assigned_elsewhere`. Checking its existing
+  room remains valid subject to all other rules. Pending bookings may be evaluated
+  for a new room, including first-time allocation without a tentative assignment.
+  Eligibility never authorizes reassignment; an actual room change needs a separate
+  authorized transition, which Phase A does not implement.
 - For allocation, dirty/cleaning/inspection does not prohibit a future booking;
   readiness is checked at arrival. Active stays conservatively reject allocation
   even for a future range: expected departure is not actual checkout. This reduces

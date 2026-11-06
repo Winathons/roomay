@@ -14,6 +14,45 @@ class HotelRules(unittest.TestCase):
     def eligible(self, room="202", **kwargs):
         return room_eligibility(self.data, uid("walk-in"), uid(room), **kwargs)
 
+    def test_confirmed_allocation_same_room(self):
+        self.assertEqual(self.eligible("202", check_in=False), ())
+
+    def test_confirmed_allocation_different_room(self):
+        before = deepcopy(self.data)
+        self.assertEqual(self.eligible("204", check_in=False),
+                         ("confirmed_reservation_assigned_elsewhere",))
+        self.assertIn("confirmed_reservation_assigned_elsewhere", self.eligible(
+            "204", check_in=True, today="2026-11-06", staff_approved=True))
+        self.assertEqual(self.data, before)
+
+    def test_pending_allocation_new_room(self):
+        self.walk_in["status"] = "pending_confirmation"
+        # A tentative room does not become a confirmed assignment.
+        self.assertEqual(self.eligible("204", check_in=False), ())
+        self.walk_in.pop("room_id")
+        self.assertEqual(self.eligible("204", check_in=False), ())
+
+    def test_cancelled_allocation_rejected(self):
+        self.walk_in["status"] = "cancelled"
+        for room in ("202", "204"):
+            with self.subTest(room=room):
+                self.assertEqual(self.eligible(room, check_in=False), ("cancelled",))
+
+    def test_allocation_assignment_conflict_preserves_safety_reasons(self):
+        # Occupancy and maintenance must each block even without the other.
+        self.data["room_blocks"] = []
+        reasons = self.eligible("205", check_in=False)
+        self.assertIn("confirmed_reservation_assigned_elsewhere", reasons)
+        self.assertIn("occupied", reasons)
+        block = synthetic_hotel()["room_blocks"][0]
+        block["room_id"] = uid("204")
+        self.data["room_blocks"] = [block]
+        self.assertEqual(self.eligible("204", check_in=False),
+                         ("confirmed_reservation_assigned_elsewhere", "maintenance_block"))
+        self.walk_in["status"] = "pending_confirmation"
+        self.assertEqual(self.eligible("204", check_in=False), ("maintenance_block",))
+        self.assertIn("occupied", self.eligible("205", check_in=False))
+
     def test_fixtures_are_deterministic_valid_and_independent(self):
         self.assertEqual(self.data, synthetic_hotel())
         validate_snapshot(self.data)
