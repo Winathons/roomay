@@ -1,0 +1,13 @@
+{
+  "namespace": "roomay",
+  "function": {
+    "entrypoint": "app.main:main"
+  },
+  "runtime": {
+    "default": "cracker",
+    "docker": {
+      "host": "127.0.0.1",
+      "port": 8000
+    }
+  }
+}
