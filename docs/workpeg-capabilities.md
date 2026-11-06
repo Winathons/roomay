@@ -7,7 +7,8 @@ This is a **development runbook**, not evidence that a live Workpeg connection i
 - GitHub: `Umardoja/roomay`, default branch `main`.
 - Local developer verified Python 3.13.5, Workpeg SDK `0.149.1`, `workpeg ui build ui/`, and `workpeg doctor . --offline` with no issues.
 - Starter page displayed `Hello from roomay` at `localhost:8081`.
-- **Not yet verified:** authenticated Workpeg business, remote table creation, persistent row writes, multi-user permissions, or Peg publishing.
+- **Approved:** Developer portal shows the `roomay` Peg registered and **Approved**; the owner confirms it is associated with the separate `Roomay AI` development business.
+- **Not yet verified:** authenticated Workpeg table operations, remote table creation, persistent row writes, multi-user permissions or Peg publishing. The developer dashboard shows **No Releases Yet**. Approval is not a published installation.
 
 ## 1. Separate development business (owner action)
 
@@ -83,6 +84,6 @@ Keep WOR-6 **In Progress** until the table test actually succeeds.
 
 ## 5. Later Roomay architecture (not part of smoke test)
 
-After WOR-6, [WOR-8](https://linear.app/workpeg/issue/WOR-8/define-workpeg-hotel-data-schema-and-seed-synthetic-inventory) will model `rooms`, `room_types`, `guests`, `reservations`, `stays`, `stay_guests`, and other operational records. Do not build all tables before Workpeg access and permission semantics are tested.
+The offline hotel model and fictional fixtures already exist in `domain/` (WOR-8 Phase A; 25 tests). Once [WOR-28](https://linear.app/workpeg/issue/WOR-28) proves real Workpeg table persistence and permissions, [WOR-29](https://linear.app/workpeg/issue/WOR-29) connects approved schemas to those tables and safely seeds fictional room records. Do not provision all tables or real guest data before validating Workpeg behavior.
 
 The product goal remains a Workpeg-native hotel operating experience with precise reservations vs. in-house occupancy and separate maintenance/housekeeping readiness, using synthetic data until privacy and correctness are verified.
