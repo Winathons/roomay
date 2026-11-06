@@ -1,7 +1,8 @@
 # Roomay — Instructions for human contributors and Codex
 
 ## Product and source of truth
-- Roomay is a **Workpeg-native hotel operations and guest experience** prototype for the November 13–14, 2026 Workpeg Hospitality Hackathon.
+- **Roomay is a real Workpeg-native hotel operations product.** The November 13–14, 2026 Workpeg Hospitality Hackathon is a development milestone, not an excuse to substitute nonfunctional screens for a working system.
+- Product requirements are genuine Workpeg-persisted room inventory, bookings, stays, service requests, multi-role staff operations and verified guest channels. A passing compile or synthetic UI is not a completed product.
 - [Linear Roomay project](https://linear.app/workpeg/project/roomay-workpeg-hospitality-hackathon-7b7a7ce4b3b9) owns requirements, issues, acceptance criteria and progress.
 - [Official Workpeg SDK documentation](https://developers.workpeg.com/docs/latest/) is authoritative for platform APIs. Inspect installed SDK `0.149.1` and documentation before using widgets, table helpers, functions, schemas, or CLI commands. **Do not invent Workpeg APIs.**
 - Read `README.md`, `CONTRIBUTING.md`, `docs/staging.md`, and relevant Linear issue before modifying code.
@@ -18,10 +19,11 @@
 - The staff UI is a Workpeg **Python Peg UI** compiled by the SDK, not a new standalone React backend.
 - Primary operational data belongs to **Workpeg business-scoped tables**, with Workpeg authenticated staff sessions and role permissions.
 - Prefer native `workpeg.*` UI helpers and manifest-declared AI table actions over custom functions. Add backend code only when the supported platform cannot meet a verified requirement.
-- Do not assume `localhost:8081` establishes Workpeg authentication or remote data persistence. **WOR-6** remains a gate until a fictional table row is created/read/updated across reload in a dedicated development business.
-- No production customer data. `--fake-cloud` uses a real Workpeg origin and real service APIs: do not invoke it without explicit confirmation of isolated test-business context.
+- Do not assume `localhost:8081` establishes Workpeg authentication or remote data persistence. **WOR-28** verifies actual table create/read/update across refresh in the isolated development business before WOR-29 and WOR-34 integrate live hotel workflows. Workpeg developers confirmed staff-session Peg UI helpers can run locally with `--fake-cloud` without a published release; Functions/custom save hooks have different deployment requirements.
+- No production customer data during engineering. `--fake-cloud` uses a real Workpeg origin and real service APIs: authorize it only for the isolated Roomay AI development business. From Windows set `WORKPEG_BIND_HOST=127.0.0.1` and use a locally trusted mkcert HTTPS certificate. Its name does not make the API simulated.
+- **Temporary synthetic fixtures are test-only.** Do not pass fictional hotel data off as operational records, and do not ship `/demo/reception` or the `/b/[business_id]/dev-smoke` diagnostic route in a hotel release. The product receptionist UI must read actual Workpeg rows; track the transition in WOR-34 and release gate WOR-33.
 - No Workpeg developer/admin keys in Git, browser JavaScript, screenshots, logs, PRs or public guest-facing code.
-- Public guest access and PBX/telephony are not established by the scaffold. Prototype voice with a typed fallback. Do not claim paid AI inference, payments or real telephony without real verification.
+- Public guest access, browser voice, WhatsApp and PBX/telephony are real product requirements requiring supported APIs, authenticated access, observability and end-to-end verification. Until implemented, do not display them as functioning or claim real payments/calls/AI inference.
 
 ## Hotel invariants
 - **Reservation != stay:** A booking/request does not mean a guest checked in.
