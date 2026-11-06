@@ -92,8 +92,10 @@ class ReservationCommandTests(unittest.TestCase):
         self.assertEqual(len(self.hotel["stays"]), 1)
 
     def test_only_authorized_staff_may_plan_confirmation(self):
-        with self.assertRaisesRegex(ReservationRejected, "authorized_staff_required"):
-            self.confirm(staff_authorized=False)
+        for supplied in (False, None, "yes", 1):
+            with self.subTest(value=supplied):
+                with self.assertRaisesRegex(ReservationRejected, "authorized_staff_required"):
+                    self.confirm(staff_authorized=supplied)
 
     def test_confirmation_proposes_transition_but_does_not_save(self):
         original = deepcopy(self.hotel)
