@@ -12,6 +12,11 @@ This is a **development runbook**, not evidence that a live Workpeg connection i
 
 ## 1. Separate development business (owner action)
 
+WOR-28 now provides an offline-verified native development screen at
+`/b/<business_id>/dev-smoke`. See the [owner runbook](dev-smoke.md) for SDK evidence,
+installation limits, exact manual test steps and an offline screenshot. No live
+persistence/permissions evidence has been added; WOR-28 and WOR-6 remain In Progress.
+
 Use a **dedicated Workpeg development account/business** containing fictional hotel data. Do not develop against a customer hotel or an intended production account.
 
 1. Sign in to the official Workpeg platform/developer console.
