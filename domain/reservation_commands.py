@@ -108,7 +108,7 @@ def prepare_room_confirmation(snapshot, *, reservation_id, room_id, staff_author
     index = validate_snapshot(snapshot)
     reservation_id = _uuid(reservation_id, "reservation_id")
     room_id = _uuid(room_id, "room_id")
-    if not staff_authorized:
+    if staff_authorized is not True:
         raise ReservationRejected("authorized_staff_required")
     booking = index["reservations"].get(reservation_id)
     if booking is None:
@@ -130,7 +130,7 @@ def prepare_cancellation(snapshot, *, reservation_id, staff_authorized):
     """Plan cancellation only when an actual stay has not used this booking."""
     index = validate_snapshot(snapshot)
     reservation_id = _uuid(reservation_id, "reservation_id")
-    if not staff_authorized:
+    if staff_authorized is not True:
         raise ReservationRejected("authorized_staff_required")
     booking = index["reservations"].get(reservation_id)
     if booking is None:
