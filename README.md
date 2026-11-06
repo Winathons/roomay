@@ -1,6 +1,6 @@
 # Roomay
 
-**Roomay** is an AI-assisted hotel operations and guest-experience application built around the **Workpeg SDK**. It aims to connect reception, walk-in bookings, room inventory, actual guest check-ins, housekeeping, maintenance and service requests in one clear staff experience. Future guest channels include a mobile portal, text/voice and WhatsApp.
+**Roomay is a real hotel operations product** built on the **Workpeg SDK**. It is designed for actual receptionist, reservations, occupancy, housekeeping, maintenance and guest-service workflows, not for displaying fictional operations as a finished application. It aims to connect reception, walk-in bookings, room inventory, actual guest check-ins, housekeeping, maintenance and service requests in one clear staff experience. Future guest channels include a mobile portal, text/voice and WhatsApp.
 
 **Repository:** [Umardoja/roomay](https://github.com/Umardoja/roomay) · **Work board:** [Roomay in Linear](https://linear.app/workpeg/project/roomay-workpeg-hospitality-hackathon-7b7a7ce4b3b9) · **SDK:** [Workpeg documentation](https://developers.workpeg.com/docs/latest/)
 
@@ -22,9 +22,7 @@ The development-only [persistence smoke screen](docs/dev-smoke.md) is available 
 `/b/<business_id>/dev-smoke` for an authorized owner's fictional table test.
 Its installation, authentication and live persistence remain unverified.
 
-The polished [offline receptionist dashboard](docs/reception-demo.md) is available
-at `/demo/reception`. It uses only synthetic fixtures, is visibly labelled as demo
-data, and makes no Workpeg table or authentication calls.
+An older internal reception UI is currently accessible at `/demo/reception`, but it **does not use live Workpeg records**. It is engineering scaffolding, not the hotel application and must **not be shipped to customers**. The real receptionist interface and removal of that temporary route are tracked in [WOR-34](https://linear.app/workpeg/issue/WOR-34); release-route exclusion is tracked in [WOR-33](https://linear.app/workpeg/issue/WOR-33). Synthetic fixtures are only test inputs.
 
 ### Step 1 — Clone the existing repository
 
@@ -84,9 +82,7 @@ workpeg ui serve ui/
 
 Open the **local address printed in your terminal** (the original scaffold used `http://localhost:8081/`, but the port may differ). The current starter interface may still show **“Hello from roomay”** while the real receptionist UI is being developed.
 
-Leave the terminal open while you use the browser. Open `/demo/reception` for the
-offline receptionist prototype. `Ctrl+C` stops the server. Edits to supported UI
-Python files usually trigger a rebuild and browser refresh.
+Leave the terminal open while you use the browser. `Ctrl+C` stops the server. Edits to supported UI Python files usually trigger a rebuild and browser refresh. **The currently available internal screens are not Workpeg-backed hotel workflows yet.** Follow WOR-28, WOR-29 and WOR-34 to connect the actual operational system.
 
 ### Step 4 — Run the offline tests and build
 
@@ -166,7 +162,7 @@ For a full guide, read [CONTRIBUTING.md](CONTRIBUTING.md), [AGENTS.md](AGENTS.md
 ## Workpeg account access and security
 
 - **Local UI and tests:** No Workpeg developer token required.
-- **Workpeg business-backed testing:** Must use the confirmed **Roomay AI development business**, an authorized staff session and **fictional** hotel records. Contact the project lead for legitimate access. Do **not** create another Peg or a real-hotel business independently.
+- **Workpeg business-backed engineering:** Must use the confirmed **Roomay AI development business**, an authorized staff session and **fictional test** hotel records. Contact the project lead for legitimate access. Do **not** create another Peg or a real-hotel business independently.
 - **Developer API/publishing token (`WORKPEG_PK`):** The Roomay Peg has been approved, so an authorized owner can generate a token when needed for approved publishing or server-side operations. **Never put it in source files, the frontend, GitHub, Linear comments, screenshots or Discord.**
 - **`--fake-cloud` is NOT an offline sandbox.** The SDK warns it sends your Workpeg session and writes to the actual service; it also modifies local host/TLS configuration and can expose the server to your network. **Do not run it as part of basic setup.** Get explicit approval and verify the isolated business first.
 - **Guest privacy:** Do not enter real hotel guests, government IDs, card information or customer messages into synthetic tests.

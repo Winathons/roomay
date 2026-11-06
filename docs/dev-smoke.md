@@ -56,7 +56,27 @@ This support clarification supersedes the earlier installation-blocker assumptio
 - Its business UUID is verified privately from the Workpeg business context; **do not use the Peg developer portal URL UUID as a guess**.
 - Only one authorized developer, one tab and one fictional table/record. Do not share session cookies or screenshot secrets.
 - `--fake-cloud` **is not a database mock**: the page talks to Workpeg's real API. The SDK's default binds to the LAN; set `WORKPEG_BIND_HOST=127.0.0.1` to confine the development server to this machine.
-- On Windows, the CLI may need an **Administrator PowerShell** to append its tagged entry to `hosts`; it also provisions local HTTPS, using mkcert if available or a self-signed fallback. Do not enter credentials through an untrusted TLS warning. Follow the SDK's mkcert setup if the certificate is not trusted, and keep the generated local CA private.
+- On Windows, the CLI needs **Administrator PowerShell** to append a tagged entry to `hosts`. It also requires **mkcert or OpenSSL** for local HTTPS. Our first owner run failed because neither was installed. Install `mkcert` from a trusted package source and trust its **local development CA** before running Workpeg. Do not enter credentials through an untrusted TLS warning; do not share the local CA private key.
+
+### Resolve Windows HTTPS prerequisite (once per developer machine)
+
+Before rerunning the Workpeg server, install **mkcert**. In Windows PowerShell:
+
+```powershell
+winget --version
+winget install -e --id FiloSottile.mkcert
+```
+
+If WinGet is unavailable but [Chocolatey](https://chocolatey.org/) is already installed, the official Workpeg/mkcert docs also support `choco install mkcert`. Otherwise use the [official mkcert releases](https://github.com/FiloSottile/mkcert/releases); do not download certificate tools from untrusted mirrors.
+
+**Open a fresh Administrator PowerShell after installing** (so PATH refreshes), then:
+
+```powershell
+mkcert -version
+mkcert -install
+```
+
+The second command installs a **locally trusted development root CA** on your machine. Approve only the expected operating-system trust prompt. Keep `rootCA-key.pem` private; never commit or share it. If the executable is not found after installation, close and reopen the terminal and check `Get-Command mkcert` before proceeding.
 
 From the existing local repo root (where `workpeg.json` and `ui/` exist):
 

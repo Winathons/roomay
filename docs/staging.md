@@ -6,7 +6,7 @@ Updated: November 6, 2026. The `staging` **Git branch** exists. It is **not** ev
 
 | Layer | What it is | State |
 | --- | --- | --- |
-| `main` branch | Stable demo/release code; GitHub default | Existing |
+| `main` branch | Reviewed stable release code; GitHub default | Existing |
 | `staging` branch | Shared integration code; features land via reviewed PRs | Existing |
 | `WOR-###-...` branches | One issue/feature at a time | Create when claimed |
 | Local Workpeg UI | `workpeg ui serve ui/`, a developer-only compiler/test page | Verified locally on initial scaffold |
@@ -85,7 +85,7 @@ Before developing the true hotel records, **WOR-6** must demonstrate an isolated
 - Record redacted evidence in Linear. No production hotel data.
 - If blocked, implement UI against explicit synthetic fixtures and accurately label data source; do not invent an online integration.
 
-## Final demo gate
+## Real product release gate
 
 - Walk-in booking persists; no false occupancy, no overlapping stay assignment.
 - Guest typed request creates a real task; staff acknowledges and resolves it; history persists.
