@@ -22,6 +22,10 @@ The development-only [persistence smoke screen](docs/dev-smoke.md) is available 
 `/b/<business_id>/dev-smoke` for an authorized owner's fictional table test.
 Its installation, authentication and live persistence remain unverified.
 
+The polished [offline receptionist dashboard](docs/reception-demo.md) is available
+at `/demo/reception`. It uses only synthetic fixtures, is visibly labelled as demo
+data, and makes no Workpeg table or authentication calls.
+
 ### Step 1 — Clone the existing repository
 
 **Windows PowerShell**
@@ -80,7 +84,9 @@ workpeg ui serve ui/
 
 Open the **local address printed in your terminal** (the original scaffold used `http://localhost:8081/`, but the port may differ). The current starter interface may still show **“Hello from roomay”** while the real receptionist UI is being developed.
 
-Leave the terminal open while you use the browser. `Ctrl+C` stops the server. Edits to supported UI Python files usually trigger a rebuild and browser refresh.
+Leave the terminal open while you use the browser. Open `/demo/reception` for the
+offline receptionist prototype. `Ctrl+C` stops the server. Edits to supported UI
+Python files usually trigger a rebuild and browser refresh.
 
 ### Step 4 — Run the offline tests and build
 
@@ -94,7 +100,8 @@ workpeg doctor . --offline
 ```
 
 **Expected on the November 6 staging snapshot:**
-- Unit tests: **26 passing**, including a compiled UI test with **17 mocked scenarios**;
+- Unit tests: **36 passing**, including compiled UI tests with **17 mocked
+  persistence scenarios** and a network-forbidden reception scenario;
   the command ends in `OK`.
 - Syntax compilation: no output when successful.
 - Workpeg UI build: `Built to ui/dist` (or `ui\dist` on Windows).
@@ -112,16 +119,19 @@ The UI build checks that the Workpeg Python interface compiles to browser assets
 roomay/
 ├── workpeg.json            # Peg namespace and manifest
 ├── ui/
-│   └── main.py             # Workpeg Python UI
+│   ├── main.py             # Workpeg route registration
+│   └── reception.py        # Offline receptionist dashboard
 ├── function/               # Optional Python hook/function runtime
 ├── domain/
 │   ├── schema.py           # Proposed Workpeg hotel table schema
 │   ├── hotel.py            # Pure availability/eligibility and validation rules
-│   └── fixtures.py         # Synthetic rooms, guests, stays and bookings
+│   ├── fixtures.py         # Synthetic rooms, guests, stays and bookings
+│   └── reception_demo.py   # Canonical receptionist view projection
 ├── tests/
 │   └── test_hotel.py       # Offline hotel regression tests
 ├── docs/
 │   ├── hotel-model.md      # Domain assumptions, limitations and next steps
+│   ├── reception-demo.md   # WOR-32 UI behavior, screenshots and limits
 │   ├── workpeg-capabilities.md # Workpeg integration readiness
 │   └── staging.md          # Branches, CI and Codex workflow
 ├── AGENTS.md               # Instructions for Codex and contributors
