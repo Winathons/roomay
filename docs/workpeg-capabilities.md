@@ -1,0 +1,88 @@
+# Workpeg integration readiness — WOR-6
+
+This is a **development runbook**, not evidence that a live Workpeg connection is already working.
+
+## Current confirmed state (2026-11-06)
+
+- GitHub: `Umardoja/roomay`, default branch `main`.
+- Local developer verified Python 3.13.5, Workpeg SDK `0.149.1`, `workpeg ui build ui/`, and `workpeg doctor . --offline` with no issues.
+- Starter page displayed `Hello from roomay` at `localhost:8081`.
+- **Not yet verified:** authenticated Workpeg business, remote table creation, persistent row writes, multi-user permissions, or Peg publishing.
+
+## 1. Separate development business (owner action)
+
+Use a **dedicated Workpeg development account/business** containing fictional hotel data. Do not develop against a customer hotel or an intended production account.
+
+1. Sign in to the official Workpeg platform/developer console.
+2. Create or select a development business with no production hotel records.
+3. Confirm the account is an authorized staff member of that business.
+4. Establish whether `roomay` is an available Peg namespace in that business, and check the developer/publishing workflow with the organizers.
+5. Give teammates only the minimum needed access. Store tokens outside Git and do not share secrets in issue comments/screenshots.
+6. Record only non-sensitive confirmation: business nickname (e.g., `Roomay Demo Hotel`), access status, screenshots without customer data, any blockers.
+
+**Important:** `workpeg ui serve ui/` on localhost only tests the UI. Workpeg's `workpeg.*` table helpers operate in an authenticated Workpeg business context. The SDK says they resolve the active business from `/b/<business_id>/...` and send the Peg namespace plus authenticated session.
+
+The `--fake-cloud` development flag **is not a sandbox**. It changes local hosting/origin, can expose the server on the LAN, and sends operations to the real Workpeg API under the signed-in account. Use it only after confirming an isolated development business and understanding its hosts/TLS changes. Do not tell the team to use it by default.
+
+References:
+- https://developers.workpeg.com/docs/latest/getting-started/
+- https://developers.workpeg.com/docs/latest/projects/
+- https://developers.workpeg.com/docs/latest/tables/
+
+## 2. Backend-first? No: use native platform facilities
+
+The primary staff application should use the Workpeg Python UI and its authenticated table helpers, without building an unnecessary second API/database.
+
+Confirmed SDK helpers (call with `await` within supported async UI code):
+
+| Purpose | Helper |
+| --- | --- |
+| List/create schema | `workpeg.get_tables(namespace)`, `workpeg.create_table(schema)` |
+| Read schema | `workpeg.get_table(table_uuid)` |
+| Paginated rows | `workpeg.get_rows(table_uuid, limit=100, offset=0)` |
+| Read one row | `workpeg.get_row(table_uuid, row_id)` |
+| Insert | `workpeg.add_row(table_uuid, row)` |
+| Edit | `workpeg.update_row(table_uuid, row_id, patch)` |
+
+These target the currently authenticated business; the Peg namespace is applied automatically. Each Workpeg table has typed columns and business/individual permissions.
+
+Two key design constraints:
+
+1. **Never assume public guest access works like authenticated staff access.** The SDK documents staff membership requirements for its REST table APIs. Confirm a supported public channel before implementing a guest portal, or design a tightly scoped server-only gateway. Never embed developer tokens in the browser.
+2. `PATCH` replaces the row's **entire** `data` object when that field is supplied, despite being a partial update of the row overall. Read, merge relevant `data` keys, then save; do not wipe other fields accidentally.
+
+## 3. First persistent-data smoke test (fictional only)
+
+After authenticated dev business access is available:
+
+1. Create a small `Roomay Dev Smoke` table belonging to the Roomay Peg and a development-only namespace, e.g., `roomay_smoke`.
+2. Define required `room_number` text and optional `status` text columns using supported table schema types. Keep table access owner-only unless a second staff account is specifically being tested.
+3. Insert **one fictional row**: room `201`, status `ready`, via documented Workpeg `create_table` and `add_row` helpers or the platform's authorized UI.
+4. Retrieve it using `get_tables` and `get_rows` under the **correct** business and namespace. Refresh and confirm persistence.
+5. Update its status to `dirty` while preserving other `data` keys, refresh and re-read.
+6. Test that a different/unauthorized account cannot read or modify the test records. If a second staff test account is unavailable, record that limitation.
+7. Capture redacted test evidence, including table/row lookup and any error details, without session cookies/tokens.
+
+**Acceptance gate:** proven persistent read/write with authorized session, repeatable from a fresh login; no data outside isolated development business changed.
+
+Do **not** connect actual guest identity records, reservations, customer payments, or hotel PBX integrations during this smoke test.
+
+## 4. Report evidence back in Linear
+
+Comment on [WOR-6](https://linear.app/workpeg/issue/WOR-6/configure-isolated-workpeg-dev-business-sdk-identity-and-access) with:
+
+- Development business created/selected? (yes/no)
+- Authorized session and Peg namespace tested? (yes/no)
+- First table created and row persisted after refresh? (yes/no)
+- Second-account negative permission test? (pass / not yet possible)
+- Unexpected errors, supported SDK version, and exact command path
+- Screenshot with sensitive values removed
+- Open blocker for public guest access / publishing, if any
+
+Keep WOR-6 **In Progress** until the table test actually succeeds.
+
+## 5. Later Roomay architecture (not part of smoke test)
+
+After WOR-6, [WOR-8](https://linear.app/workpeg/issue/WOR-8/define-workpeg-hotel-data-schema-and-seed-synthetic-inventory) will model `rooms`, `room_types`, `guests`, `reservations`, `stays`, `stay_guests`, and other operational records. Do not build all tables before Workpeg access and permission semantics are tested.
+
+The product goal remains a Workpeg-native hotel operating experience with precise reservations vs. in-house occupancy and separate maintenance/housekeeping readiness, using synthetic data until privacy and correctness are verified.
