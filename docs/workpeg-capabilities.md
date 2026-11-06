@@ -8,13 +8,14 @@ This is a **development runbook**, not evidence that a live Workpeg connection i
 - Local developer verified Python 3.13.5, Workpeg SDK `0.149.1`, `workpeg ui build ui/`, and `workpeg doctor . --offline` with no issues.
 - Starter page displayed `Hello from roomay` at `localhost:8081`.
 - **Approved:** Developer portal shows the `roomay` Peg registered and **Approved**; the owner confirms it is associated with the separate `Roomay AI` development business.
-- **Not yet verified:** authenticated Workpeg table operations, remote table creation, persistent row writes, multi-user permissions or Peg publishing. The developer dashboard shows **No Releases Yet**. Approval is not a published installation.
+- **Workpeg support-confirmed:** a Peg UI using authenticated staff-session table helpers can test data **locally with `--fake-cloud` and `--peg-namespace roomay` without a published/installed release**. Function/save-hook publishing is a separate workflow.
+- **Not yet verified:** actual authenticated Workpeg table operations, remote table creation, persistent row writes, multi-user permissions or Peg publishing. **No Releases Yet** does not block this UI-only smoke test.
 
 ## 1. Separate development business (owner action)
 
 WOR-28 now provides an offline-verified native development screen at
 `/b/<business_id>/dev-smoke`. See the [owner runbook](dev-smoke.md) for SDK evidence,
-installation limits, exact manual test steps and an offline screenshot. No live
+fake-cloud run instructions, exact manual test steps and an offline screenshot. No live
 persistence/permissions evidence has been added; WOR-28 and WOR-6 remain In Progress.
 
 Use a **dedicated Workpeg development account/business** containing fictional hotel data. Do not develop against a customer hotel or an intended production account.
@@ -28,7 +29,7 @@ Use a **dedicated Workpeg development account/business** containing fictional ho
 
 **Important:** `workpeg ui serve ui/` on localhost only tests the UI. Workpeg's `workpeg.*` table helpers operate in an authenticated Workpeg business context. The SDK says they resolve the active business from `/b/<business_id>/...` and send the Peg namespace plus authenticated session.
 
-The `--fake-cloud` development flag **is not a sandbox**. It changes local hosting/origin, can expose the server on the LAN, and sends operations to the real Workpeg API under the signed-in account. Use it only after confirming an isolated development business and understanding its hosts/TLS changes. Do not tell the team to use it by default.
+The `--fake-cloud` development flag **is not a sandbox**. It changes local hosting/origin, can expose the server on the LAN, and sends operations to the real Workpeg API under the signed-in account. Workpeg support has confirmed this is the supported local **Peg UI table test** path without a release; it should be run **only by the owner after verifying the Roomay AI business**, with `WORKPEG_BIND_HOST=127.0.0.1` to prevent LAN exposure. See [dev-smoke.md](dev-smoke.md).
 
 References:
 - https://developers.workpeg.com/docs/latest/getting-started/
