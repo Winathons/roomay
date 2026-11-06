@@ -96,7 +96,7 @@ workpeg doctor . --offline
 ```
 
 **Expected on the November 6 staging snapshot:**
-- Unit tests: **36 passing**, including compiled UI tests with **17 mocked
+- Unit tests: **54 passing**, including compiled UI tests with **17 mocked
   persistence scenarios** and a network-forbidden reception scenario;
   the command ends in `OK`.
 - Syntax compilation: no output when successful.
@@ -192,6 +192,7 @@ Current real-backend steps are tracked in [WOR-27 — Peg onboarding](https://li
 - [Workpeg SDK — Tables & Rows](https://developers.workpeg.com/docs/latest/tables/)
 - [Workpeg SDK — Functions](https://developers.workpeg.com/docs/latest/functions/)
 - [Hotel model and invariants](docs/hotel-model.md)
+- [Service-request lifecycle and persistence contract](docs/service-requests.md)
 - [Workpeg integration readiness](docs/workpeg-capabilities.md)
 - [Team staging workflow](docs/staging.md)
 

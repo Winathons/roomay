@@ -8,8 +8,9 @@ is unchanged. Python domain code is not compiled into the Peg UI or deployed as 
 function; UI compilation verifies the existing scaffold only.
 
 **WOR-8 remains In Progress.** Its hosted read/write acceptance criteria depend on
-WOR-6 and are not satisfied by these checks. Service requests and incidents from
-the larger issue are deferred; this phase covers inventory, bookings and presence.
+WOR-6 and are not satisfied by these checks. This phase covers inventory, bookings
+and presence. The separate offline service-request lifecycle is documented in
+[service-requests.md](service-requests.md); its persistence is also unverified.
 
 ## Verified SDK evidence (2026-11-06)
 
@@ -148,8 +149,9 @@ No legal retention duration is invented here; no scheduled deletion is implement
 5. Verify authorized reservation-to-stay and registered-occupant creation,
    checkout making the room dirty, maintenance blocks on occupied rooms, recovery
    after partial writes, refresh persistence, stale state and concurrent requests.
-6. Add service request/incident schemas under their approved scope. Demonstrate
-   remaining WOR-8 acceptance criteria before claiming the issue complete.
+6. Integrate the proposed service-request schemas under their approved scope only
+   after the request gateway and permissions are verified. Demonstrate remaining
+   WOR-8 acceptance criteria before claiming the issue complete.
 
 No live Workpeg API, `--fake-cloud`, production records, credentials or billable AI
 were used in Phase A. Reading public SDK docs and GitHub/Linear coordination is
