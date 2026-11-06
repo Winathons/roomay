@@ -10,7 +10,7 @@ Updated: November 6, 2026. The `staging` **Git branch** exists. It is **not** ev
 | `staging` branch | Shared integration code; features land via reviewed PRs | Existing |
 | `WOR-###-...` branches | One issue/feature at a time | Create when claimed |
 | Local Workpeg UI | `workpeg ui serve ui/`, a developer-only compiler/test page | Verified locally on initial scaffold |
-| Workpeg staging business | Isolated authenticated **real Workpeg** business with synthetic hotel rooms, tables and roles | **Not verified; WOR-6 open** |
+| Workpeg staging business | Separate **Roomay AI** business tied to approved `roomay` Peg | **Business created; remote table access/persistence unverified (WOR-28)** |
 | Production Workpeg Peg | Real published customer install | **Not available/claimed** |
 
 Never confuse a branch or localhost page with a hosted Workpeg environment.
