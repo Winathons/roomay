@@ -29,7 +29,10 @@ jobs:
         run: python -m pip install -r requirements-dev.txt
 
       - name: Python syntax check
-        run: python -m compileall -q ui function
+        run: python -m compileall -q ui function domain tests
+
+      - name: Offline hotel rules
+        run: python -m unittest discover -s tests -v
 
       - name: Compile Workpeg UI
         run: workpeg ui build ui/
