@@ -43,43 +43,51 @@ Only 401/403 codes are classified using the inspected runtime's HTTP prefix. Raw
 exceptions, server bodies, cookies, user payloads and unrelated row fields are not
 rendered/logged. Other network/service/malformed-response failures use static text.
 
-## Installation preflight — owner action
+## Approved local UI table testing — confirmed by Workpeg support
 
-Owner-confirmed: Roomay is approved and associated with Roomay AI. Approval alone
-does not establish a release, installation or working UI.
+**Workpeg developer reply (November 6, 2026):** Native `workpeg.*` **Peg UI table helpers can be tested from a local `--fake-cloud` server without publishing or installing a Peg release**. The UI requests run as the signed-in Workpeg user under the business selected by the `/b/<business-uuid>/...` URL. A published/installed release is required when using **backend Functions or custom save hooks**, not for this UI-only development test.
 
-The Tables docs explicitly require installation for **developer-token** access;
-a business without the installation returns 403. This screen uses the documented
-**staff-session** UI path instead, whose prerequisites include authentication and
-business staff membership. The docs do not establish whether this approved,
-unpublished UI can be hosted/installed in Roomay AI without a Function release.
-Do not extend the token rule into an unverified session-API rule.
+This support clarification supersedes the earlier installation-blocker assumption. **It does not mean any real table persistence has passed yet.** The Tables docs' developer-token installation requirement is distinct from authenticated Peg UI staff-session access. No `WORKPEG_PK` is needed for this UI test.
 
-Before live testing, the owner must confirm with Workpeg organizers:
+### Owner-only Windows PowerShell setup (real development API!)
 
-1. Is Roomay installed in Roomay AI, and what is the verified business UUID?
-2. What supported authenticated development host can serve this UI build?
-3. Can this UI-only test run without a Function/Peg release, or is a separately
-   reviewed release/install required? Obtain that supported process first.
+**Check before running:**
+- You are using the **Roomay AI development business**, not Personal Account, another hotel or production.
+- Its business UUID is verified privately from the Workpeg business context; **do not use the Peg developer portal URL UUID as a guess**.
+- Only one authorized developer, one tab and one fictional table/record. Do not share session cookies or screenshot secrets.
+- `--fake-cloud` **is not a database mock**: the page talks to Workpeg's real API. The SDK's default binds to the LAN; set `WORKPEG_BIND_HOST=127.0.0.1` to confine the development server to this machine.
+- On Windows, the CLI may need an **Administrator PowerShell** to append its tagged entry to `hosts`; it also provisions local HTTPS, using mkcert if available or a self-signed fallback. Do not enter credentials through an untrusted TLS warning. Follow the SDK's mkcert setup if the certificate is not trusted, and keep the generated local CA private.
 
-Until answered, live testing is blocked. This PR publishes/installs nothing.
-`workpeg ui serve ui/ --peg-namespace roomay` previews locally; it does not establish
-authentication. The documented `--fake-cloud` path calls real APIs using a real
-Workpeg origin. Do not use it as an automatic fallback: a separate owner decision
-must approve isolated account context, hosts/TLS changes and loopback binding (the
-SDK default can be LAN-visible). No fake-cloud command was run for this change.
+From the existing local repo root (where `workpeg.json` and `ui/` exist):
 
-## Exact manual persistence test after preflight succeeds
+```powershell
+cd C:\Users\HomePC\Desktop\roomay-workspace\roomay
+git status
+git fetch origin
+git switch staging
+git pull --ff-only origin staging
+
+# Only after the owner has checked the worktree and dev business:
+$env:WORKPEG_BIND_HOST = "127.0.0.1"
+& ..\.venv\Scripts\workpeg.exe ui serve ui/ --fake-cloud --peg-namespace roomay
+```
+
+If the `workpeg.exe` path is different, activate your existing virtual environment and run `workpeg ui serve ui/ --fake-cloud --peg-namespace roomay`. Do not re-scaffold or generate a token.
+
+Use **the URL printed by the CLI**, generally `https://roomay.dev.workpeg.com`; it may use a different port such as `:8443`. Open that URL **in the same browser profile where you signed in to Workpeg and selected Roomay AI**, append `/b/<verified-Roomay-AI-business-uuid>/dev-smoke`, and confirm the browser shows only the development domain. The hosts mapping may remain on your machine after stopping; see the Workpeg fake-cloud docs for tagged entry cleanup.
+
+Official reference: https://developers.workpeg.com/docs/latest/getting-started/ (Fake cloud section), plus the Workpeg developer's hackathon Discord guidance.
+
+If the CLI fails on hosts/TLS, get the exact sanitized error and fix only that issue; don't publish functions or loosen database permissions as a workaround. For a `401`, verify the signed-in browser session. For `403`, verify the **selected business ID, your staff membership and table grants**. Avoid inventing a publishing requirement for Peg UI helpers.
+
+## Exact owner-operated live persistence test
 
 Use one designated owner/staff account, one tab and no concurrent operators/scripts.
 Confirm this is the sole smoke table: a readable list may hide another owner's
 records. Never paste any token/credential into the screen.
 
-1. Sign in through Workpeg's supported staff login flow. Record the approved
-   development host and verified Roomay AI UUID privately.
-2. Open `https://<confirmed-roomay-development-host>/b/<verified-business-uuid>/dev-smoke`.
-   This is a URL pattern, not a claimed deployed host. If unavailable, stop and
-   resolve hosting/install with organizers; do not publish an unreviewed release.
+1. Sign in to Workpeg in the browser and select the **Roomay AI** development business; verify and record its business UUID privately.
+2. Start the local fake-cloud server using the safe loopback-bound commands above. Open the **printed local HTTPS domain** (plus the actual port, if any) and navigate to `/b/<verified-business-uuid>/dev-smoke`. Do not guess the UUID from the Peg review page. No published release is required for this UI helper route.
 3. Compare the displayed business UUID with the platform's Roomay AI context.
    Enter that UUID and type `Roomay AI single operator`. This is an operator
    safeguard, not an authentication/authorization grant or hardcoded allowlist.
