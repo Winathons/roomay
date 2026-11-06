@@ -14,7 +14,13 @@
 - A terminal (Windows PowerShell, macOS Terminal or Linux shell) and an editor such as VS Code.
 - Internet access to clone and install packages the first time.
 
-**You do not need Node.js, Docker, Supabase, Firebase, a Workpeg API token or a separate database just to run the local UI and offline tests.** Workpeg account access becomes important later when testing authenticated Workpeg business records.
+**Node 24 is required for the compiled UI offline tests.** No Docker, Supabase,
+Firebase, Workpeg API token or separate database is needed for local UI/testing.
+Workpeg account access becomes important later for authenticated business records.
+
+The development-only [persistence smoke screen](docs/dev-smoke.md) is available at
+`/b/<business_id>/dev-smoke` for an authorized owner's fictional table test.
+Its installation, authentication and live persistence remain unverified.
 
 ### Step 1 — Clone the existing repository
 
@@ -88,12 +94,15 @@ workpeg doctor . --offline
 ```
 
 **Expected on the November 6 staging snapshot:**
-- Unit tests: **25 passing**; the command ends in `OK`.
+- Unit tests: **26 passing**, including a compiled UI test with **17 mocked scenarios**;
+  the command ends in `OK`.
 - Syntax compilation: no output when successful.
 - Workpeg UI build: `Built to ui/dist` (or `ui\dist` on Windows).
 - Doctor: no issues on the original Windows developer's setup; it may skip optional checks on machines without Node.js or Docker.
 
-The unit tests exercise **pure Python hotel rules**: booking date overlap, room assignment, active stays and occupancy, housekeeping readiness, and maintenance blocks. They use **fictional fixtures** and **do not connect to Workpeg's live database**.
+The unit tests exercise **pure Python hotel rules** and the compiled development
+screen with mocked Workpeg responses. They use **fictional fixtures** and **do not
+connect to Workpeg's live database**.
 
 The UI build checks that the Workpeg Python interface compiles to browser assets; it does **not** test remote records or prove the offline Python hotel rules are already called by the browser.
 

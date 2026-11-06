@@ -4,6 +4,7 @@ Compile it with `workpeg ui build ui/`, or watch it as you edit with
 `workpeg ui serve ui/`.
 """
 from workpeg.ui import Route, Router, Scaffold, Text
+from dev_smoke import DevSmoke
 
 
 class Home(Scaffold):
@@ -12,4 +13,4 @@ class Home(Scaffold):
 
 
 class Main(Router):
-    routes = [Route("/", Home)]
+    routes = [Route("/", Home), Route("/b/[business_id]/dev-smoke", DevSmoke)]
