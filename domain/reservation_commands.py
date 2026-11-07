@@ -11,8 +11,9 @@ from dataclasses import dataclass
 from datetime import datetime
 from re import fullmatch
 from uuid import NAMESPACE_URL, UUID, uuid5
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from .hotel import interval, room_eligibility, validate_snapshot
+from .hotel import interval, parse_day, room_eligibility, validate_snapshot
 
 
 class ReservationRejected(ValueError):
@@ -52,6 +53,7 @@ class WriteContext:
     authorization_verified: bool
     snapshot_fresh: bool
     serialization_guard_held: bool
+    authoritative_now: str | None = None
 
 
 @dataclass(frozen=True)
@@ -243,7 +245,7 @@ def prepare_authorized_room_confirmation(
 
 def prepare_check_in(
     snapshot, *, reservation_id, occupant_guest_ids, checked_in_at, today,
-    idempotency_key, context,
+    hotel_timezone, idempotency_key, context,
 ):
     """Prepare physical check-in and occupant rows, without saving either.
 
@@ -263,11 +265,34 @@ def prepare_check_in(
         instant = datetime.fromisoformat(checked_in_at)
         if instant.tzinfo is None or instant.utcoffset() is None:
             raise ValueError
-        # Validate the hotel-local business date explicitly at eligibility.
-        if not isinstance(today, str) or len(today) != 10:
-            raise ValueError
-    except (ValueError, TypeError):
+    except (ValueError, TypeError, OverflowError):
         raise ReservationRejected("invalid_check_in_time") from None
+    try:
+        operational_date = parse_day(today)
+    except (ValueError, TypeError):
+        raise ReservationRejected("invalid_operational_date") from None
+    try:
+        authoritative_now = datetime.fromisoformat(context.authoritative_now)
+        if authoritative_now.tzinfo is None or authoritative_now.utcoffset() is None:
+            raise ValueError
+    except (ValueError, TypeError, OverflowError):
+        raise ReservationRejected("authoritative_clock_unavailable") from None
+    if not isinstance(hotel_timezone, str) or not hotel_timezone.strip():
+        raise ReservationRejected("invalid_authoritative_hotel_timezone")
+    try:
+        hotel_zone = ZoneInfo(hotel_timezone)
+        local_date = instant.astimezone(hotel_zone).date()
+        authoritative_date = authoritative_now.astimezone(hotel_zone).date()
+    except ZoneInfoNotFoundError:
+        raise ReservationRejected("authoritative_hotel_timezone_unavailable") from None
+    except (ValueError, TypeError, OverflowError):
+        raise ReservationRejected("invalid_authoritative_hotel_timezone") from None
+    if operational_date != authoritative_date:
+        raise ReservationRejected("operational_date_not_authoritative")
+    if local_date != authoritative_date:
+        raise ReservationRejected("check_in_timestamp_operational_date_mismatch")
+    if instant > authoritative_now:
+        raise ReservationRejected("check_in_timestamp_in_future")
     booking = index["reservations"].get(reservation_id)
     if booking is None:
         raise ReservationRejected("unknown_reservation")
@@ -316,7 +341,7 @@ def prepare_check_in(
     try:
         reasons = room_eligibility(
             snapshot, reservation_id, booking["room_id"], check_in=True,
-            today=today, staff_approved=True,
+            today=authoritative_date.isoformat(), staff_approved=True,
         )
     except (ValueError, TypeError):
         raise ReservationRejected("invalid_or_stale_snapshot") from None

@@ -1,6 +1,9 @@
 """WOR-9: real reservation-state invariants; no Workpeg network access."""
 import unittest
 from copy import deepcopy
+from datetime import timedelta, timezone
+from unittest.mock import patch
+from zoneinfo import ZoneInfoNotFoundError
 
 from domain.fixtures import synthetic_hotel, uid
 from domain.hotel import validate_snapshot
@@ -170,12 +173,19 @@ class ReservationCommandTests(unittest.TestCase):
 class SafeCheckInContractTests(unittest.TestCase):
     def setUp(self):
         self.hotel = synthetic_hotel()
+        self.timezone_patcher = patch(
+            "domain.reservation_commands.ZoneInfo",
+            return_value=timezone(timedelta(hours=1), name="Lagos fixture timezone"),
+        )
+        self.timezone_patcher.start()
+        self.addCleanup(self.timezone_patcher.stop)
         self.business = uid("Roomay development business")
         self.context = WriteContext(
             business_id=self.business, snapshot_business_id=self.business,
             actor_id=uid("authorized receptionist"), actor_role="receptionist",
             authorization_verified=True, snapshot_fresh=True,
             serialization_guard_held=True,
+            authoritative_now="2026-11-06T16:00:00+01:00",
         )
         self.request = {
             "entity_id": uid("walkin-checkin"), "guest_id": uid("Guest A"),
@@ -190,10 +200,17 @@ class SafeCheckInContractTests(unittest.TestCase):
             reservation_id=self.request["entity_id"],
             occupant_guest_ids=[uid("Guest A")],
             checked_in_at="2026-11-06T15:00:00+01:00", today="2026-11-06",
+            hotel_timezone="Africa/Lagos",
             idempotency_key="walkin-attempt-0001", context=self.context,
         )
         params.update(kwargs)
         return prepare_check_in(self.hotel, **params)
+
+    def context_at(self, day):
+        return WriteContext(**{
+            **self.context.__dict__,
+            "authoritative_now": day + "T16:00:00+01:00",
+        })
 
     def test_walk_in_request_stays_pending_and_creates_no_stay(self):
         hotel = synthetic_hotel()
@@ -288,19 +305,59 @@ class SafeCheckInContractTests(unittest.TestCase):
         # Use an eligible interval beginning on the scheduled checkout date.
         self.request.update(arrival="2026-11-08", departure="2026-11-10", room_id=uid("205"))
         with self.assertRaises(ReservationRejected) as error:
-            self.plan(today="2026-11-08", checked_in_at="2026-11-08T15:00:00+01:00")
+            self.plan(today="2026-11-08", context=self.context_at("2026-11-08"),
+                      checked_in_at="2026-11-08T15:00:00+01:00")
         self.assertIn("occupied", error.exception.reasons)
         self.assertIn("maintenance_block", error.exception.reasons)
 
     def test_checkin_rejects_invalid_dates_unconfirmed_and_duplicate_attempts(self):
         with self.assertRaisesRegex(ReservationRejected, "outside_booking_dates"):
-            self.plan(today="2026-11-08", checked_in_at="2026-11-08T15:00:00+01:00")
+            self.plan(today="2026-11-08", context=self.context_at("2026-11-08"),
+                      checked_in_at="2026-11-08T15:00:00+01:00")
         with self.assertRaisesRegex(ReservationRejected, "invalid_check_in_time"):
             self.plan(checked_in_at="2026-11-06T15:00:00")
+        with self.assertRaisesRegex(ReservationRejected, "invalid_operational_date"):
+            self.plan(today="2026-02-30")
         self.request["status"] = "pending_confirmation"
         self.request.pop("room_id")
         with self.assertRaisesRegex(ReservationRejected, "confirmed_assignment_required"):
             self.plan()
+
+    def test_operational_date_uses_authoritative_hotel_zone_at_midnight_boundary(self):
+        before_midnight = self.plan(
+            checked_in_at="2026-11-06T22:59:59Z",
+            context=WriteContext(**{
+                **self.context.__dict__,
+                "authoritative_now": "2026-11-06T23:59:59+01:00",
+            }),
+        )
+        self.assertEqual(before_midnight.stay_record["checked_in_at"],
+                         "2026-11-06T22:59:59+00:00")
+        with self.assertRaisesRegex(
+            ReservationRejected, "check_in_timestamp_operational_date_mismatch"
+        ):
+            self.plan(checked_in_at="2026-11-06T23:00:00Z")
+
+    def test_browser_operational_date_must_match_trusted_clock_and_future_time_refuses(self):
+        with self.assertRaisesRegex(ReservationRejected, "operational_date_not_authoritative"):
+            self.plan(today="2026-11-07")
+        with self.assertRaisesRegex(ReservationRejected, "check_in_timestamp_in_future"):
+            self.plan(checked_in_at="2026-11-06T16:00:01+01:00")
+
+    def test_timestamp_offset_does_not_define_hotel_local_date(self):
+        # The input's -02:00 calendar date is Nov 6, but the same instant is
+        # Nov 7 in the configured +01:00 hotel zone.
+        with self.assertRaisesRegex(
+            ReservationRejected, "check_in_timestamp_operational_date_mismatch"
+        ):
+            self.plan(checked_in_at="2026-11-06T23:30:00-02:00")
+
+    def test_missing_authoritative_timezone_fails_closed(self):
+        with patch("domain.reservation_commands.ZoneInfo", side_effect=ZoneInfoNotFoundError):
+            with self.assertRaisesRegex(
+                ReservationRejected, "authoritative_hotel_timezone_unavailable"
+            ):
+                self.plan()
 
     def test_duplicate_stay_and_occupants_are_rejected_or_idempotently_recognized(self):
         plan = self.plan()

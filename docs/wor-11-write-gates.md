@@ -19,16 +19,23 @@ stay row plus one or more registered occupant rows.
 - `prepare_check_in(...)` requires the same gate, a confirmed assigned
   reservation, check-in date in the booking interval, a ready and unoccupied
   room, no overlapping maintenance block, valid occupants within party size,
-  and an offset-bearing timestamp. It returns deterministic stay and occupant
-  records, separately from the reservation.
+  and an offset-bearing timestamp. It also requires an explicit IANA
+  `hotel_timezone`, converts the timestamp instant into that zone, and rejects
+  when its local date differs from the date derived from the trusted
+  `WriteContext.authoritative_now`. The supplied operational date must match
+  that derived date, and a future check-in timestamp is rejected. The input
+  timestamp's own offset does not identify the hotel's time zone. It returns
+  deterministic stay and occupant records, separately from the reservation.
 - `reconcile_check_in_readback(...)` classifies a complete post-timeout read.
   Matching rows mean the expected rows were observed and must not be repeated;
   absent rows permit a retry only while a guard is held; partial/malformed or
   conflicting rows require manual reconciliation. It does not claim a
   transaction committed.
 
-The `WriteContext` fields are a contract between a future trusted server-side
-adapter and this pure logic. Constructing a `WriteContext` in a browser or
+The `WriteContext` fields, including `authoritative_now`, are a contract between
+a future trusted server-side adapter and this pure logic. The adapter must
+source `authoritative_now` from its trusted clock, not a browser clock.
+Constructing a `WriteContext` in a browser or
 offline test does not authenticate a user, validate Workpeg permissions, make a
 snapshot fresh, or create a lock. Never accept those claims directly from an
 untrusted client. The current Workpeg UI adapter has no verified concurrency
@@ -39,6 +46,9 @@ mechanism, so it must not call these write paths in production.
 1. Resolve the Workpeg namespace/installation issue and establish the exact
    authenticated business context from the Workpeg staff session. Verify the
    requested business ID against the session on a trusted server boundary.
+   Resolve the hotel's IANA time-zone identifier from authoritative hotel
+   configuration. Never derive it from the browser clock or timestamp offset;
+   if configuration or time-zone data is unavailable, refuse check-in.
 2. Authorize the actor and operation server-side using the current business
    membership/role. Guest access may submit a pending request only; guests may
    not assign rooms, confirm reservations, or check themselves in. Restrict
@@ -81,6 +91,14 @@ verified way in the current UI adapter to guarantee concurrent confirmation or
 multi-row atomic check-in. The user interface must keep these operations
 disabled until an approved trusted writer or documented platform primitive
 proves the gates above.
+
+The pinned Windows virtual environment also has no IANA time-zone database
+(`tzdata` is absent and Windows does not provide the database through Python's
+`zoneinfo` lookup). `prepare_check_in` therefore refuses with
+`authoritative_hotel_timezone_unavailable` in that environment unless a valid
+IANA zone database is supplied by the eventual runtime. The tests inject a
+deterministic fixture zone to exercise date-boundary behavior; this is not
+hosted time-zone verification.
 
 Before enabling real writes, an authorized owner must verify in the isolated
 Roomay development business: installed Peg and authenticated role context;
