@@ -117,6 +117,7 @@ SAFE_MESSAGES = {
     "business_binding_unverified": "Access to this hotel's records is not verified.",
     "wrong_business": "These records are outside the active hotel business.",
     "wrong_hotel": "These records are outside the active hotel.",
+    "hotel_mapping_unverified": "This hotel's records could not be safely identified.",
     "not_hotel_member": "This account is not authorized for this hotel's records.",
     "access_denied": "This information is not available to your role.",
     "guest_scope_denied": "This guest information is not available to this account.",
@@ -237,13 +238,21 @@ def authorize_access(
 
 def authorize_hotel_snapshot(
     context, *, business_id, record_business_id, resource, action, snapshot,
-    record_guest_id=None, stay_id=None, room_id=None,
+    trusted_snapshot_hotel_id=None, record_guest_id=None, stay_id=None, room_id=None,
 ):
-    """Validate hotel references, then evaluate access without returning data."""
+    """Validate references and trusted hotel binding before authorizing a snapshot.
+
+    Schemas do not carry hotel IDs. The binding must come from a trusted adapter
+    mapping, never from the caller's context alone. No such hosted mapping is
+    currently verified, so callers without one fail closed.
+    """
     authorize_access(
         context, business_id=business_id, record_business_id=record_business_id,
         resource=resource, action=action, record_guest_id=record_guest_id,
     )
+    if (not _canonical_uuid(trusted_snapshot_hotel_id)
+            or trusted_snapshot_hotel_id != context.hotel_id):
+        raise AccessDenied("hotel_mapping_unverified")
     indexes = validate_hotel_snapshot(snapshot)
     if resource in GUEST_SCOPED_RESOURCES and record_guest_id not in indexes["guests"]:
         raise AccessDenied("invalid_record_reference")
@@ -260,16 +269,26 @@ def authorize_hotel_snapshot(
                      and not row.get("left_at")]
         if len(occupants) != 1:
             raise AccessDenied("guest_scope_denied")
+    if resource == "guest_profile" and context.role == "guest":
+        active_stays = {
+            row["stay_id"] for row in snapshot["stay_guests"]
+            if row["guest_id"] == record_guest_id and not row.get("left_at")
+            and indexes["stays"].get(row["stay_id"], {}).get("status") == "checked_in"
+        }
+        if len(active_stays) != 1:
+            raise AccessDenied("guest_scope_denied")
     return True
 
 
 def project_room_inventory(
     context, *, business_id, record_business_id, snapshot, room_id,
+    trusted_snapshot_hotel_id=None,
 ):
     """Project a validated room with department-staff fields minimized."""
     authorize_hotel_snapshot(
         context, business_id=business_id, record_business_id=record_business_id,
         resource="room_inventory", action="read", snapshot=snapshot,
+        trusted_snapshot_hotel_id=trusted_snapshot_hotel_id,
     )
     room = next((row for row in snapshot["rooms"] if row["entity_id"] == room_id), None)
     if room is None:
@@ -283,11 +302,13 @@ def project_room_inventory(
 
 def project_guest_profile(
     context, *, business_id, record_business_id, snapshot, guest_id,
+    trusted_snapshot_hotel_id=None,
 ):
     """Return only the authorized guest profile fields from a valid snapshot."""
     authorize_hotel_snapshot(
         context, business_id=business_id, record_business_id=record_business_id,
         resource="guest_profile", action="read", snapshot=snapshot,
+        trusted_snapshot_hotel_id=trusted_snapshot_hotel_id,
         record_guest_id=guest_id,
     )
     guest = next(row for row in snapshot["guests"] if row["entity_id"] == guest_id)
@@ -297,6 +318,7 @@ def project_guest_profile(
 
 def project_service_request(
     context, *, business_id, record_business_id, request, snapshot=None,
+    trusted_snapshot_hotel_id=None,
 ):
     """Return the least request detail needed by this role.
 
@@ -323,6 +345,7 @@ def project_service_request(
         authorize_hotel_snapshot(
             actor, business_id=business_id, record_business_id=record_business_id,
             resource="guest_stay_summary", action="read", snapshot=snapshot,
+            trusted_snapshot_hotel_id=trusted_snapshot_hotel_id,
             record_guest_id=request.get("guest_id"), stay_id=request.get("stay_id"),
             room_id=request.get("room_id"),
         )

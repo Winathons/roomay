@@ -106,6 +106,7 @@ class AccessControlContractTests(unittest.TestCase):
         profile = project_guest_profile(
             guest, business_id=self.business, record_business_id=self.business,
             snapshot=self.hotel, guest_id=self.guest_id,
+            trusted_snapshot_hotel_id=self.hotel_id,
         )
         self.assertEqual(profile, {
             "entity_id": self.guest_id, "display_name": "Fictional Guest C",
@@ -114,6 +115,7 @@ class AccessControlContractTests(unittest.TestCase):
             project_guest_profile(
                 guest, business_id=self.business, record_business_id=self.business,
                 snapshot=self.hotel, guest_id=uid("Guest A"),
+                trusted_snapshot_hotel_id=self.hotel_id,
             )
         with self.assertRaisesRegex(AccessDenied, "access_denied"):
             self.authorize(guest, resource="guest_personal_data", record_guest_id=self.guest_id)
@@ -126,11 +128,33 @@ class AccessControlContractTests(unittest.TestCase):
             )
         self.assertTrue(self.authorize(self.context(role="receptionist")))
 
+    def test_room_snapshot_fails_closed_without_trusted_hotel_mapping(self):
+        context = self.context(role="receptionist")
+        with self.assertRaisesRegex(AccessDenied, "hotel_mapping_unverified"):
+            project_room_inventory(
+                context, business_id=self.business, record_business_id=self.business,
+                snapshot=self.hotel, room_id=uid("201"),
+            )
+        with self.assertRaisesRegex(AccessDenied, "hotel_mapping_unverified"):
+            project_room_inventory(
+                context, business_id=self.business, record_business_id=self.business,
+                snapshot=self.hotel, room_id=uid("201"),
+                trusted_snapshot_hotel_id=uid("different-hotel"),
+            )
+        # Only a separate mapping claim permits this offline contract projection.
+        room = project_room_inventory(
+            context, business_id=self.business, record_business_id=self.business,
+            snapshot=self.hotel, room_id=uid("201"),
+            trusted_snapshot_hotel_id=self.hotel_id,
+        )
+        self.assertEqual(room["number"], "201")
+
     def test_department_room_projection_is_minimal_and_operations_are_scoped(self):
         housekeeping = self.context(role="department_staff", department="housekeeping")
         room = project_room_inventory(
             housekeeping, business_id=self.business,
             record_business_id=self.business, snapshot=self.hotel, room_id=uid("201"),
+            trusted_snapshot_hotel_id=self.hotel_id,
         )
         self.assertEqual(set(room), {"entity_id", "number", "room_type_id"})
         self.assertEqual(room["number"], "201")
@@ -176,6 +200,7 @@ class AccessControlContractTests(unittest.TestCase):
         view = project_service_request(
             guest, business_id=self.business, record_business_id=self.business,
             request=self.request, snapshot=self.hotel,
+            trusted_snapshot_hotel_id=self.hotel_id,
         )
         self.assertEqual(view["request_id"], self.request["request_id"])
         self.assertNotIn("room_id", view)
@@ -184,7 +209,7 @@ class AccessControlContractTests(unittest.TestCase):
             project_service_request(
                 wrong_guest, business_id=self.business,
                 record_business_id=self.business, request=self.request,
-                snapshot=self.hotel,
+                snapshot=self.hotel, trusted_snapshot_hotel_id=self.hotel_id,
             )
         with self.assertRaisesRegex(AccessDenied, "guest_scope_denied"):
             no_active_stay = synthetic_hotel()
@@ -193,6 +218,7 @@ class AccessControlContractTests(unittest.TestCase):
             project_service_request(
                 guest, business_id=self.business, record_business_id=self.business,
                 request=self.request, snapshot=no_active_stay,
+                trusted_snapshot_hotel_id=self.hotel_id,
             )
 
         wrong_room_request = dict(self.request, room_id=uid("201"))
@@ -200,7 +226,47 @@ class AccessControlContractTests(unittest.TestCase):
             project_service_request(
                 guest, business_id=self.business, record_business_id=self.business,
                 request=wrong_room_request, snapshot=self.hotel,
+                trusted_snapshot_hotel_id=self.hotel_id,
             )
+
+    def test_guest_profile_requires_active_registered_occupant_but_staff_access_remains(self):
+        guest = self.context(role="guest", guest_id=self.guest_id)
+        staff = self.context(role="receptionist")
+        no_stay = synthetic_hotel()
+        no_stay["stays"] = []
+        no_stay["stay_guests"] = []
+        with self.assertRaisesRegex(AccessDenied, "guest_scope_denied"):
+            project_guest_profile(
+                guest, business_id=self.business, record_business_id=self.business,
+                snapshot=no_stay, guest_id=self.guest_id,
+                trusted_snapshot_hotel_id=self.hotel_id,
+            )
+
+        checked_out = synthetic_hotel()
+        checked_out["stays"][0]["status"] = "checked_out"
+        checked_out["stays"][0]["checked_out_at"] = "2026-11-06T13:00:00+01:00"
+        checked_out["stay_guests"][0]["left_at"] = "2026-11-06T13:00:00+01:00"
+        with self.assertRaisesRegex(AccessDenied, "guest_scope_denied"):
+            project_guest_profile(
+                guest, business_id=self.business, record_business_id=self.business,
+                snapshot=checked_out, guest_id=self.guest_id,
+                trusted_snapshot_hotel_id=self.hotel_id,
+            )
+
+        occupant_left = synthetic_hotel()
+        occupant_left["stay_guests"][0]["left_at"] = "2026-11-06T13:00:00+01:00"
+        with self.assertRaisesRegex(AccessDenied, "guest_scope_denied"):
+            project_guest_profile(
+                guest, business_id=self.business, record_business_id=self.business,
+                snapshot=occupant_left, guest_id=self.guest_id,
+                trusted_snapshot_hotel_id=self.hotel_id,
+            )
+
+        self.assertEqual(project_guest_profile(
+            staff, business_id=self.business, record_business_id=self.business,
+            snapshot=no_stay, guest_id=uid("Guest A"),
+            trusted_snapshot_hotel_id=self.hotel_id,
+        )["entity_id"], uid("Guest A"))
 
     def test_invalid_room_or_guest_references_fail_before_data_is_authorized(self):
         for table, field, bad_value in (
@@ -215,6 +281,7 @@ class AccessControlContractTests(unittest.TestCase):
                         self.context(role="receptionist"),
                         business_id=self.business, record_business_id=self.business,
                         resource="reservations", action="read", snapshot=broken,
+                        trusted_snapshot_hotel_id=self.hotel_id,
                     )
 
     def test_sensitive_requests_require_manager_or_verified_incident_privilege(self):

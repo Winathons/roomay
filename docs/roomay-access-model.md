@@ -12,13 +12,15 @@ People get only the records and actions they need for their job. A receptionist
 handles arrivals and guest identity. Housekeeping sees room-cleaning work. A
 maintenance worker sees repair work. A guest sees only their own limited stay
 and request information after Roomay can bind them to an active registered
-occupant. A hotel business boundary applies to every record. Missing or
+occupant. Current hotel schemas support a conservative single-hotel-per-business
+deployment assumption; they do not prove isolation between multiple hotels in
+one Workpeg business. Missing or
 unverified identity, membership, business binding, or row ownership means
 access is refused.
 
 In code, `domain/access_control.py` checks a proposed `AccessContext`, business
-and hotel identity, resource, action, department, guest scope, and sensitivity. These
-context values are claims that a future trusted adapter must establish from
+and hotel identity, resource, action, department, guest scope, and sensitivity.
+These context values are claims that a future trusted adapter must establish from
 Workpeg and a server-maintained staff directory. A browser-supplied role,
 business ID, guest ID, or `verified=True` flag is not proof and must never be
 passed directly as authority. `domain/hotel.py::validate_snapshot` remains the
@@ -60,10 +62,16 @@ yet enforce these projections.
   hotel membership and role in a trusted staff directory. Never infer authority
   from the URL, a form value, AI output, a request body, caller ID, or QR code.
 - Resolve one active Workpeg business and compare it with the requested business
-  and every row's required `business_id`. Also bind each hotel's records to the
-  trusted active `hotel_id`, even when multiple hotels share a business. A
-  mismatch or missing identity rejects the complete response; never fall back
-  to another hotel or data store.
+  and every row's required `business_id`. The current `rooms` and `reservations`
+  schemas have no `hotel_id` column (nor do the other hotel tables). Until a
+  trusted Workpeg-to-hotel/table mapping is established, the safe supported
+  deployment assumption is exactly one hotel per business. Do not claim that
+  multiple hotels in one business are isolated by row fields. Snapshot
+  projections require a separate `trusted_snapshot_hotel_id` contract value;
+  `AccessContext.hotel_id` alone is insufficient. No hosted source for that
+  mapping has been demonstrated, so an unmapped snapshot must be refused. This
+  argument remains a forgeable offline contract, not evidence of Workpeg
+  enforcement.
 - Validate the complete hotel snapshot before using references. Reject missing,
   malformed, duplicate, or cross-linked rooms, guests, reservations, stays,
   occupants, and blocks. Reuse canonical `validate_snapshot` rather than
@@ -72,8 +80,10 @@ yet enforce these projections.
   names, reservation dates, occupant lists, or contact information. Maintenance
   receives only the room and repair context necessary to do the assigned work.
 - Limit guest access to a verified matching guest identity and active registered
-  stay. Reservation visibility is currently denied to guest contexts; any future
-  guest booking view needs a separate verified ownership contract.
+  stay. Guest-profile and stay-summary reads require exactly one active stay
+  with a registered occupant who has not left. Staff profile access remains
+  separate. Reservation visibility is currently denied to guest contexts; any
+  future guest booking view needs a separate verified ownership contract.
 - Keep request descriptions and sensitive incident details private. Department
   staff receive their own department's operational request projection. Sensitive
   incidents require a manager or separately verified incident manager.
@@ -146,6 +156,7 @@ guest, reservation, room, request, or table exists.
 | A row's `business_id` differs from the authenticated business | Hide the complete snapshot and return a fixed safe error. |
 | Room, guest, reservation, stay, or occupant reference is malformed/missing | Reject the snapshot using the canonical hotel validator; do not render partial data. |
 | Workpeg returns 401/403, timeout, missing table, malformed response, or unknown identity | Deny/mark unavailable; do not fallback to fixtures, another business, or broader permissions. |
+| Workpeg returns HTTP 400, 401, or 403 | `tests/hotel_data.cjs` covers explicit 400/401/403 states and asserts raw sentinel response text is absent from rendered state. This is compiled local UI error handling only, not proof of server permissions. |
 | Sensitive request is read by ordinary reception or department staff | Deny; allow only manager or separately verified incident-manager authority. |
 | Error message contains a guest name, description, or server payload | Replace it with a fixed public message; never echo raw exception text. |
 | AI proposes an action or a save hook is bypassed | Treat AI as a suggestion only; require the same trusted authorization and write gates as staff. |
@@ -169,6 +180,12 @@ guest, reservation, room, request, or table exists.
   outcomes. Python values, boolean flags, a `department`, or a role string are
   forgeable outside a trusted adapter. These functions are not a Workpeg ACL,
   server boundary, or authorization token.
+- A service-request description is free text and may itself contain a guest
+  name, phone number, health detail, or other personal information. Omitting
+  explicit `guest_id` and `stay_id` fields from a department projection does
+  not remove PII embedded in `description`. Until field-level redaction or a
+  reviewed description-handling policy exists, treat every description as
+  sensitive and restrict it to staff with a legitimate operational need.
 - Current Workpeg integration documentation reports no verified conditional
   update, transaction, uniqueness, or compare-and-swap helper. Access checks do
   not solve concurrent reservation or multi-row stay writes.
