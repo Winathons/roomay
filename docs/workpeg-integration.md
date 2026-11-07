@@ -1,0 +1,129 @@
+# Workpeg hotel integration contract (WOR-29)
+
+This is the Phase A, offline-verified integration boundary for Roomay's real
+hotel data. It does not provision tables, seed inventory, contact Workpeg, or
+claim that persistence works. The currently observed live blocker remains:
+
+```text
+HTTP 400
+{"peg-namespace":"Unknown peg namespace 'roomay'."}
+```
+
+WOR-28 owns that namespace and installation investigation. Do not work around
+it with a different Peg, business, token, or unreviewed release.
+
+## Runtime boundary
+
+`domain/workpeg_adapter.py` is a pure normalizer and contract validator. It has
+no SDK dependency and no I/O. It converts native row envelopes to the existing
+hotel and service-request records, calls the existing domain validators, and
+keeps the native `row_id` and opaque `fingerprint` in a separate mapping.
+Booking, check-in, assignment and request-transition rules remain in their
+existing domain modules.
+
+`ui/hotel_data.py` is the only new SDK transport. It compiles into the browser,
+where `workpeg.*` can use the authenticated session and business ID from
+`/b/<business_id>/hotel-data`. Loading is an explicit user action. The route is
+read-only and rejects business mismatches, missing or duplicate tables, unsafe
+permissions, malformed pages, cross-business rows, duplicate identities and
+incomplete records. It exposes transport arrays for room types, rooms,
+reservations, active stays, active blocks and service requests for WOR-34.
+Those browser arrays are not actionable until WOR-34 applies the pure adapter's
+complete cross-table validation; the route labels them accordingly.
+
+A successful read is labelled as a snapshot, not a lock. The route offers an
+explicit stale marker. It does not confirm reservations: the documented SDK
+has no transaction, unique constraint, conditional update or compare-and-swap
+helper, so local eligibility cannot make a concurrency-safe booking.
+
+## SDK 0.149.1 and official documentation evidence
+
+The installed distribution was inspected at
+`.venv/Lib/site-packages/workpeg/`:
+
+| Evidence | Verified behavior |
+| --- | --- |
+| `ui/compiler/ast_parser.py`, `_WORKPEG_TABLE_HELPERS` | `get_tables([namespace])`; `get_table(uuid)`; `create_table(table)`; `update_table(uuid, patch)`; `delete_table(uuid)`; `get_rows(uuid, limit=..., offset=...)`; `get_row(uuid, row_id)`; `add_row(uuid, row)`; `add_rows(uuid, rows)`; `update_row(uuid, row_id, patch)`; `delete_row(uuid, row_id)` compile. Only `limit` and `offset` are accepted keywords for `get_rows`. |
+| `ui/runtime/workpeg-runtime.js`, `wpGetTables` / `wpGetRows` | Calls are protected and scoped to the active URL business. Namespace is URL encoded. Row windows are sent as non-negative integer `limit`/`offset` values. |
+| Official Tables & Rows documentation | A table is addressed by its returned UUID. `get_rows` returns a plain list ordered by descending position. Row `id` is a read-only integer and `fingerprint` is an opaque change marker. |
+| Official Tables & Rows documentation | Table aliases are write-only and currently serve schema inheritance; they cannot resolve a runtime table UUID. Discovery therefore verifies namespace, exact name, permission and columns. |
+| Official Tables & Rows documentation | `PATCH` is partial at the row level, but its `data` field replaces the whole object. `full_row_update` always preserves unrelated data. |
+| Official Getting Started documentation | The compiler parses Python without executing it. A real authenticated local origin can reach production APIs; therefore this work does not run `--fake-cloud`. |
+
+Official references:
+
+- <https://developers.workpeg.com/docs/latest/tables/>
+- <https://developers.workpeg.com/docs/latest/getting-started/>
+- <https://developers.workpeg.com/docs/latest/reference/>
+
+## Table contract
+
+All nine tables are owner-only (`700`) and include a required canonical
+`business_id` UUID in every row. Workpeg already scopes tables to a business;
+the duplicated value is a fail-closed disclosure guard and is stripped before
+domain validation.
+
+| Namespace | Table | Stable alias for future owner-run provisioning | Domain identity |
+| --- | --- | --- | --- |
+| `roomay_hotel_v1` | `room_types` | `roomay-hotel-v1-room-types` | `entity_id` |
+| `roomay_hotel_v1` | `rooms` | `roomay-hotel-v1-rooms` | `entity_id` |
+| `roomay_hotel_v1` | `guests` | `roomay-hotel-v1-guests` | `entity_id` |
+| `roomay_hotel_v1` | `reservations` | `roomay-hotel-v1-reservations` | `entity_id` |
+| `roomay_hotel_v1` | `stays` | `roomay-hotel-v1-stays` | `entity_id` |
+| `roomay_hotel_v1` | `stay_guests` | `roomay-hotel-v1-stay-guests` | `entity_id` |
+| `roomay_hotel_v1` | `room_blocks` | `roomay-hotel-v1-room-blocks` | `entity_id` |
+| `roomay_requests_v1` | `Roomay Service Requests` | `roomay-service-requests-v1` | `request_id` |
+| `roomay_requests_v1` | `Roomay Service Request Audit` | `roomay-service-request-audit-v1` | `event_id` |
+
+The exact column definitions are generated by `table_contracts()` from the
+canonical hotel and service-request schemas. An authorized migration must use
+those payloads and record every returned UUID. Runtime code must not assume an
+alias will be returned.
+
+## Failure and reconciliation contract
+
+- A missing table means missing **or unreadable**. The adapter never creates it.
+- Empty room types or rooms produce `empty_inventory=True`; no fixtures are
+  substituted.
+- All tables are read in windows of 100 until the first short list. A safety
+  ceiling stops unbounded or inconsistent pagination.
+- A row is rejected if its business differs from the active business, its
+  native ID/fingerprint is missing, its application identity is duplicated,
+  or its record fails the existing cross-table domain rules.
+- A timed-out or failed mutation must be read back before any retry.
+  `reconcile_write` distinguishes confirmed, not applied, conflict, malformed
+  and missing outcomes. A changed fingerprint is evidence of change, not proof
+  that this caller won a race.
+- A trusted writer must serialize reservation confirmation and re-read the
+  authoritative rows. Workpeg 0.149.1 documents no atomic uniqueness or CAS
+  primitive, so the production concurrency mechanism remains an integration
+  requirement, not an optimistic UI behavior.
+
+## Owner-run live validation after WOR-28
+
+These steps are intentionally not performed by Codex or automated tests:
+
+1. Confirm the approved `roomay` Peg is installed in the exact development
+   business. Approval alone is not installation.
+2. Use one authorized owner and one browser tab at
+   `/b/<verified-business-uuid>/hotel-data`.
+3. Confirm the URL business UUID manually, type the read confirmation, and load.
+   Capture the exact status without exposing cookies, tokens or record data.
+4. If tables do not yet exist, review `table_contracts()` as a migration plan.
+   Provision only through a separately approved, owner-operated change; never
+   from page load or this read route.
+5. With synthetic records in the isolated development business, verify all
+   pages, native row IDs, fingerprints, reload persistence, a full-data update,
+   failed-write read-back, and cross-business denial.
+6. Only after authenticated create/read/update/reload and concurrency behavior
+   are proven should WOR-29 acceptance be reconsidered. Keep WOR-29 In Progress
+   meanwhile.
+
+## WOR-34 implementation notes
+
+WOR-34 should consume the six read-only state arrays on `HotelData` or extract
+the same transport into its authenticated route. It must preserve the
+`row_references` mapping outside domain records, mark data stale after any
+mutation attempt, and run complete domain validation before rendering an
+actionable room board. It must not import demo fixtures, infer occupancy from a
+reservation, or treat a loaded snapshot as permission to book or check in.

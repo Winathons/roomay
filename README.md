@@ -20,6 +20,8 @@ Workpeg account access becomes important later for authenticated business record
 
 The development-only [persistence smoke screen](docs/dev-smoke.md) is available at
 `/b/<business_id>/dev-smoke` for an authorized owner's fictional table test.
+The read-only [hotel integration boundary](docs/workpeg-integration.md) is available
+at `/b/<business_id>/hotel-data`; it never provisions or seeds records.
 Its installation, authentication and live persistence remain unverified.
 
 An older internal reception UI is currently accessible at `/demo/reception`, but it **does not use live Workpeg records**. It is engineering scaffolding, not the hotel application and must **not be shipped to customers**. The real receptionist interface and removal of that temporary route are tracked in [WOR-34](https://linear.app/workpeg/issue/WOR-34); release-route exclusion is tracked in [WOR-33](https://linear.app/workpeg/issue/WOR-33). Synthetic fixtures are only test inputs.
@@ -192,6 +194,7 @@ Current real-backend steps are tracked in [WOR-27 — Peg onboarding](https://li
 - [Workpeg SDK — Tables & Rows](https://developers.workpeg.com/docs/latest/tables/)
 - [Workpeg SDK — Functions](https://developers.workpeg.com/docs/latest/functions/)
 - [Hotel model and invariants](docs/hotel-model.md)
+- [Workpeg hotel integration contract](docs/workpeg-integration.md)
 - [Service-request lifecycle and persistence contract](docs/service-requests.md)
 - [Workpeg integration readiness](docs/workpeg-capabilities.md)
 - [Team staging workflow](docs/staging.md)
