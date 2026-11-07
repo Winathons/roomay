@@ -4,7 +4,7 @@ This is a **development runbook**, not evidence that a live Workpeg connection i
 
 ## Current confirmed state (2026-11-06)
 
-- GitHub: `Umardoja/roomay`, default branch `main`.
+- GitHub: `Winathons/roomay`, default branch `main`.
 - Local developer verified Python 3.13.5, Workpeg SDK `0.149.1`, `workpeg ui build ui/`, and `workpeg doctor . --offline` with no issues.
 - Starter page displayed `Hello from roomay` at `localhost:8081`.
 - **Approved:** Developer portal shows the `roomay` Peg registered and **Approved**; the owner confirms it is associated with the separate `Roomay AI` development business.
@@ -13,8 +13,9 @@ This is a **development runbook**, not evidence that a live Workpeg connection i
 
 ## 1. Separate development business (owner action)
 
-WOR-28 now provides an offline-verified native development screen at
-`/b/<business_id>/dev-smoke`. See the [owner runbook](dev-smoke.md) for SDK evidence,
+WOR-28 provides an offline-verified diagnostic source module, but WOR-34 no
+longer registers `/b/<business_id>/dev-smoke` in the release router. See the
+[owner runbook](dev-smoke.md) for SDK evidence,
 fake-cloud run instructions, exact manual test steps and an offline screenshot. No live
 persistence/permissions evidence has been added; WOR-28 and WOR-6 remain In Progress.
 

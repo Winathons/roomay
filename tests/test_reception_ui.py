@@ -1,65 +1,72 @@
-"""Projection and compiled-controller tests for the offline receptionist UI."""
+"""Domain projection and compiled receptionist regression tests."""
 import shutil
 import subprocess
-import sys
 import tempfile
 import unittest
 from pathlib import Path
 
-from workpeg.ui.build import build_ui
-
-from domain.reception_demo import DEMO_LABEL, build_reception_demo
+from domain.fixtures import synthetic_hotel
+from domain.hotel import room_eligibility
+from domain.reception import build_reception_snapshot
+from ui.hotel_data import HotelData
 
 
 ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT / "ui"))
-from reception import (  # noqa: E402
-    ARRIVALS, DATE_LABEL, DEPARTURES, IN_HOUSE, METRICS, PENDING_ENQUIRIES, REQUESTS,
-    ROOMS, ReceptionDemo,
-)
 
 
-class ReceptionUIProjectionTests(unittest.TestCase):
-    def test_compiler_literals_match_canonical_domain_projection(self):
-        demo = build_reception_demo()
-        self.assertEqual(DATE_LABEL, demo["date_label"])
-        self.assertEqual(METRICS, demo["metrics"])
-        self.assertEqual(ROOMS, demo["rooms"])
-        self.assertEqual(REQUESTS, demo["requests"])
-        self.assertEqual(ARRIVALS, demo["arrivals"])
-        self.assertEqual(DEPARTURES, demo["departures"])
-        self.assertEqual(IN_HOUSE, demo["in_house"])
-        self.assertEqual(PENDING_ENQUIRIES, demo["pending_enquiries"])
+class ReceptionProjectionTests(unittest.TestCase):
+    def test_today_projection_preserves_reservation_and_stay_distinction(self):
+        view = build_reception_snapshot(synthetic_hotel(), [], "2026-11-06")
+        self.assertEqual(view["metrics"], {
+            "in_house": 1, "arrivals": 1, "departures": 0,
+            "ready_for_check_in": 1, "needs_cleaning": 1,
+            "maintenance_blocks": 1, "open_requests": 0,
+        })
+        self.assertEqual(view["arrivals"][0]["room"], "202")
+        self.assertEqual(view["in_house"][0]["room"], "205")
+        self.assertNotEqual(view["arrivals"][0]["guest"], view["in_house"][0]["guest"])
 
-    def test_runtime_state_defaults_match_reviewed_literals(self):
-        self.assertEqual(ReceptionDemo.metrics.default, METRICS)
-        self.assertEqual(ReceptionDemo.rooms.default, ROOMS)
-        self.assertEqual(ReceptionDemo.requests.default, REQUESTS)
-        self.assertEqual(ReceptionDemo.arrivals.default, ARRIVALS)
-        self.assertEqual(ReceptionDemo.in_house.default, IN_HOUSE)
-        self.assertEqual(ReceptionDemo.pending_enquiries.default, PENDING_ENQUIRIES)
+    def test_compiled_readiness_mirror_is_pinned_to_canonical_rules(self):
+        hotel = synthetic_hotel()
+        app = HotelData()
+        app.operational_date = "2026-11-06"
+        app.rooms = hotel["rooms"]
+        app.reservations = hotel["reservations"]
+        app.stays = hotel["stays"]
+        app.room_blocks = hotel["room_blocks"]
+        for booking in hotel["reservations"]:
+            room = next(item for item in hotel["rooms"]
+                        if item["entity_id"] == booking["room_id"])
+            expected = room_eligibility(
+                hotel, booking["entity_id"], room["entity_id"], check_in=True,
+                today="2026-11-06", staff_approved=True,
+            )
+            self.assertEqual(tuple(app.readiness_reasons(booking, room)), expected)
 
-    def test_route_is_explicitly_offline(self):
-        source = (ROOT / "ui/reception.py").read_text(encoding="utf-8")
-        self.assertIn(r'DEMO_LABEL = "DEMO DATA \N{EM DASH} NOT CONNECTED TO LIVE WORKPEG"', source)
-        for forbidden in (
-            "workpeg.get_tables", "workpeg.create_table", "workpeg.get_rows",
-            "workpeg.add_row", "workpeg.update_row", "WORKPEG_PK",
-        ):
+    def test_release_router_exposes_only_real_business_reception(self):
+        source = (ROOT / "ui" / "main.py").read_text(encoding="utf-8")
+        self.assertIn('Route("/b/[business_id]/reception", HotelData)', source)
+        for forbidden in ("/demo/reception", "/dev-smoke", "/hotel-data", "ReceptionDemo"):
             self.assertNotIn(forbidden, source)
+        ui_source = (ROOT / "ui" / "hotel_data.py").read_text(encoding="utf-8")
+        for forbidden in ("create_table", "add_row", "update_row", "WORKPEG_PK"):
+            self.assertNotIn(forbidden, ui_source)
 
-    def test_offline_compiled_controller(self):
-        self.assertIsNotNone(shutil.which("node"), "Node is required for compiled UI tests")
-        scratch = ROOT / "build"
-        scratch.mkdir(exist_ok=True)
-        with tempfile.TemporaryDirectory(dir=scratch) as output:
-            build_ui(str(ROOT / "ui/main.py"), output, peg_namespace="roomay")
+    def test_compiled_reception_controller(self):
+        self.assertIsNotNone(shutil.which("node"), "Node is required")
+        workpeg = shutil.which("workpeg") or str(ROOT / ".venv" / "Scripts" / "workpeg.exe")
+        with tempfile.TemporaryDirectory(dir=ROOT) as output:
+            build = subprocess.run(
+                [workpeg, "ui", "build", str(ROOT / "ui"), "--out", output],
+                cwd=ROOT, capture_output=True, text=True, check=False,
+            )
+            self.assertEqual(build.returncode, 0, build.stdout + build.stderr)
             result = subprocess.run(
-                ["node", str(ROOT / "tests/reception.cjs"), output],
-                capture_output=True, text=True, timeout=60,
+                ["node", str(ROOT / "tests" / "reception.cjs"), output],
+                cwd=ROOT, capture_output=True, text=True, timeout=60,
             )
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-        print(result.stdout.strip())
+        self.assertIn("compiled reception controller", result.stdout)
 
 
 if __name__ == "__main__":

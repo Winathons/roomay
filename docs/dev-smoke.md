@@ -4,7 +4,9 @@ The native UI compiles with SDK **0.149.1**. Offline tests exercise its generate
 JavaScript with mocked table helpers. **No authenticated Workpeg request or real
 persistence test was performed. WOR-28 and WOR-6 remain In Progress.**
 
-The screen is at `/b/<business_id>/dev-smoke`. Home stays unchanged. There are no
+The diagnostic was designed for `/b/<business_id>/dev-smoke`, but WOR-34 removes
+that route from the release router. Compile it only as an isolated development
+artifact under WOR-33. There are no
 table requests on mount, automatic writes, token fields, functions or additional
 databases. No State fields persist locally: after reload the room must be re-read.
 

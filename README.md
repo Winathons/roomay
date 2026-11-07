@@ -2,14 +2,14 @@
 
 **Roomay is a real hotel operations product** built on the **Workpeg SDK**. It is designed for actual receptionist, reservations, occupancy, housekeeping, maintenance and guest-service workflows, not for displaying fictional operations as a finished application. It aims to connect reception, walk-in bookings, room inventory, actual guest check-ins, housekeeping, maintenance and service requests in one clear staff experience. Future guest channels include a mobile portal, text/voice and WhatsApp.
 
-**Repository:** [Umardoja/roomay](https://github.com/Umardoja/roomay) · **Work board:** [Roomay in Linear](https://linear.app/workpeg/project/roomay-workpeg-hospitality-hackathon-7b7a7ce4b3b9) · **SDK:** [Workpeg documentation](https://developers.workpeg.com/docs/latest/)
+**Repository:** [Winathons/roomay](https://github.com/Winathons/roomay) · **Work board:** [Roomay in Linear](https://linear.app/workpeg/project/roomay-workpeg-hospitality-hackathon-7b7a7ce4b3b9) · **SDK:** [Workpeg documentation](https://developers.workpeg.com/docs/latest/)
 
 > **Project status (November 6, 2026):** The `roomay` Peg registration has been **approved** in the Workpeg developer portal and is associated with the separate Roomay AI development business. **No Peg release is published yet**, and live Workpeg table persistence and permissions have **not yet been verified**. The existing UI scaffold serves locally; the hotel domain model, fictional data and rules have **25 passing offline tests**. Do not confuse the local UI or a passing build with a deployed, data-connected hotel system.
 
 ## Start here — first-time team setup
 
 **You'll need:**
-- **Git** and access to the [Roomay GitHub repository](https://github.com/Umardoja/roomay).
+- **Git** and access to the [Roomay GitHub repository](https://github.com/Winathons/roomay).
 - **Python 3.10 or newer**. The original development setup used Python **3.13.5** with `workpeg==0.149.1`.
 - A terminal (Windows PowerShell, macOS Terminal or Linux shell) and an editor such as VS Code.
 - Internet access to clone and install packages the first time.
@@ -18,20 +18,21 @@
 Firebase, Workpeg API token or separate database is needed for local UI/testing.
 Workpeg account access becomes important later for authenticated business records.
 
-The development-only [persistence smoke screen](docs/dev-smoke.md) is available at
-`/b/<business_id>/dev-smoke` for an authorized owner's fictional table test.
-The read-only [hotel integration boundary](docs/workpeg-integration.md) is available
-at `/b/<business_id>/hotel-data`; it never provisions or seeds records.
-Its installation, authentication and live persistence remain unverified.
-
-An older internal reception UI is currently accessible at `/demo/reception`, but it **does not use live Workpeg records**. It is engineering scaffolding, not the hotel application and must **not be shipped to customers**. The real receptionist interface and removal of that temporary route are tracked in [WOR-34](https://linear.app/workpeg/issue/WOR-34); release-route exclusion is tracked in [WOR-33](https://linear.app/workpeg/issue/WOR-33). Synthetic fixtures are only test inputs.
+The release router exposes the read-only receptionist application at
+`/b/<business_id>/reception`. It reads the nine-table
+[hotel integration contract](docs/workpeg-integration.md), never provisions or
+seeds records, and enables no booking, check-in, assignment, or request writes.
+The former demo, diagnostic smoke, and raw adapter routes are not registered in
+the release router. Their source remains isolated for offline contract testing.
+See [WOR-34 implementation notes](docs/wor-34.md). Live installation,
+authentication, and persistence remain unverified because of the namespace blocker.
 
 ### Step 1 — Clone the existing repository
 
 **Windows PowerShell**
 
 ```powershell
-git clone https://github.com/Umardoja/roomay.git
+git clone https://github.com/Winathons/roomay.git
 cd roomay
 git fetch origin
 git switch --track origin/staging
@@ -40,7 +41,7 @@ git switch --track origin/staging
 **macOS / Linux**
 
 ```bash
-git clone https://github.com/Umardoja/roomay.git
+git clone https://github.com/Winathons/roomay.git
 cd roomay
 git fetch origin
 git switch --track origin/staging
@@ -84,7 +85,7 @@ workpeg ui serve ui/
 
 Open the **local address printed in your terminal** (the original scaffold used `http://localhost:8081/`, but the port may differ). The current starter interface may still show **“Hello from roomay”** while the real receptionist UI is being developed.
 
-Leave the terminal open while you use the browser. `Ctrl+C` stops the server. Edits to supported UI Python files usually trigger a rebuild and browser refresh. **The currently available internal screens are not Workpeg-backed hotel workflows yet.** Follow WOR-28, WOR-29 and WOR-34 to connect the actual operational system.
+Leave the terminal open while you use the browser. `Ctrl+C` stops the server. Edits to supported UI Python files usually trigger a rebuild and browser refresh. The receptionist route has an offline-verified Workpeg transport, but the live `roomay` Peg namespace is still blocked; a successful build is not proof of authenticated persistence.
 
 ### Step 4 — Run the offline tests and build
 
@@ -98,8 +99,8 @@ workpeg doctor . --offline
 ```
 
 **Expected on the November 6 staging snapshot:**
-- Unit tests: **54 passing**, including compiled UI tests with **17 mocked
-  persistence scenarios** and a network-forbidden reception scenario;
+- Unit tests: **83 passing**, including compiled UI tests with mocked
+  persistence, authorization, empty, error, and receptionist states;
   the command ends in `OK`.
 - Syntax compilation: no output when successful.
 - Workpeg UI build: `Built to ui/dist` (or `ui\dist` on Windows).
@@ -118,13 +119,14 @@ roomay/
 ├── workpeg.json            # Peg namespace and manifest
 ├── ui/
 │   ├── main.py             # Workpeg route registration
-│   └── reception.py        # Offline receptionist dashboard
+│   └── hotel_data.py       # Authenticated read-only receptionist application
 ├── function/               # Optional Python hook/function runtime
 ├── domain/
 │   ├── schema.py           # Proposed Workpeg hotel table schema
 │   ├── hotel.py            # Pure availability/eligibility and validation rules
 │   ├── fixtures.py         # Synthetic rooms, guests, stays and bookings
-│   └── reception_demo.py   # Canonical receptionist view projection
+│   ├── reception.py        # Canonical read-only receptionist projection
+│   └── reception_demo.py   # Legacy synthetic projection used only in tests
 ├── tests/
 │   └── test_hotel.py       # Offline hotel regression tests
 ├── docs/

@@ -1,7 +1,8 @@
-# Reception dashboard prototype (WOR-32)
+# Archived reception dashboard prototype (WOR-32)
 
-The receptionist dashboard is an **offline, synthetic-data prototype** at
-`/demo/reception`. It is intentionally separate from the authenticated
+The receptionist dashboard was an **offline, synthetic-data prototype** at
+`/demo/reception`; WOR-34 removes that route from the release router. This file
+retains historical WOR-32 design evidence only. It was separate from the authenticated
 `/b/<business_id>/dev-smoke` diagnostic route.
 
 ![Compiled desktop room board](images/reception-dashboard.png)

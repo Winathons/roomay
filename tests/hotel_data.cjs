@@ -15,7 +15,8 @@ Workpeg.stateHandler = () => ({});
 Workpeg.setInterval = () => {};
 
 const business = '00000000-0000-4000-8000-000000000029';
-Workpeg.routeParam = () => business;
+let routeBusiness = business;
+Workpeg.routeParam = () => routeBusiness;
 const hotelNames = ['room_types', 'rooms', 'guests', 'reservations', 'stays', 'stay_guests', 'room_blocks'];
 const requestNames = ['Roomay Service Requests', 'Roomay Service Request Audit'];
 const allNames = [...hotelNames, ...requestNames];
@@ -36,6 +37,7 @@ let calls;
 let remoteRows;
 
 function setup() {
+  routeBusiness = business;
   calls = [];
   remoteRows = Object.fromEntries(allNames.map(name => [name, []]));
   Workpeg.wpGetTables = async ns => {
@@ -51,35 +53,47 @@ function setup() {
   Workpeg.wpCreateTable = async () => { throw new Error('WRITE FORBIDDEN'); };
   Workpeg.wpAddRow = async () => { throw new Error('WRITE FORBIDDEN'); };
   Workpeg.wpUpdateRow = async () => { throw new Error('WRITE FORBIDDEN'); };
-  const app = new HotelDataTest();
-  app.state.expected_business = business;
-  app.state.confirmation = 'Read Roomay hotel data';
-  return app;
+  return new HotelDataTest();
 }
 
 const cases = [];
 const test = (name, fn) => cases.push([name, fn]);
 
-test('mount and render do not read, provision, seed or write', async () => {
-  const app = setup(); app.on_mount(); app.build();
-  assert.equal(calls.length, 0);
+test('mount loads the read-only snapshot and never provisions, seeds or writes', async () => {
+  const app = setup(); await app.on_mount(); app.build();
+  assert.equal(calls.filter(call => call[0] === 'tables').length, 2);
+  assert.equal(calls.filter(call => call[0] === 'rows').length, 9);
 });
 
-test('business and confirmation gates run before the SDK', async () => {
-  const app = setup(); app.state.expected_business = uuid(999);
+test('malformed business route is rejected before the SDK', async () => {
+  const app = setup(); routeBusiness = 'not-a-business';
   await app.load_snapshot(); assert.equal(calls.length, 0);
-  assert.match(app.state.failure, /context mismatch/);
-  app.state.expected_business = business; app.state.confirmation = '';
-  await app.load_snapshot(); assert.equal(calls.length, 0);
+  assert.match(app.state.failure, /Business context/);
 });
 
 test('empty inventory is truthful and makes no writes', async () => {
   const app = setup(); await app.load_snapshot();
   assert.equal(app.state.failure, '');
-  assert.match(app.state.status, /inventory is empty/);
+  assert.match(app.state.status, /no rooms configured/);
   assert.equal(calls.filter(call => call[0] === 'tables').length, 2);
   assert.equal(calls.filter(call => call[0] === 'rows').length, 9);
   assert.equal(app.state.rooms.length, 0);
+  assert.equal(app.state.view_state, 'empty_inventory');
+});
+
+test('valid persisted inventory reaches the loaded receptionist state', async () => {
+  const app = setup();
+  app.state.operational_date = '2026-11-06';
+  remoteRows.room_types = [roomType(1)];
+  remoteRows.rooms = [row('rooms', 2, {
+    entity_id: uuid(10002), number: '201', room_type_id: uuid(10001),
+    enabled: true, housekeeping: 'ready',
+  })];
+  await app.load_snapshot();
+  assert.equal(app.state.failure, '');
+  assert.equal(app.state.view_state, 'loaded');
+  assert.equal(app.state.room_cards.length, 1);
+  assert.equal(app.state.metrics.length, 7);
 });
 
 test('all plain-list pages are fetched with limit and offset', async () => {
@@ -130,6 +144,9 @@ test('400, 401, 403 and network failures are explicit without raw details', asyn
     await app.load_snapshot();
     assert.ok(app.state.failure); assert.ok(!JSON.stringify(app.state).includes('SECRET_SENTINEL'));
     if (status === 400) assert.match(app.state.failure, /WOR-28/);
+    if (status === 401) assert.equal(app.state.view_state, 'authentication_required');
+    if (status === 403) assert.equal(app.state.view_state, 'access_denied');
+    if (status === 400 || status === 500) assert.equal(app.state.view_state, 'connection_unavailable');
   }
 });
 
