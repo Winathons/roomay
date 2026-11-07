@@ -199,6 +199,7 @@ Current real-backend steps are tracked in [WOR-27 — Peg onboarding](https://li
 - [Workpeg hotel integration contract](docs/workpeg-integration.md)
 - [Service-request lifecycle and persistence contract](docs/service-requests.md)
 - [Workpeg integration readiness](docs/workpeg-capabilities.md)
+- [UI-only release candidate and owner handoff](docs/wor-25-release.md)
 - [Team staging workflow](docs/staging.md)
 
 **The goal for every teammate's first local run:** open Roomay in a browser, run the offline tests, compile the UI, and know exactly which Linear issue to claim next.
