@@ -4,7 +4,7 @@ Roomay is a Workpeg-native hotel operations and AI guest experience application.
 
 ## Getting started
 
-1. Clone https://github.com/Umardoja/roomay and open the repository root (containing `workpeg.json`).
+1. Clone https://github.com/Winathons/roomay and open the repository root (containing `workpeg.json`).
 2. Create and activate a virtual environment (on Windows: `py -m venv .venv`, then `.\.venv\Scripts\Activate.ps1`).
 3. `python -m pip install -r requirements-dev.txt`
 4. `workpeg ui serve ui/` to view the local interface.

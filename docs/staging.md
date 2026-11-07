@@ -66,7 +66,7 @@ Codex automatically reads repository-level `AGENTS.md`. Have it implement a spec
 ### Recommended task kickoff template
 
 ```text
-Work on Roomay issue WOR-<ID> in github.com/Umardoja/roomay.
+Work on Roomay issue WOR-<ID> in github.com/Winathons/roomay.
 Read AGENTS.md, CONTRIBUTING.md, docs/staging.md, and the issue's full description/acceptance criteria.
 Use latest staging as the base, on a dedicated WOR-<ID>-... branch.
 Inspect the real installed Workpeg 0.149.1 SDK and official docs; do not invent APIs.

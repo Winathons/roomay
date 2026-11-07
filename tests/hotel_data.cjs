@@ -15,7 +15,8 @@ Workpeg.stateHandler = () => ({});
 Workpeg.setInterval = () => {};
 
 const business = '00000000-0000-4000-8000-000000000029';
-Workpeg.routeParam = () => business;
+let routeBusiness = business;
+Workpeg.routeParam = () => routeBusiness;
 const hotelNames = ['room_types', 'rooms', 'guests', 'reservations', 'stays', 'stay_guests', 'room_blocks'];
 const requestNames = ['Roomay Service Requests', 'Roomay Service Request Audit'];
 const allNames = [...hotelNames, ...requestNames];
@@ -32,10 +33,34 @@ const row = (name, number, data) => ({id: number, fingerprint: uuid(5000 + numbe
 const roomType = number => row('room_types', number, {
   entity_id: uuid(10000 + number), name: `Type ${number}`, capacity: 2,
 });
+
+function validRelationshipSnapshot() {
+  return {
+    room_types: [{entity_id: uuid(10001), name: 'Standard', capacity: 2}],
+    rooms: [
+      {entity_id: uuid(10002), number: '201', room_type_id: uuid(10001), enabled: true, housekeeping: 'ready'},
+      {entity_id: uuid(10003), number: '202', room_type_id: uuid(10001), enabled: true, housekeeping: 'ready'},
+    ],
+    guests: [{entity_id: uuid(10004), display_name: 'Synthetic Test Guest'}],
+    reservations: [{entity_id: uuid(10005), guest_id: uuid(10004),
+      room_type_id: uuid(10001), room_id: uuid(10003), arrival: '2026-11-06',
+      departure: '2026-11-09', party_size: 1, source: 'advance', status: 'confirmed'}],
+    stays: [{entity_id: uuid(10006), reservation_id: uuid(10005), room_id: uuid(10003),
+      checked_in_at: '2026-11-06T15:00:00+00:00', status: 'checked_in'}],
+    stay_guests: [{entity_id: uuid(10007), stay_id: uuid(10006), guest_id: uuid(10004),
+      joined_at: '2026-11-06T15:00:00+00:00'}],
+    room_blocks: [],
+    'Roomay Service Requests': [],
+    'Roomay Service Request Audit': [],
+  };
+}
+
+const clone = value => JSON.parse(JSON.stringify(value));
 let calls;
 let remoteRows;
 
 function setup() {
+  routeBusiness = business;
   calls = [];
   remoteRows = Object.fromEntries(allNames.map(name => [name, []]));
   Workpeg.wpGetTables = async ns => {
@@ -51,35 +76,47 @@ function setup() {
   Workpeg.wpCreateTable = async () => { throw new Error('WRITE FORBIDDEN'); };
   Workpeg.wpAddRow = async () => { throw new Error('WRITE FORBIDDEN'); };
   Workpeg.wpUpdateRow = async () => { throw new Error('WRITE FORBIDDEN'); };
-  const app = new HotelDataTest();
-  app.state.expected_business = business;
-  app.state.confirmation = 'Read Roomay hotel data';
-  return app;
+  return new HotelDataTest();
 }
 
 const cases = [];
 const test = (name, fn) => cases.push([name, fn]);
 
-test('mount and render do not read, provision, seed or write', async () => {
-  const app = setup(); app.on_mount(); app.build();
-  assert.equal(calls.length, 0);
+test('mount loads the read-only snapshot and never provisions, seeds or writes', async () => {
+  const app = setup(); await app.on_mount(); app.build();
+  assert.equal(calls.filter(call => call[0] === 'tables').length, 2);
+  assert.equal(calls.filter(call => call[0] === 'rows').length, 9);
 });
 
-test('business and confirmation gates run before the SDK', async () => {
-  const app = setup(); app.state.expected_business = uuid(999);
+test('malformed business route is rejected before the SDK', async () => {
+  const app = setup(); routeBusiness = 'not-a-business';
   await app.load_snapshot(); assert.equal(calls.length, 0);
-  assert.match(app.state.failure, /context mismatch/);
-  app.state.expected_business = business; app.state.confirmation = '';
-  await app.load_snapshot(); assert.equal(calls.length, 0);
+  assert.match(app.state.failure, /Business context/);
 });
 
 test('empty inventory is truthful and makes no writes', async () => {
   const app = setup(); await app.load_snapshot();
   assert.equal(app.state.failure, '');
-  assert.match(app.state.status, /inventory is empty/);
+  assert.match(app.state.status, /no rooms configured/);
   assert.equal(calls.filter(call => call[0] === 'tables').length, 2);
   assert.equal(calls.filter(call => call[0] === 'rows').length, 9);
   assert.equal(app.state.rooms.length, 0);
+  assert.equal(app.state.view_state, 'empty_inventory');
+});
+
+test('valid persisted inventory reaches the loaded receptionist state', async () => {
+  const app = setup();
+  app.state.operational_date = '2026-11-06';
+  remoteRows.room_types = [roomType(1)];
+  remoteRows.rooms = [row('rooms', 2, {
+    entity_id: uuid(10002), number: '201', room_type_id: uuid(10001),
+    enabled: true, housekeeping: 'ready',
+  })];
+  await app.load_snapshot();
+  assert.equal(app.state.failure, '');
+  assert.equal(app.state.view_state, 'loaded');
+  assert.equal(app.state.room_cards.length, 1);
+  assert.equal(app.state.metrics.length, 8);
 });
 
 test('all plain-list pages are fetched with limit and offset', async () => {
@@ -130,6 +167,9 @@ test('400, 401, 403 and network failures are explicit without raw details', asyn
     await app.load_snapshot();
     assert.ok(app.state.failure); assert.ok(!JSON.stringify(app.state).includes('SECRET_SENTINEL'));
     if (status === 400) assert.match(app.state.failure, /WOR-28/);
+    if (status === 401) assert.equal(app.state.view_state, 'authentication_required');
+    if (status === 403) assert.equal(app.state.view_state, 'access_denied');
+    if (status === 400 || status === 500) assert.equal(app.state.view_state, 'connection_unavailable');
   }
 });
 
@@ -147,6 +187,62 @@ test('timeout discards a late table response and exposes no snapshot', async () 
 test('consumer can explicitly invalidate a previously complete snapshot', async () => {
   const app = setup(); await app.load_snapshot(); app.mark_stale();
   assert.match(app.state.freshness, /Stale/);
+});
+
+test('invalid stay and occupant histories fail closed in the compiled validator', async () => {
+  const invalidCases = [
+    snapshot => { snapshot.stays[0].status = 'checked_out'; },
+    snapshot => {
+      snapshot.stays[0].status = 'checked_out';
+      snapshot.stays[0].checked_out_at = '2026-11-06T16:00:00+02:00';
+      snapshot.stay_guests[0].left_at = '2026-11-06T16:00:00+02:00';
+    },
+    snapshot => { snapshot.stay_guests[0].joined_at = '2026-11-06T14:59:00+00:00'; },
+    snapshot => {
+      snapshot.stays[0].status = 'checked_out';
+      snapshot.stays[0].checked_out_at = '2026-11-06T17:00:00+00:00';
+      snapshot.stay_guests[0].left_at = '2026-11-06T17:01:00+00:00';
+    },
+    snapshot => {
+      snapshot.stays[0].status = 'checked_out';
+      snapshot.stays[0].checked_out_at = '2026-11-06T17:00:00+00:00';
+    },
+    snapshot => { snapshot.stays[0].checked_out_at = '2026-11-06T17:00:00+00:00'; },
+    snapshot => { snapshot.reservations[0].status = 'pending'; },
+    snapshot => { snapshot.stays.push({...snapshot.stays[0], entity_id: uuid(10008)}); },
+  ];
+  for (const mutate of invalidCases) {
+    const app = setup();
+    app.state.view_state = 'loaded';
+    const snapshot = clone(validRelationshipSnapshot());
+    mutate(snapshot);
+    assert.equal(app.validate_relationships(snapshot), false);
+    assert.equal(app.state.view_state, 'connection_unavailable');
+    assert.ok(app.state.failure);
+  }
+});
+
+test('historical request keeps its original room after a legitimate room change', async () => {
+  const app = setup();
+  const snapshot = validRelationshipSnapshot();
+  snapshot['Roomay Service Requests'] = [{
+    request_id: uuid(10009), stay_id: uuid(10006), guest_id: uuid(10004),
+    room_id: uuid(10002), description: 'Original-room request', status: 'resolved',
+  }];
+  assert.equal(snapshot.stays[0].room_id, uuid(10003));
+  assert.equal(snapshot['Roomay Service Requests'][0].room_id, uuid(10002));
+  assert.equal(app.validate_relationships(snapshot), true, app.state.failure);
+  app.state.operational_date = '2026-11-07';
+  app.state.room_types = snapshot.room_types;
+  app.state.rooms = snapshot.rooms;
+  app.state.guests = snapshot.guests;
+  app.state.reservations = snapshot.reservations;
+  app.state.stays = snapshot.stays;
+  app.state.room_blocks = snapshot.room_blocks;
+  app.state.service_requests = snapshot['Roomay Service Requests'];
+  app.project_records();
+  assert.equal(app.state.request_cards[0].room, '201');
+  assert.equal(app.state.room_cards.find(room => room.number === '202').occupancy, 'In house');
 });
 
 (async () => {

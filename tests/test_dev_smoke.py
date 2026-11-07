@@ -1,4 +1,4 @@
-"""Compile the real UI, then exercise its generated JS with SDK responses mocked.
+"""Compile the isolated diagnostic, then exercise generated JS with mocks.
 
 No Python reimplementation of the UI's controller and no live API transport.
 """
@@ -18,7 +18,7 @@ class CompiledDevSmoke(unittest.TestCase):
         scratch = root / "build"
         scratch.mkdir(exist_ok=True)
         with tempfile.TemporaryDirectory(dir=scratch) as output:
-            build_ui(str(root / "ui/main.py"), output, peg_namespace="roomay")
+            build_ui(str(root / "ui/dev_smoke.py"), output, peg_namespace="roomay")
             result = subprocess.run(
                 ["node", str(root / "tests/dev_smoke.cjs"), output],
                 capture_output=True, text=True, timeout=60,

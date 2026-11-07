@@ -21,15 +21,13 @@ keeps the native `row_id` and opaque `fingerprint` in a separate mapping.
 Booking, check-in, assignment and request-transition rules remain in their
 existing domain modules.
 
-`ui/hotel_data.py` is the only new SDK transport. It compiles into the browser,
-where `workpeg.*` can use the authenticated session and business ID from
-`/b/<business_id>/hotel-data`. Loading is an explicit user action. The route is
-read-only and rejects business mismatches, missing or duplicate tables, unsafe
-permissions, malformed pages, cross-business rows, duplicate identities and
-incomplete records. It exposes transport arrays for room types, rooms,
-reservations, active stays, active blocks and service requests for WOR-34.
-Those browser arrays are not actionable until WOR-34 applies the pure adapter's
-complete cross-table validation; the route labels them accordingly.
+`ui/hotel_data.py` is the SDK transport and read-only receptionist application.
+It compiles into the browser, where `workpeg.*` uses the authenticated session
+and business ID from `/b/<business_id>/reception`. It loads on mount and through
+an explicit refresh action. The route rejects malformed business context,
+missing or duplicate tables, unsafe permissions, malformed pages,
+cross-business rows, duplicate identities, incomplete records and inconsistent
+hotel/service-request relationships before rendering the snapshot.
 
 A successful read is labelled as a snapshot, not a lock. The route offers an
 explicit stale marker. It does not confirm reservations: the documented SDK
@@ -90,6 +88,10 @@ alias will be returned.
 - A row is rejected if its business differs from the active business, its
   native ID/fingerprint is missing, its application identity is duplicated,
   or its record fails the existing cross-table domain rules.
+- Historical service requests retain their original persisted room association.
+  A later legitimate room transfer may change the stay's current `room_id`
+  without rewriting request history. The missing authoritative room-move audit
+  contract is tracked under WOR-12; this read adapter does not invent one.
 - A timed-out or failed mutation must be read back before any retry.
   `reconcile_write` distinguishes confirmed, not applied, conflict, malformed
   and missing outcomes. A changed fingerprint is evidence of change, not proof
@@ -106,9 +108,9 @@ These steps are intentionally not performed by Codex or automated tests:
 1. Confirm the approved `roomay` Peg is installed in the exact development
    business. Approval alone is not installation.
 2. Use one authorized owner and one browser tab at
-   `/b/<verified-business-uuid>/hotel-data`.
-3. Confirm the URL business UUID manually, type the read confirmation, and load.
-   Capture the exact status without exposing cookies, tokens or record data.
+   `/b/<verified-business-uuid>/reception`.
+3. Let the authenticated route load, then use Refresh records. Capture the exact
+   status without exposing cookies, tokens, business IDs, or record data.
 4. If tables do not yet exist, review `table_contracts()` as a migration plan.
    Provision only through a separately approved, owner-operated change; never
    from page load or this read route.
@@ -119,11 +121,10 @@ These steps are intentionally not performed by Codex or automated tests:
    are proven should WOR-29 acceptance be reconsidered. Keep WOR-29 In Progress
    meanwhile.
 
-## WOR-34 implementation notes
+## WOR-34 implementation
 
-WOR-34 should consume the six read-only state arrays on `HotelData` or extract
-the same transport into its authenticated route. It must preserve the
-`row_references` mapping outside domain records, mark data stale after any
-mutation attempt, and run complete domain validation before rendering an
-actionable room board. It must not import demo fixtures, infer occupancy from a
-reservation, or treat a loaded snapshot as permission to book or check in.
+The receptionist route now consumes the transport arrays, retains native row
+references outside domain records, and validates cross-table relationships
+before rendering. It imports no fixture or demo module and keeps physical stays
+distinct from reservations. See `docs/wor-34.md` for UI states, authorization
+limits, and remaining live acceptance steps.

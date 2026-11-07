@@ -25,7 +25,7 @@ class CompiledHotelDataTests(unittest.TestCase):
                 cwd=ROOT, capture_output=True, text=True, check=False,
             )
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-            self.assertIn("10 compiled hotel-data scenarios passed", result.stdout)
+            self.assertIn("13 compiled hotel-data scenarios passed", result.stdout)
 
 
 if __name__ == "__main__":

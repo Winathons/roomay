@@ -4,20 +4,16 @@ Compile it with `workpeg ui build ui/`, or watch it as you edit with
 `workpeg ui serve ui/`.
 """
 from workpeg.ui import Route, Router, Scaffold, Text
-from dev_smoke import DevSmoke
 from hotel_data import HotelData
-from reception import ReceptionDemo
 
 
 class Home(Scaffold):
     def build(self):
-        return Text("Hello from roomay")
+        return Text("Roomay reception is available inside an authenticated Workpeg business.")
 
 
 class Main(Router):
     routes = [
         Route("/", Home),
-        Route("/demo/reception", ReceptionDemo),
-        Route("/b/[business_id]/dev-smoke", DevSmoke),
-        Route("/b/[business_id]/hotel-data", HotelData),
+        Route("/b/[business_id]/reception", HotelData),
     ]
