@@ -5,6 +5,7 @@ Compile it with `workpeg ui build ui/`, or watch it as you edit with
 """
 from workpeg.ui import Route, Router, Scaffold, Text
 from dev_smoke import DevSmoke
+from hotel_data import HotelData
 from reception import ReceptionDemo
 
 
@@ -18,4 +19,5 @@ class Main(Router):
         Route("/", Home),
         Route("/demo/reception", ReceptionDemo),
         Route("/b/[business_id]/dev-smoke", DevSmoke),
+        Route("/b/[business_id]/hotel-data", HotelData),
     ]
