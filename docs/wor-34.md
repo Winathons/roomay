@@ -24,6 +24,13 @@ contract. It does not call create, add, update, or delete helpers.
   validated before the UI enters `loaded` state.
 - The dashboard shows physical active stays separately from reservations. Its
   check-in readiness mirror is regression-pinned to `domain.hotel.room_eligibility`.
+- The compiled validator mirrors the canonical stay/occupant chronology rules:
+  checkout status and timestamp must agree, checkout cannot precede check-in,
+  and registered occupants must remain within the physical stay interval.
+- Scheduled departures today and overdue active stays are shown separately.
+  An overdue stay remains physically in house until checkout is recorded.
+- Invalid operational-date input retains the last valid date and shows a
+  validation error, so existing metrics are never relabelled with an invalid date.
 - Loading, empty inventory, authentication required, access denied, connection
   unavailable, and loaded states are explicit. Failed or partial snapshots show
   no hotel records.
@@ -51,6 +58,21 @@ in the browser. A `403` therefore fails closed as **Access denied**. Supporting
 non-owner reception staff requires a reviewed table-permission or individual
 grant design plus an authenticated live multi-role test; the UI does not weaken
 the table contract to simulate that support.
+
+## Room-change history dependency
+
+A service request retains its persisted `room_id` as the room context where the
+request originated. The receptionist validator therefore does not reject a
+historical request merely because the linked stay now points at a different
+room after a transfer. Stay/guest membership and both room identities must still
+be valid.
+
+The current nine-table contract has no canonical room-move audit record that can
+prove the transfer sequence, actor, authorization, old room, new room, and
+effective timestamp. That production audit contract belongs to WOR-12 and must
+be designed and persisted before Roomay claims a complete room-change history.
+WOR-34 preserves the original request context but does not invent that missing
+audit trail or enable room-change writes.
 
 ## Still requires authorized live validation
 

@@ -28,7 +28,7 @@ def build_reception_snapshot(hotel, service_requests, today):
                 and parse_day(block["start"]) <= current < parse_day(block["end"])):
             active_blocks.setdefault(block["room_id"], []).append(block)
 
-    arrivals, departures, in_house, room_cards = [], [], [], []
+    arrivals, departures, overdue_departures, in_house, room_cards = [], [], [], [], []
     ready_for_check_in = 0
     for room in hotel["rooms"]:
         stay = active_stays.get(room["entity_id"])
@@ -43,9 +43,19 @@ def build_reception_snapshot(hotel, service_requests, today):
         guest = guests[booking["guest_id"]] if booking else None
         if stay:
             occupancy = "In house"
+            departure_status = "Scheduled"
+            if parse_day(booking["departure"]) < current:
+                departure_status = "OVERDUE"
+                overdue_departures.append({
+                    "guest": guest["display_name"], "room": room["number"],
+                    "departure": booking["departure"],
+                })
+            elif booking["departure"] == today:
+                departure_status = "Due today"
             in_house.append({
                 "guest": guest["display_name"], "room": room["number"],
                 "departure": booking["departure"],
+                "departure_status": departure_status,
             })
             if booking["departure"] == today:
                 departures.append({
@@ -97,11 +107,13 @@ def build_reception_snapshot(hotel, service_requests, today):
         "metrics": {
             "in_house": len(in_house), "arrivals": len(arrivals),
             "departures": len(departures), "ready_for_check_in": ready_for_check_in,
+            "overdue_active_stays": len(overdue_departures),
             "needs_cleaning": sum(room["housekeeping"] != "ready" for room in hotel["rooms"]),
-            "maintenance_blocks": len(active_blocks),
+            "maintenance_blocked_rooms": len(active_blocks),
             "open_requests": sum(
                 request["status"] in OPEN_REQUEST_STATUSES for request in service_requests),
         },
-        "arrivals": arrivals, "departures": departures, "in_house": in_house,
+        "arrivals": arrivals, "departures": departures,
+        "overdue_departures": overdue_departures, "in_house": in_house,
         "rooms": room_cards, "requests": requests,
     }

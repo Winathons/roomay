@@ -99,7 +99,7 @@ workpeg doctor . --offline
 ```
 
 **Expected on the November 6 staging snapshot:**
-- Unit tests: **83 passing**, including compiled UI tests with mocked
+- Unit tests: **84 passing**, including compiled UI tests with mocked
   persistence, authorization, empty, error, and receptionist states;
   the command ends in `OK`.
 - Syntax compilation: no output when successful.

@@ -19,12 +19,25 @@ class ReceptionProjectionTests(unittest.TestCase):
         view = build_reception_snapshot(synthetic_hotel(), [], "2026-11-06")
         self.assertEqual(view["metrics"], {
             "in_house": 1, "arrivals": 1, "departures": 0,
-            "ready_for_check_in": 1, "needs_cleaning": 1,
-            "maintenance_blocks": 1, "open_requests": 0,
+            "ready_for_check_in": 1, "overdue_active_stays": 0,
+            "needs_cleaning": 1, "maintenance_blocked_rooms": 1,
+            "open_requests": 0,
         })
         self.assertEqual(view["arrivals"][0]["room"], "202")
         self.assertEqual(view["in_house"][0]["room"], "205")
         self.assertNotEqual(view["arrivals"][0]["guest"], view["in_house"][0]["guest"])
+
+    def test_overdue_stay_remains_physically_in_house(self):
+        hotel = synthetic_hotel()
+        booking = next(item for item in hotel["reservations"]
+                       if item["entity_id"] == hotel["stays"][0]["reservation_id"])
+        booking["departure"] = "2026-11-06"
+        view = build_reception_snapshot(hotel, [], "2026-11-07")
+        self.assertEqual(view["metrics"]["in_house"], 1)
+        self.assertEqual(view["metrics"]["departures"], 0)
+        self.assertEqual(view["metrics"]["overdue_active_stays"], 1)
+        self.assertEqual(view["in_house"][0]["departure_status"], "OVERDUE")
+        self.assertEqual(view["overdue_departures"][0]["room"], "205")
 
     def test_compiled_readiness_mirror_is_pinned_to_canonical_rules(self):
         hotel = synthetic_hotel()

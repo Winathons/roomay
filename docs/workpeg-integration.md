@@ -88,6 +88,10 @@ alias will be returned.
 - A row is rejected if its business differs from the active business, its
   native ID/fingerprint is missing, its application identity is duplicated,
   or its record fails the existing cross-table domain rules.
+- Historical service requests retain their original persisted room association.
+  A later legitimate room transfer may change the stay's current `room_id`
+  without rewriting request history. The missing authoritative room-move audit
+  contract is tracked under WOR-12; this read adapter does not invent one.
 - A timed-out or failed mutation must be read back before any retry.
   `reconcile_write` distinguishes confirmed, not applied, conflict, malformed
   and missing outcomes. A changed fingerprint is evidence of change, not proof

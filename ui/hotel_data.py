@@ -40,8 +40,10 @@ class HotelData(App):
     in_house_cards = State([])
     room_cards = State([])
     request_cards = State([])
+    overdue_departure_cards = State([])
     room_filter = State("All rooms")
     selected_room = State("")
+    date_error = State("")
 
     async def on_mount(self):
         set_interval(self.watch_timeout, 1000)
@@ -73,13 +75,14 @@ class HotelData(App):
         return False
 
     def set_operational_date(self, value):
-        self.operational_date = value.strip()
-        if dates.is_date(self.operational_date):
-            self.failure = ""
-            if self.view_state == "loaded":
-                self.project_records()
-        else:
-            self.failure = "Operational date must be a valid YYYY-MM-DD date."
+        proposed = value.strip()
+        if not dates.is_date(proposed):
+            self.date_error = "Enter a valid YYYY-MM-DD date. Counts still use the last valid operational date."
+            return
+        self.date_error = ""
+        self.operational_date = proposed
+        if self.view_state == "loaded":
+            self.project_records()
 
     def set_filter(self, value):
         self.room_filter = value
@@ -97,6 +100,34 @@ class HotelData(App):
             elif value[position] not in "0123456789abcdef":
                 return False
         return True
+
+    def instant_epoch(self, value):
+        if str(value) != value:
+            return None
+        if len(value) == 20 and value[19] == "Z":
+            local_value = value[:19]
+            if dates.is_datetime(local_value):
+                return dates.to_epoch(local_value, "UTC")
+            return None
+        if (len(value) != 25 or value[19] not in ["+", "-"]
+                or value[22] != ":"):
+            return None
+        digits = value[20:22] + value[23:25]
+        for character in digits:
+            if character not in "0123456789":
+                return None
+        local_value = value[:19]
+        if not dates.is_datetime(local_value):
+            return None
+        hours = int(value[20:22])
+        minutes = int(value[23:25])
+        if hours > 23 or minutes > 59:
+            return None
+        offset = (hours * 60 + minutes) * 60000
+        epoch = dates.to_epoch(local_value, "UTC")
+        if value[19] == "+":
+            return epoch - offset
+        return epoch + offset
 
     def expected_names(self, namespace):
         if namespace == "roomay_hotel_v1":
@@ -274,6 +305,8 @@ class HotelData(App):
         for booking in loaded["reservations"]:
             if (booking["guest_id"] not in guests
                     or booking["room_type_id"] not in room_types
+                    or not dates.is_date(booking["arrival"])
+                    or not dates.is_date(booking["departure"])
                     or booking["arrival"] >= booking["departure"]):
                 return self.fail("Invalid reservation reference or date interval.")
             if booking.get("room_id"):
@@ -309,6 +342,19 @@ class HotelData(App):
             if stay["reservation_id"] in used_reservations:
                 return self.fail("Reservation has more than one stay.")
             used_reservations.append(stay["reservation_id"])
+            checked_out_at = stay.get("checked_out_at")
+            checked_in_epoch = self.instant_epoch(stay["checked_in_at"])
+            if checked_in_epoch is None:
+                return self.fail("Stay has an invalid check-in timestamp.")
+            if ((stay["status"] == "checked_out" and not checked_out_at)
+                    or (stay["status"] != "checked_out" and checked_out_at)):
+                return self.fail("Stay checkout status and timestamp do not agree.")
+            if checked_out_at:
+                checked_out_epoch = self.instant_epoch(checked_out_at)
+                if checked_out_epoch is None:
+                    return self.fail("Stay has an invalid checkout timestamp.")
+                if checked_out_epoch < checked_in_epoch:
+                    return self.fail("Stay checkout precedes check-in.")
             if stay["status"] == "checked_in":
                 if stay["room_id"] in active_rooms:
                     return self.fail("Room has more than one active stay.")
@@ -322,6 +368,27 @@ class HotelData(App):
             if pair in occupant_pairs:
                 return self.fail("Duplicate registered occupant.")
             occupant_pairs.append(pair)
+            stay = [item for item in loaded["stays"]
+                    if item["entity_id"] == occupant["stay_id"]][0]
+            joined_at = self.instant_epoch(occupant["joined_at"])
+            if joined_at is None:
+                return self.fail("Registered occupant has an invalid arrival timestamp.")
+            checked_in_at = self.instant_epoch(stay["checked_in_at"])
+            if joined_at < checked_in_at:
+                return self.fail("Registered occupant arrived before stay check-in.")
+            left_at = occupant.get("left_at")
+            left_epoch = None
+            if left_at:
+                left_epoch = self.instant_epoch(left_at)
+                if left_epoch is None:
+                    return self.fail("Registered occupant has an invalid departure timestamp.")
+                if left_epoch < joined_at:
+                    return self.fail("Registered occupant left before arrival.")
+            if stay.get("checked_out_at"):
+                if not left_at:
+                    return self.fail("Checked-out stay has an occupant without a departure timestamp.")
+                if left_epoch > self.instant_epoch(stay["checked_out_at"]):
+                    return self.fail("Registered occupant left after stay checkout.")
             occupant_counts[occupant["stay_id"]] = occupant_counts.get(occupant["stay_id"], 0) + 1
         for stay in loaded["stays"]:
             booking = [item for item in loaded["reservations"]
@@ -330,7 +397,10 @@ class HotelData(App):
             if count < 1 or count > booking["party_size"]:
                 return self.fail("Stay occupant count is outside the reservation party size.")
         for block in loaded["room_blocks"]:
-            if block["room_id"] not in rooms or block["start"] >= block["end"]:
+            if (block["room_id"] not in rooms
+                    or not dates.is_date(block["start"])
+                    or not dates.is_date(block["end"])
+                    or block["start"] >= block["end"]):
                 return self.fail("Maintenance block has an invalid room or date interval.")
         request_ids = []
         for request in loaded["Roomay Service Requests"]:
@@ -340,10 +410,6 @@ class HotelData(App):
             if (request["stay_id"] not in stays or request["room_id"] not in rooms
                     or request["guest_id"] not in guests):
                 return self.fail("Service request references unknown hotel records.")
-            stay = [item for item in loaded["stays"]
-                    if item["entity_id"] == request["stay_id"]][0]
-            if stay["room_id"] != request["room_id"]:
-                return self.fail("Service request room does not match its stay.")
             if request["stay_id"] + ":" + request["guest_id"] not in occupant_pairs:
                 return self.fail("Service request guest is not a registered occupant.")
         for event in loaded["Roomay Service Request Audit"]:
@@ -389,14 +455,22 @@ class HotelData(App):
 
     def project_records(self):
         if not dates.is_date(self.operational_date):
-            self.failure = "Operational date must be a valid YYYY-MM-DD date."
+            self.date_error = "Operational date is invalid. Computed receptionist data is hidden."
+            self.metrics = []
+            self.arrival_cards = []
+            self.departure_cards = []
+            self.overdue_departure_cards = []
+            self.in_house_cards = []
+            self.room_cards = []
+            self.request_cards = []
             return
         room_cards = []
         arrivals = []
         departures = []
+        overdue_departures = []
         in_house = []
         ready = 0
-        active_blocks = 0
+        blocked_rooms = 0
         for room in self.rooms:
             room_type = [item for item in self.room_types
                          if item["entity_id"] == room["room_type_id"]][0]
@@ -425,12 +499,21 @@ class HotelData(App):
                       and block["start"] <= self.operational_date
                       and self.operational_date < block["end"]]
             if blocks:
-                active_blocks += 1
+                blocked_rooms += 1
             occupancy = "Vacant"
             if stay:
                 occupancy = "In house"
+                departure_status = "Scheduled"
+                if booking["departure"] < self.operational_date:
+                    departure_status = "OVERDUE"
+                    overdue_departures.append({"guest": guest["display_name"],
+                                               "room": room["number"],
+                                               "departure": booking["departure"]})
+                elif booking["departure"] == self.operational_date:
+                    departure_status = "Due today"
                 in_house.append({"guest": guest["display_name"], "room": room["number"],
-                                 "departure": booking["departure"]})
+                                 "departure": booking["departure"],
+                                 "departure_status": departure_status})
                 if booking["departure"] == self.operational_date:
                     departures.append({"guest": guest["display_name"],
                                        "room": room["number"]})
@@ -463,14 +546,16 @@ class HotelData(App):
         self.metrics = [
             {"label": "In house", "value": len(in_house), "helper": "Physical active stays"},
             {"label": "Arrivals", "value": len(arrivals), "helper": "Confirmed, not checked in"},
-            {"label": "Departures", "value": len(departures), "helper": "Active stays due today"},
+            {"label": "Scheduled departures today", "value": len(departures), "helper": "Checked-in stays due today"},
+            {"label": "Overdue active stays", "value": len(overdue_departures), "helper": "Still checked in past departure"},
             {"label": "Ready for check-in", "value": ready, "helper": "Canonical eligibility rules"},
             {"label": "Needs cleaning", "value": len([room for room in self.rooms if room["housekeeping"] != "ready"]), "helper": "Not marked ready"},
-            {"label": "Maintenance blocks", "value": active_blocks, "helper": "Active on operational date"},
+            {"label": "Maintenance-blocked rooms", "value": blocked_rooms, "helper": "Rooms with an active block today"},
             {"label": "Open requests", "value": len([request for request in self.service_requests if request["status"] in open_statuses]), "helper": "Unresolved guest requests"},
         ]
         self.arrival_cards = arrivals
         self.departure_cards = departures
+        self.overdue_departure_cards = overdue_departures
         self.in_house_cards = in_house
         self.room_cards = room_cards
         self.request_cards = request_cards
@@ -589,6 +674,8 @@ class HotelData(App):
                         ),
                         TextInput(value=self.operational_date, on_change=self.set_operational_date,
                                   placeholder="Operational date YYYY-MM-DD"),
+                        Text(self.date_error, variant="caption", tone="warning",
+                             visible=self.date_error != ""),
                         Button("Refresh records", on_click=self.load_snapshot,
                                variant="outline-color") if not self.busy else Text("Refreshing..."),
                         spacing=12, cross_alignment="center",
@@ -674,7 +761,7 @@ class HotelData(App):
                                     Container(Column(
                                         Text("Currently in house", variant="subheading", weight="bold"),
                                         Text("No active stays", tone="muted", visible=len(self.in_house_cards) == 0),
-                                        Column(*[Text(f"{item['guest']} - Room {item['room']} - departs {item['departure']}") for item in self.in_house_cards], gap=8),
+                                        Column(*[Text(f"{item['guest']} - Room {item['room']} - departs {item['departure']} - {item['departure_status']}") for item in self.in_house_cards], gap=8),
                                         Text("Physical checked-in stays only.", variant="caption", tone="muted"),
                                         gap=10,
                                     ), padding=20, width=330, radius=16, color="#ffffff", style={"border": "1px solid #dce7e2"}),
@@ -686,10 +773,13 @@ class HotelData(App):
                                         gap=10,
                                     ), padding=20, width=330, radius=16, color="#ffffff", style={"border": "1px solid #dce7e2"}),
                                     Container(Column(
-                                        Text("Departures", variant="subheading", weight="bold"),
-                                        Text("No departures planned", tone="muted", visible=len(self.departure_cards) == 0),
+                                        Text("Scheduled departures today", variant="subheading", weight="bold"),
+                                        Text("No active stays due today", tone="muted", visible=len(self.departure_cards) == 0),
                                         Column(*[Text(f"{item['guest']} - Room {item['room']}") for item in self.departure_cards], gap=8),
-                                        Text("Derived from active stays and reservation departure dates.", variant="caption", tone="muted"),
+                                        Text("Overdue active stays", variant="label", weight="bold",
+                                             tone="warning", visible=len(self.overdue_departure_cards) > 0),
+                                        Column(*[Text(f"OVERDUE - {item['guest']} - Room {item['room']} - scheduled {item['departure']}", tone="warning") for item in self.overdue_departure_cards], gap=8),
+                                        Text("Physical occupancy remains active until checkout is recorded.", variant="caption", tone="muted"),
                                         gap=10,
                                     ), padding=20, width=330, radius=16, color="#ffffff", style={"border": "1px solid #dce7e2"}),
                                     spacing=12, run_spacing=12,
