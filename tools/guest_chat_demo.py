@@ -1,6 +1,6 @@
 """Loopback-only offline guest chat demo backed by WOR-18 domain contracts.
 
-Run with ``python tools/guest_chat_demo.py``. This server never contacts
+Run from the repository root with ``python -m tools.guest_chat_demo``. This server never contacts
 Workpeg, Vapi, YarnGPT, or any other remote service.
 """
 
