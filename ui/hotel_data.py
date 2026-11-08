@@ -1,6 +1,6 @@
 """Authenticated, read-only receptionist application over Workpeg tables.
 
-The UI compiles with Workpeg 0.149.1. It never provisions, seeds, or mutates
+The UI compiles with Workpeg 0.152.0. It never provisions, seeds, or mutates
 records and fails closed when the complete owner-only table contract cannot be
 read. Browser-local ``dates.today()`` is exposed rather than mislabelled as a
 persisted hotel timezone.
