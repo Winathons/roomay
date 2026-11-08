@@ -224,7 +224,9 @@ class GuestChatDemoHttpTests(unittest.TestCase):
             cwd=repository_root,
             capture_output=True,
             text=True,
-            timeout=10,
+            # A fresh Windows Python process can take several seconds to import
+            # the Workpeg-linked project during the full compiled test suite.
+            timeout=30,
             check=False,
         )
         self.assertEqual(result.returncode, 0, result.stderr)
