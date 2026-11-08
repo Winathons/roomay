@@ -1,0 +1,110 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <title>Roomay | Offline Guest Chat</title>
+  <link rel="stylesheet" href="/app.css">
+  <script src="/app.js" defer></script>
+</head>
+<body>
+  <div class="page-shell">
+    <header class="topbar">
+      <a class="brand" href="/" aria-label="Roomay home">
+        <span class="brand-mark" aria-hidden="true">R</span>
+        <span class="brand-name">roomay<span class="brand-period">.</span></span>
+      </a>
+      <div class="demo-status"><span class="status-dot"></span> Local demo</div>
+    </header>
+
+    <main>
+      <section class="notice" role="note" aria-label="Demo status">
+        <span class="notice-icon" aria-hidden="true">i</span>
+        <strong>OFFLINE DEMO — SYNTHETIC DATA — NO REQUEST SUBMITTED</strong>
+      </section>
+
+      <section class="intro">
+        <p class="eyebrow">ROOMAY GUEST CARE</p>
+        <h1>How can we help?</h1>
+        <p class="intro-copy">Tell us what you need. Roomay can clarify the request and show which hotel team would handle it.</p>
+      </section>
+
+      <div class="workspace">
+        <section class="chat-panel" aria-label="Offline guest chat">
+          <div class="chat-heading">
+            <div class="assistant-avatar" aria-hidden="true">R</div>
+            <div>
+              <h2>Roomay assistant</h2>
+              <p><span class="online-dot"></span> Offline rules demo</p>
+            </div>
+            <span class="synthetic-pill">FICTIONAL SESSION</span>
+          </div>
+
+          <div id="messages" class="messages" role="log" aria-live="polite" aria-relevant="additions text">
+            <div class="loading-state">Starting the offline demo…</div>
+          </div>
+
+          <div id="confirmation" class="confirmation-slot"></div>
+
+          <form id="chat-form" class="composer">
+            <label class="sr-only" for="guest-message">Your message</label>
+            <textarea id="guest-message" name="message" rows="2" maxlength="1000"
+              placeholder="Type what you need…" autocomplete="off" required></textarea>
+            <div class="composer-footer">
+              <span>Enter to send · Shift + Enter for a new line</span>
+              <button id="send-button" class="send-button" type="submit" aria-label="Send message">
+                <span>Send</span><span aria-hidden="true">↗</span>
+              </button>
+            </div>
+          </form>
+          <p id="feedback" class="feedback" role="status" aria-live="polite"></p>
+        </section>
+
+        <aside class="side-panel" aria-label="Demo information">
+          <section class="side-card examples-card">
+            <p class="side-kicker">TRY A MESSAGE</p>
+            <h2>Start with a need</h2>
+            <div class="suggestions">
+              <button type="button" class="suggestion" data-example="Abeg, my AC no dey cool for room 205.">
+                <span class="suggestion-icon maintenance" aria-hidden="true">✳</span>
+                <span><strong>Maintenance</strong><small>“Abeg, my AC no dey cool…”</small></span>
+                <span class="chevron" aria-hidden="true">›</span>
+              </button>
+              <button type="button" class="suggestion" data-example="Please bring extra towels to room 205.">
+                <span class="suggestion-icon housekeeping" aria-hidden="true">✦</span>
+                <span><strong>Housekeeping</strong><small>“Please bring extra towels…”</small></span>
+                <span class="chevron" aria-hidden="true">›</span>
+              </button>
+              <button type="button" class="suggestion" data-example="Can I ask about room availability?">
+                <span class="suggestion-icon reception" aria-hidden="true">↗</span>
+                <span><strong>Room enquiry</strong><small>Routes to Reception</small></span>
+                <span class="chevron" aria-hidden="true">›</span>
+              </button>
+            </div>
+          </section>
+
+          <section class="side-card how-card">
+            <p class="side-kicker">WHAT HAPPENS</p>
+            <ol class="steps">
+              <li><span>1</span><div><strong>Describe it</strong><small>Use your own words or Nigerian Pidgin.</small></div></li>
+              <li><span>2</span><div><strong>Review the route</strong><small>Roomay checks the request and asks if details are missing.</small></div></li>
+              <li><span>3</span><div><strong>Confirm to prepare</strong><small>Nothing is sent or saved in this demo.</small></div></li>
+            </ol>
+          </section>
+
+          <section class="safety-note">
+            <span aria-hidden="true">!</span>
+            <p><strong>Need urgent help?</strong> Contact Reception directly. This demo does not notify hotel staff or emergency services.</p>
+          </section>
+        </aside>
+      </div>
+
+      <footer class="page-footer">
+        <span>Roomay · Guest care, made clear</span>
+        <span>Fictional context · Session kept in local memory only</span>
+      </footer>
+    </main>
+  </div>
+</body>
+</html>

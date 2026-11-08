@@ -316,8 +316,8 @@ def handle_conversation_turn(
                        intent=intent, failure_code="invalid_confirmation")
     if not confirmed:
         department = intent["department"].replace("_", " ").title()
-        detail = ("Reception will triage it" if intent["triage_required"] else
-                  "it will go to " + department)
+        detail = ("Reception to review and triage" if intent["triage_required"] else
+                  "the " + department + " team")
         return _result(
             "awaiting_confirmation",
             "I can prepare this request for " + detail + ". It will not be sent or saved yet. Shall I prepare it?",
