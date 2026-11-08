@@ -3,7 +3,10 @@
 from dataclasses import replace
 import io
 import json
+import subprocess
+import sys
 import unittest
+from pathlib import Path
 
 from domain.fixtures import uid
 from tools.guest_chat_demo import (
@@ -175,6 +178,20 @@ class GuestChatDemoFlowTests(unittest.TestCase):
 
 
 class GuestChatDemoHttpTests(unittest.TestCase):
+    def test_documented_module_launch_imports_from_repository_root(self):
+        # The module entrypoint resolves sibling domain imports without PYTHONPATH.
+        repository_root = Path(__file__).resolve().parents[1]
+        result = subprocess.run(
+            [sys.executable, "-m", "tools.guest_chat_demo", "--help"],
+            cwd=repository_root,
+            capture_output=True,
+            text=True,
+            timeout=10,
+            check=False,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("--port", result.stdout)
+
     def setUp(self):
         self.server = make_server(port=0)
         self.origin = f"http://{LOOPBACK}:{self.server.server_port}"
