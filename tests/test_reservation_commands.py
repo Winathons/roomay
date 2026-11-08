@@ -1,14 +1,22 @@
 """WOR-9: real reservation-state invariants; no Workpeg network access."""
 import unittest
 from copy import deepcopy
+from datetime import timedelta, timezone
+from unittest.mock import patch
+from zoneinfo import ZoneInfoNotFoundError
 
 from domain.fixtures import synthetic_hotel, uid
 from domain.hotel import validate_snapshot
 from domain.reservation_commands import (
     ReservationRejected,
+    WriteContext,
     prepare_booking_request,
+    prepare_authorized_room_confirmation,
     prepare_cancellation,
+    prepare_check_in,
     prepare_room_confirmation,
+    prepare_walk_in_request,
+    reconcile_check_in_readback,
 )
 
 
@@ -160,6 +168,234 @@ class ReservationCommandTests(unittest.TestCase):
         repeat = prepare_cancellation(self.hotel, reservation_id=uid("walk-in"),
                                       staff_authorized=True)
         self.assertEqual(repeat.action, "already_cancelled")
+
+
+class SafeCheckInContractTests(unittest.TestCase):
+    def setUp(self):
+        self.hotel = synthetic_hotel()
+        self.timezone_patcher = patch(
+            "domain.reservation_commands.ZoneInfo",
+            return_value=timezone(timedelta(hours=1), name="Lagos fixture timezone"),
+        )
+        self.timezone_patcher.start()
+        self.addCleanup(self.timezone_patcher.stop)
+        self.business = uid("Roomay development business")
+        self.context = WriteContext(
+            business_id=self.business, snapshot_business_id=self.business,
+            actor_id=uid("authorized receptionist"), actor_role="receptionist",
+            authorization_verified=True, snapshot_fresh=True,
+            serialization_guard_held=True,
+            authoritative_now="2026-11-06T16:00:00+01:00",
+        )
+        self.request = {
+            "entity_id": uid("walkin-checkin"), "guest_id": uid("Guest A"),
+            "room_type_id": uid("standard"), "room_id": uid("204"),
+            "arrival": "2026-11-06", "departure": "2026-11-08",
+            "party_size": 1, "source": "walk_in", "status": "confirmed",
+        }
+        self.hotel["reservations"].append(self.request)
+
+    def plan(self, **kwargs):
+        params = dict(
+            reservation_id=self.request["entity_id"],
+            occupant_guest_ids=[uid("Guest A")],
+            checked_in_at="2026-11-06T15:00:00+01:00", today="2026-11-06",
+            hotel_timezone="Africa/Lagos",
+            idempotency_key="walkin-attempt-0001", context=self.context,
+        )
+        params.update(kwargs)
+        return prepare_check_in(self.hotel, **params)
+
+    def context_at(self, day):
+        return WriteContext(**{
+            **self.context.__dict__,
+            "authoritative_now": day + "T16:00:00+01:00",
+        })
+
+    def test_walk_in_request_stays_pending_and_creates_no_stay(self):
+        hotel = synthetic_hotel()
+        request = prepare_walk_in_request(
+            hotel, idempotency_key="walkin-request-0001", guest_id=uid("Guest A"),
+            room_type_id=uid("standard"), arrival="2026-11-06", departure="2026-11-08",
+            party_size=1, context=self.context,
+        )
+        self.assertEqual(request.record["status"], "pending_confirmation")
+        self.assertNotIn("room_id", request.record)
+        self.assertEqual(request.action, "create_pending_request")
+        self.assertFalse(request.persisted)
+        self.assertEqual(len(hotel["stays"]), 1)
+        self.assertEqual(hotel["stays"][0]["reservation_id"], uid("in-house"))
+
+    def test_walkin_retry_is_idempotent_and_unserialized_create_refuses(self):
+        hotel = synthetic_hotel()
+        args = dict(
+            idempotency_key="walkin-request-0002", guest_id=uid("Guest A"),
+            room_type_id=uid("standard"), arrival="2026-11-06", departure="2026-11-08",
+            party_size=1, context=self.context,
+        )
+        first = prepare_walk_in_request(hotel, **args)
+        hotel["reservations"].append(dict(first.record))
+        retry = prepare_walk_in_request(hotel, **args)
+        self.assertEqual(retry.action, "already_requested")
+        self.assertFalse(retry.persisted)
+        unguarded = WriteContext(**{**self.context.__dict__, "serialization_guard_held": False})
+        with self.assertRaisesRegex(ReservationRejected, "authoritative_serialization_unavailable"):
+            prepare_walk_in_request(hotel, **{**args, "context": unguarded,
+                                               "idempotency_key": "walkin-request-0003"})
+
+    def test_room_confirmation_requires_fresh_authorized_serialized_context(self):
+        for changes, reason in [
+            ({"authorization_verified": False}, "authorized_staff_required"),
+            ({"actor_role": "guest"}, "authorized_staff_required"),
+            ({"snapshot_fresh": False}, "stale_snapshot"),
+            ({"serialization_guard_held": False}, "authoritative_serialization_unavailable"),
+            ({"snapshot_business_id": uid("other business")}, "wrong_business"),
+        ]:
+            with self.subTest(changes=changes):
+                context = WriteContext(**{**self.context.__dict__, **changes})
+                with self.assertRaisesRegex(ReservationRejected, reason):
+                    prepare_authorized_room_confirmation(
+                        self.hotel, reservation_id=uid("walk-in"),
+                        room_id=uid("204"), context=context,
+                    )
+
+    def test_authorized_confirmation_plans_pending_transition_only(self):
+        pending = dict(self.request, entity_id=uid("new pending walkin"),
+                       arrival="2026-11-09", departure="2026-11-11",
+                       status="pending_confirmation")
+        pending.pop("room_id")
+        self.hotel["reservations"].append(pending)
+        plan = prepare_authorized_room_confirmation(
+            self.hotel, reservation_id=pending["entity_id"],
+            room_id=uid("204"), context=self.context,
+        )
+        self.assertEqual(plan.record["status"], "confirmed")
+        self.assertEqual(plan.record["room_id"], uid("204"))
+        self.assertFalse(plan.persisted)
+
+    def test_checkin_plan_is_separate_from_confirmed_reservation_and_not_persisted(self):
+        plan = self.plan()
+        self.assertEqual(plan.action, "check_in_guest")
+        self.assertEqual(plan.stay_record["status"], "checked_in")
+        self.assertEqual(plan.stay_record["reservation_id"], self.request["entity_id"])
+        self.assertEqual(len(plan.occupant_records), 1)
+        self.assertEqual(self.request["status"], "confirmed")
+        self.assertEqual(len(self.hotel["stays"]), 1)  # only the unrelated synthetic stay
+        self.assertFalse(plan.persisted)
+        self.assertTrue(plan.requires_authoritative_guard)
+
+    def test_checkin_fails_closed_for_missing_authority_stale_or_wrong_business(self):
+        for changes, reason in [
+            ({"authorization_verified": False}, "authorized_staff_required"),
+            ({"actor_role": "housekeeping"}, "authorized_staff_required"),
+            ({"snapshot_fresh": False}, "stale_snapshot"),
+            ({"serialization_guard_held": False}, "authoritative_serialization_unavailable"),
+            ({"snapshot_business_id": uid("different business")}, "wrong_business"),
+        ]:
+            with self.subTest(changes=changes):
+                context = WriteContext(**{**self.context.__dict__, **changes})
+                with self.assertRaisesRegex(ReservationRejected, reason):
+                    self.plan(context=context)
+
+    def test_checkin_rejects_dirty_occupied_or_maintenance_blocked_room(self):
+        self.hotel["rooms"][3]["housekeeping"] = "dirty"  # Room 204
+        with self.assertRaisesRegex(ReservationRejected, "housekeeping_not_ready"):
+            self.plan()
+
+        # Use an eligible interval beginning on the scheduled checkout date.
+        self.request.update(arrival="2026-11-08", departure="2026-11-10", room_id=uid("205"))
+        with self.assertRaises(ReservationRejected) as error:
+            self.plan(today="2026-11-08", context=self.context_at("2026-11-08"),
+                      checked_in_at="2026-11-08T15:00:00+01:00")
+        self.assertIn("occupied", error.exception.reasons)
+        self.assertIn("maintenance_block", error.exception.reasons)
+
+    def test_checkin_rejects_invalid_dates_unconfirmed_and_duplicate_attempts(self):
+        with self.assertRaisesRegex(ReservationRejected, "outside_booking_dates"):
+            self.plan(today="2026-11-08", context=self.context_at("2026-11-08"),
+                      checked_in_at="2026-11-08T15:00:00+01:00")
+        with self.assertRaisesRegex(ReservationRejected, "invalid_check_in_time"):
+            self.plan(checked_in_at="2026-11-06T15:00:00")
+        with self.assertRaisesRegex(ReservationRejected, "invalid_operational_date"):
+            self.plan(today="2026-02-30")
+        self.request["status"] = "pending_confirmation"
+        self.request.pop("room_id")
+        with self.assertRaisesRegex(ReservationRejected, "confirmed_assignment_required"):
+            self.plan()
+
+    def test_operational_date_uses_authoritative_hotel_zone_at_midnight_boundary(self):
+        before_midnight = self.plan(
+            checked_in_at="2026-11-06T22:59:59Z",
+            context=WriteContext(**{
+                **self.context.__dict__,
+                "authoritative_now": "2026-11-06T23:59:59+01:00",
+            }),
+        )
+        self.assertEqual(before_midnight.stay_record["checked_in_at"],
+                         "2026-11-06T22:59:59+00:00")
+        with self.assertRaisesRegex(
+            ReservationRejected, "check_in_timestamp_operational_date_mismatch"
+        ):
+            self.plan(checked_in_at="2026-11-06T23:00:00Z")
+
+    def test_browser_operational_date_must_match_trusted_clock_and_future_time_refuses(self):
+        with self.assertRaisesRegex(ReservationRejected, "operational_date_not_authoritative"):
+            self.plan(today="2026-11-07")
+        with self.assertRaisesRegex(ReservationRejected, "check_in_timestamp_in_future"):
+            self.plan(checked_in_at="2026-11-06T16:00:01+01:00")
+
+    def test_timestamp_offset_does_not_define_hotel_local_date(self):
+        # The input's -02:00 calendar date is Nov 6, but the same instant is
+        # Nov 7 in the configured +01:00 hotel zone.
+        with self.assertRaisesRegex(
+            ReservationRejected, "check_in_timestamp_operational_date_mismatch"
+        ):
+            self.plan(checked_in_at="2026-11-06T23:30:00-02:00")
+
+    def test_missing_authoritative_timezone_fails_closed(self):
+        with patch("domain.reservation_commands.ZoneInfo", side_effect=ZoneInfoNotFoundError):
+            with self.assertRaisesRegex(
+                ReservationRejected, "authoritative_hotel_timezone_unavailable"
+            ):
+                self.plan()
+
+    def test_duplicate_stay_and_occupants_are_rejected_or_idempotently_recognized(self):
+        plan = self.plan()
+        self.hotel["stays"].append(dict(plan.stay_record))
+        self.hotel["stay_guests"].extend(dict(row) for row in plan.occupant_records)
+        retry = self.plan()
+        self.assertEqual(retry.action, "already_checked_in")
+        self.assertFalse(retry.persisted)
+        self.hotel["stay_guests"].clear()
+        with self.assertRaises(ReservationRejected):
+            self.plan()
+
+    def test_overlapping_confirmed_booking_blocks_room_checkin(self):
+        other = dict(self.request)
+        other.update(entity_id=uid("overlapping reservation"), arrival="2026-11-06",
+                     departure="2026-11-07", room_id=uid("202"))
+        self.hotel["reservations"].append(other)
+        with self.assertRaises(ReservationRejected):
+            self.plan()
+
+    def test_same_key_is_deterministic_and_simultaneous_unserialized_attempt_fails_closed(self):
+        first, second = self.plan(), self.plan()
+        self.assertEqual(first.stay_record, second.stay_record)
+        unguarded = WriteContext(**{**self.context.__dict__, "serialization_guard_held": False})
+        with self.assertRaisesRegex(ReservationRejected, "authoritative_serialization_unavailable"):
+            self.plan(context=unguarded, idempotency_key="walkin-attempt-0002")
+
+    def test_uncertain_write_readback_never_authorizes_blind_duplicate(self):
+        plan = self.plan()
+        self.assertEqual(reconcile_check_in_readback(plan, self.hotel, context=self.context),
+                         "rows_absent_retry_only_under_held_guard")
+        self.hotel["stays"].append(dict(plan.stay_record))
+        self.hotel["stay_guests"].extend(dict(row) for row in plan.occupant_records)
+        self.assertEqual(reconcile_check_in_readback(plan, self.hotel, context=self.context),
+                         "expected_rows_observed_do_not_repeat")
+        self.hotel["stay_guests"].clear()
+        self.assertEqual(reconcile_check_in_readback(plan, self.hotel, context=self.context),
+                         "invalid_readback_manual_reconciliation")
 
 
 if __name__ == "__main__":
