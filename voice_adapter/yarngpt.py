@@ -58,7 +58,7 @@ def _provider_status(status, headers=None):
 
 
 class YarnConversationClient:
-    def __init__(self, api_key, timeout_seconds=20, opener=None, chunk_size=8192):
+    def __init__(self, api_key, timeout_seconds=20, opener=None, chunk_size=2048):
         if not isinstance(api_key, str) or not api_key.strip():
             raise ValueError("yarngpt_api_key_required")
         if timeout_seconds <= 0 or chunk_size <= 0:
@@ -115,7 +115,7 @@ class YarnConversationClient:
 class PcmAudioStream:
     """Closeable stream. WSGI iterator close propagates client cancellation."""
 
-    def __init__(self, response, source_rate, target_rate, chunk_size=8192):
+    def __init__(self, response, source_rate, target_rate, chunk_size=2048):
         self._response = response
         self._resampler = LinearPcmResampler(source_rate, target_rate)
         self._chunk_size = chunk_size
@@ -145,12 +145,12 @@ class PcmAudioStream:
         except (TimeoutError, socket.timeout):
             self.close()
             raise ProviderError("provider_timeout", status=504) from None
-        except Exception:
-            self.close()
-            raise ProviderError("provider_stream_interrupted", status=502) from None
         except PcmFormatError:
             self.close()
             raise ProviderError("provider_audio_malformed", status=502) from None
+        except Exception:
+            self.close()
+            raise ProviderError("provider_stream_interrupted", status=502) from None
 
     def close(self):
         if not self._closed:
