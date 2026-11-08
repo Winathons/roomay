@@ -246,6 +246,47 @@ class GuestActionGatewayTests(unittest.TestCase):
         record, _ = self.authority.resolve_for_action(self.token)
         self.assertEqual(record.pending["handle"], first["proposal"]["handle"])
 
+    def test_replayed_old_message_cannot_reoffer_superseded_confirmation(self):
+        first = self.action(
+            "message", interaction_id="old-event",
+            text="The AC is faulty in room 205.",
+        )
+        old_handle = first["proposal"]["handle"]
+        second = self.action(
+            "message", interaction_id="new-event",
+            text="Please bring towels to room 205.",
+        )
+        newer_handle = second["proposal"]["handle"]
+        self.assertNotEqual(old_handle, newer_handle)
+
+        replay = self.action(
+            "message", interaction_id="old-event",
+            text="The AC is faulty in room 205.",
+        )
+        self.assertEqual(replay["state"], "confirmation_expired")
+        self.assertIsNone(replay["proposal"])
+        self.assertFalse(replay["submitted"])
+        self.assertFalse(replay["persisted"])
+        with self.assertRaises(GuestActionError):
+            self.action("confirm", confirmation_handle=old_handle)
+
+        confirmed = self.action("confirm", confirmation_handle=newer_handle)
+        self.assertEqual(confirmed["state"], "prepared")
+
+    def test_replay_after_confirmation_has_no_live_confirmation_handle(self):
+        first = self.action(
+            "message", interaction_id="confirm-event",
+            text="The AC is faulty in room 205.",
+        )
+        handle = first["proposal"]["handle"]
+        self.action("confirm", confirmation_handle=handle)
+        replay = self.action(
+            "message", interaction_id="confirm-event",
+            text="The AC is faulty in room 205.",
+        )
+        self.assertEqual(replay["state"], "confirmation_expired")
+        self.assertIsNone(replay["proposal"])
+
     def test_interaction_id_cannot_be_reused_for_different_message(self):
         self.action("message", interaction_id="event-fixed", text="AC broken in room 205")
         with self.assertRaises(GuestActionError) as error:
