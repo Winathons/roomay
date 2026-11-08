@@ -300,9 +300,13 @@ class GuestActionGatewayTests(unittest.TestCase):
             self.action(
                 "message", interaction_id=f"bounded-event-{index}",
                 text=f"AC issue update {index} in room 205")
-        self.assertEqual(self.action(
+        self.assertIsNotNone(first["proposal"])
+        replay = self.action(
             "message", interaction_id="bounded-event-0",
-            text="AC broken in room 205"), first)
+            text="AC broken in room 205")
+        self.assertEqual(replay["state"], "confirmation_expired")
+        self.assertIsNone(replay["proposal"])
+        self.assertFalse(replay["submitted"])
         with self.assertRaises(GuestActionError) as error:
             self.action(
                 "message", interaction_id="bounded-event-overflow",
