@@ -20,7 +20,7 @@ transaction, or successful save.
 | Guest service request | **PASS — offline command plan** | `create_request` verifies the guest against the active stay and creates a received plumbing request routed to Maintenance. | The request and its audit event are pending plans, not persisted records. Request text is synthetic. |
 | Department routing and status transitions | **PASS — offline command plans** | The test routes to Maintenance and prepares Received → Assigned → Acknowledged → In Progress → Resolved. It checks each proposed audit event and uses test-local state for the next transition. | Test-local state is not the Workpeg write/reconciliation path. Events remain `pending`; no department permissions or audit persistence were verified. |
 | Maintenance block | **PASS — pure eligibility rule** | The candidate room is eligible before a synthetic block is added and confirmation is refused after the active overlapping block is added. | No hosted block or reservation was created or changed. |
-| Checkout and housekeeping handoff | **NOT IMPLEMENTED** | The schema and snapshot validator can represent and validate a checked-out stay and housekeeping state. | There is no checkout command or operational housekeeping handoff in the current domain API. This workflow is not simulated as a supported operation. |
+| Checkout and housekeeping handoff | **PASS — offline command plans only (WOR-54)** | `prepare_checkout` plans a physical checkout, remaining occupant departures, and a separate Dirty-room update. Housekeeping transition plans enforce role, order, occupancy, maintenance-block, and unresolved maintenance-request gates. A copied snapshot confirms checkout removes physical occupancy while leaving the room Dirty. | Plans remain `persisted=False`; authorization, serialization, audit/idempotency storage, atomic multi-row writes, and hosted read-back are not verified. See [WOR-54 gates](wor-12-checkout-housekeeping-gates.md). |
 
 ## Adversarial regression coverage
 
@@ -41,6 +41,15 @@ The new cross-workflow suite is `tests/test_hotel_workflow.py`:
 - `test_check_in_plan_readback_is_not_a_persistence_claim` exercises the
   existing read-back classifier and confirms that its absent-row result remains
   a guarded retry classification, not a saved stay.
+- `test_checkout_changes_physical_occupancy_only_in_test_copy_and_leaves_room_dirty`
+  applies the unpersisted checkout plan to an isolated copy and verifies the
+  source fixture remains checked in and Ready.
+
+`tests/test_checkout_housekeeping.py` covers checkout scope, actor roles,
+trusted-time/timezone agreement, occupants, deterministic idempotency,
+read-back classification, housekeeping roles and transition order, active
+occupancy, disabled rooms, maintenance blocks, unresolved maintenance requests,
+and operations that must not release a block.
 
 Existing focused suites continue to cover detailed validation and negative
 cases in `tests/test_hotel.py`, `tests/test_reservation_commands.py`,
@@ -76,9 +85,10 @@ adapter's present fail-closed behavior, not a room-transfer implementation.
 - **NOT IMPLEMENTED — service persistence:** Request rows and audit events need
   an authorized adapter that persists and reads back both sides of each change,
   with idempotency, serialization, and manual reconciliation for partial writes.
-- **NOT IMPLEMENTED — checkout and handoff:** Define and implement an authorized
-  checkout operation, occupant departure/audit treatment, and housekeeping handoff
-  before claiming this workflow.
+- **HOSTED BLOCKED — checkout and handoff:** Offline plans now exist under
+  WOR-54, but a trusted writer, durable idempotency/audit record, atomic or
+  recoverable multi-row update, server authorization, and hosted read-back are
+  not implemented or verified. No real checkout/cleaning action is enabled.
 - **NOT IMPLEMENTED — room transfers (WOR-12):** The current adapter requires a
   request's historical `room_id` to equal the stay's current room and therefore
   fails closed after a hypothetical room change. Do not rewrite old request
@@ -114,8 +124,10 @@ development business with fictional records:
 7. Persist a guest request and each department transition with corresponding
    audit events; test duplicate submission, failed writes, cross-guest access,
    and fresh-session/reload behavior.
-8. Implement and separately verify checkout/housekeeping handoff before marking
-   that step complete. Do not mark WOR-23 done from this offline evidence.
+8. Implement and separately verify the Workpeg checkout/housekeeping writer,
+   multi-row read-back, and authorization gates described in
+   `docs/wor-12-checkout-housekeeping-gates.md`. Do not mark WOR-23 done from
+   this offline evidence.
 
 No hosted verification, table provisioning, customer data, or Workpeg permission
 change was performed for WOR-50.
