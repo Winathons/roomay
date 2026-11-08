@@ -77,7 +77,16 @@ a customer or production business. Do not use or generate WORKPEG_PK.
 3. After separately approved, verify a clean worktree. With the pinned SDK
    0.152.0, use the reviewed dev-install command from the repo root:
 
-       & ..\.venv\Scripts\workpeg.exe ui serve ui/dev_table_setup.py --fake-cloud
+       & "..\.venv\Scripts\python.exe" "tools\workpeg_serve_compat.py" "ui/dev_table_setup.py" --fake-cloud
+
+   On the owner's Windows/Python 3.13 machine, invoke the reviewed MIME
+   compatibility launcher rather than calling `workpeg ui serve` directly;
+   the direct server previously delivered JavaScript as `text/plain`. Confirm
+   `app.js` and `workpeg-runtime.js` respond with `Content-Type:
+   text/javascript` and `X-Content-Type-Options: nosniff` in Chrome before any
+   authenticated inspection. This exact dev-table-setup source-file launch
+   has **not** been browser-verified yet. The page contains a live Create
+   action: do not click it without separate explicit owner approval.
 
    **Correction for the installed 0.152.0 SDK:** do not set
    WORKPEG_BIND_HOST and do not pass --peg-namespace with --fake-cloud. The
