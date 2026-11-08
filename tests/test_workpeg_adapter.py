@@ -207,6 +207,46 @@ class SnapshotAndWriteContractTests(unittest.TestCase):
         with self.assertRaisesRegex(AdapterError, "invalid_service_request"):
             normalize_snapshot(BUSINESS_ID, broken)
 
+    def test_historical_request_room_is_rejected_when_current_stay_room_differs(self):
+        hotel = synthetic_hotel()
+        plan = service_request_plan(hotel)
+        historical_room_id = plan["target_request"]["room_id"]
+        current_room_id = next(
+            room["entity_id"] for room in hotel["rooms"] if room["number"] == "204"
+        )
+        self.assertNotEqual(current_room_id, historical_room_id)
+
+        # Model only a hypothetical snapshot after a room change. There is no
+        # room-transfer operation here, and the request's historical room is
+        # intentionally left unchanged.
+        moved_reservation_id = hotel["stays"][0]["reservation_id"]
+        moved_stay_id = hotel["stays"][0]["entity_id"]
+        rows = remote_snapshot()
+        reservation_row = next(
+            row for row in rows["reservations"]
+            if row["data"]["entity_id"] == moved_reservation_id
+        )
+        stay_row = next(
+            row for row in rows["stays"]
+            if row["data"]["entity_id"] == moved_stay_id
+        )
+        reservation_row["data"]["room_id"] = current_room_id
+        stay_row["data"]["room_id"] = current_room_id
+
+        hotel_only_rows = deepcopy(rows)
+        hotel_only_rows["service_requests"] = []
+        hotel_only_rows["service_request_audit"] = []
+        moved = normalize_snapshot(BUSINESS_ID, hotel_only_rows)
+        self.assertEqual(moved["hotel"]["stays"][0]["room_id"], current_room_id)
+        self.assertEqual(plan["target_request"]["room_id"], historical_room_id)
+
+        rows["service_requests"] = [remote_row(
+            "service_requests", plan["target_request"], 90)]
+        rows["service_request_audit"] = [remote_row(
+            "service_request_audit", plan["event"], 91)]
+        with self.assertRaisesRegex(AdapterError, "invalid_service_request"):
+            normalize_snapshot(BUSINESS_ID, rows)
+
     def test_orphan_audit_event_is_rejected(self):
         rows = remote_snapshot()
         plan = service_request_plan(synthetic_hotel())
