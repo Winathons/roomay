@@ -4,6 +4,9 @@
 document and `domain/schema_provisioning.py` produce reviewable plans and
 validate mock/read-back responses. They do not call Workpeg or expose a
 provisioning route. Workpeg remains the only intended operational database.
+The narrower first-table, owner-operated procedure is documented in
+[WOR-29 Phase B](wor-29-first-table-test.md); it is a separate dev-only
+artifact and does not alter the release router.
 
 ## Current evidence and remaining gate
 

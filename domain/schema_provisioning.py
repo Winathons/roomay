@@ -97,6 +97,55 @@ def prepare_provisioning_plan(*, target_business_id, active_business_id,
     }
 
 
+def prepare_first_room_types_creation(*, target_business_id,
+                                      active_business_id, peg_namespace,
+                                      tables_by_namespace):
+    """Propose only the first room_types table after a complete preflight.
+
+    This is still a proposal, not an authorization or a Workpeg write. The
+    signed-in owner must verify the business and approve a fresh manual create.
+    """
+    plan = prepare_provisioning_plan(
+        target_business_id=target_business_id,
+        active_business_id=active_business_id,
+        peg_namespace=peg_namespace,
+        tables_by_namespace=tables_by_namespace,
+    )
+    if plan["state"] == "blocked":
+        return {
+            "state": "blocked",
+            "errors": plan["errors"],
+            "payload": None,
+            "writes_authorized": False,
+        }
+    if "room_types" in plan["existing_table_uuids"]:
+        return {
+            "state": "already_exists",
+            "table_uuid": plan["existing_table_uuids"]["room_types"],
+            "errors": [],
+            "payload": None,
+            "writes_authorized": False,
+        }
+    payload = next(
+        (item["payload"] for item in plan["create_payloads"]
+         if item["table_key"] == "room_types"),
+        None,
+    )
+    if payload is None:
+        return {
+            "state": "blocked",
+            "errors": ["room_types_create_proposal_missing"],
+            "payload": None,
+            "writes_authorized": False,
+        }
+    return {
+        "state": "ready_for_owner_review",
+        "errors": [],
+        "payload": payload,
+        "writes_authorized": False,
+    }
+
+
 def verify_created_table(table_key, create_response, *, direct_readback,
                          tables_by_namespace):
     """Require complete matching create, get_table and fresh list responses.

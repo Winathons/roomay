@@ -5,7 +5,8 @@ from uuid import NAMESPACE_URL, uuid5
 
 from domain.schema_provisioning import (
     ProvisioningError, classify_test_record, first_fictional_room_records,
-    prepare_provisioning_plan, verify_created_table,
+    prepare_first_room_types_creation, prepare_provisioning_plan,
+    verify_created_table,
 )
 from domain.workpeg_adapter import contract_by_key
 
@@ -69,6 +70,39 @@ class MockWorkpeg:
 
 
 class ProvisioningPlanTests(unittest.TestCase):
+    def test_first_table_plan_proposes_only_room_types_and_never_authorizes_write(self):
+        inventory = {"roomay_hotel_v1": [], "roomay_requests_v1": []}
+        result = prepare_first_room_types_creation(
+            **context(), tables_by_namespace=inventory)
+        self.assertEqual(result["state"], "ready_for_owner_review")
+        self.assertEqual(result["payload"], contract_by_key()["room_types"])
+        self.assertEqual(result["payload"]["name"], "room_types")
+        self.assertEqual(result["payload"]["namespace"], "roomay_hotel_v1")
+        self.assertFalse(result["writes_authorized"])
+
+    def test_first_table_plan_blocks_incomplete_context_and_duplicate_schema(self):
+        with self.assertRaises(ProvisioningError):
+            prepare_first_room_types_creation(
+                **context(peg_namespace="wrong"),
+                tables_by_namespace={"roomay_hotel_v1": [], "roomay_requests_v1": []})
+        inventory = {"roomay_hotel_v1": [table_response("room_types"),
+                                         table_response("room_types")],
+                     "roomay_requests_v1": []}
+        result = prepare_first_room_types_creation(
+            **context(), tables_by_namespace=inventory)
+        self.assertEqual(result["state"], "blocked")
+        self.assertIsNone(result["payload"])
+        self.assertFalse(result["writes_authorized"])
+
+    def test_first_table_plan_reports_valid_existing_table_without_create(self):
+        inventory = complete_inventory()
+        result = prepare_first_room_types_creation(
+            **context(), tables_by_namespace=inventory)
+        self.assertEqual(result["state"], "already_exists")
+        self.assertEqual(result["table_uuid"], table_response("room_types")["uuid"])
+        self.assertIsNone(result["payload"])
+        self.assertFalse(result["writes_authorized"])
+
     def test_exact_nine_contracts_are_owner_only_and_namespace_scoped(self):
         plan = prepare_provisioning_plan(
             **context(), tables_by_namespace=complete_inventory())
