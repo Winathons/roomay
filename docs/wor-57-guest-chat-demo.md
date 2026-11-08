@@ -26,6 +26,8 @@ treated as proof of identity or access.
 
 Try these messages:
 
+- `Hi` (greeting, no room or ticket requested)
+- `205` then `Hi are you here` then `The AC is not cooling` (room context is preserved, greeting is not a ticket)
 - `Abeg, my AC no dey cool for room 205.`
 - `The air conditioner in room 205 is not cooling.`
 - `Please bring extra towels to room 205.`
