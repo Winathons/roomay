@@ -34,6 +34,23 @@ DEMO_TIMESTAMP = "2026-11-06T12:00:00+01:00"
 _ROOM_TOKEN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9-]{0,19}$")
 _ROOM_RESPONSE = re.compile(r"^(?:room\s+|rm\s+)?([A-Za-z0-9][A-Za-z0-9-]{0,19})$", re.I)
 
+# Only standalone social turns count. "Hi, the AC is broken" is still a request.
+_SOCIAL_GREETING = frozenset((
+    "hi", "hello", "hey", "hi there", "hello there", "hey there",
+    "hi are you here", "hi are you there", "are you here", "are you there",
+    "good morning", "good afternoon", "good evening", "how are you",
+))
+_SOCIAL_THANKS = frozenset(("thanks", "thank you", "thank you very much"))
+
+
+def _social_kind(text):
+    normalized = re.sub(r"\s+", " ", text.lower().strip(" \t\r\n.!?,"))
+    if normalized in _SOCIAL_GREETING:
+        return "greeting"
+    if normalized in _SOCIAL_THANKS:
+        return "thanks"
+    return None
+
 
 class DemoError(ValueError):
     def __init__(self, code, status=400):
@@ -194,6 +211,39 @@ class GuestChatDemo:
             self._append(session, "guest", text)
 
             session.revision += 1
+            social = _social_kind(text)
+            if social is not None:
+                # A greeting or thanks is not a new service request or a confirmation.
+                # Preserve an existing clarification so the guest can continue.
+                session.state = "needs_clarification" if session.clarification else "ready"
+                session.active_turn_id = None
+                if social == "thanks":
+                    reply = "You're welcome. What else can I help you with?"
+                elif session.clarification is not None:
+                    reply = "Yes, I'm here. Please tell me what you need help with."
+                else:
+                    reply = "Hello! I'm here to help. What do you need during your stay?"
+                self._append(session, "assistant", reply)
+                return self._view(session)
+
+            # Room-only statements are contextual information, not service requests.
+            # Do not claim that a guest has been authenticated by a room number.
+            if session.clarification is None:
+                standalone_room = _ROOM_RESPONSE.fullmatch(text)
+                if standalone_room is not None:
+                    session.clarification = {
+                        "kind": "problem_description",
+                        "text": "room " + standalone_room.group(1),
+                        "turn_id": str(uuid4()),
+                    }
+                    session.state = "needs_clarification"
+                    session.active_turn_id = None
+                    self._append(
+                        session, "assistant",
+                        "What do you need help with in that room? Please describe the issue.",
+                    )
+                    return self._view(session)
+
             if session.clarification is not None:
                 previous = session.clarification["text"]
                 reply = (self._room_reply(text)
