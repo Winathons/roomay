@@ -1,6 +1,6 @@
 # WOR-28: owner-operated development persistence test
 
-The native UI compiles with SDK **0.149.1**. Offline tests exercise its generated
+The native UI compiles with SDK **0.152.0**. Offline tests exercise its generated
 JavaScript with mocked table helpers. **No authenticated Workpeg request or real
 persistence test was performed. WOR-28 and WOR-6 remain In Progress.**
 

@@ -5,12 +5,19 @@ const vm = require('node:vm');
 const assert = require('node:assert/strict');
 
 globalThis.window = globalThis;
-globalThis.addEventListener = () => {};
+let loadHandler;
+globalThis.addEventListener = (event, handler) => { if (event === 'load') loadHandler = handler; };
 globalThis.fetch = () => { throw new Error('NETWORK FORBIDDEN IN TESTS'); };
 const output = process.argv[2];
 vm.runInThisContext(fs.readFileSync(path.join(output, 'workpeg-runtime.js'), 'utf8'));
-vm.runInThisContext(fs.readFileSync(path.join(output, 'app.js'), 'utf8') +
-  '\nglobalThis.HotelDataTest = HotelData;');
+let registeredRoutes;
+Workpeg.router = routes => { registeredRoutes = routes; };
+vm.runInThisContext(fs.readFileSync(path.join(output, 'app.js'), 'utf8'));
+assert.equal(typeof loadHandler, 'function');
+loadHandler();
+assert.ok(Array.isArray(registeredRoutes), 'generated router registers its compiled routes');
+const HotelDataTest = registeredRoutes.find(route => route.path === '/b/[business_id]/reception').app;
+assert.equal(typeof HotelDataTest, 'function');
 Workpeg.stateHandler = () => ({});
 Workpeg.setInterval = () => {};
 
@@ -24,10 +31,22 @@ const uuid = number => `00000000-0000-4000-8000-${String(number).padStart(12, '0
 const tableId = name => uuid(allNames.indexOf(name) + 1);
 const namespace = name => hotelNames.includes(name) ? 'roomay_hotel_v1' : 'roomay_requests_v1';
 const schemaApp = new HotelDataTest();
-const table = name => ({uuid: tableId(name), name, namespace: namespace(name), permission: '700',
-  columns: schemaApp.allowed_fields(name).map(id => ({
-    id, type: schemaApp.field_type(id), required: !schemaApp.optional_fields(name).includes(id),
-  }))});
+const table = name => {
+  const ns = namespace(name);
+  const columns = schemaApp.allowed_fields(name).map((id, index) => {
+    const choices = schemaApp.field_choices(name, id).map(value => ({ref: value, tag: value}));
+    const column = {
+      id, name: id, type: schemaApp.field_type(id),
+      position: id === 'business_id' ? 500 : index * 1000,
+      required: !schemaApp.optional_fields(name).includes(id),
+      metadata: schemaApp.field_metadata(id),
+    };
+    if (choices.length) column.options = {choices};
+    return column;
+  });
+  return {uuid: tableId(name), name, namespace: ns, permission: '700',
+    metadata: schemaApp.expected_table_metadata(ns), columns};
+};
 const row = (name, number, data) => ({id: number, fingerprint: uuid(5000 + number),
   data: {business_id: business, ...data}});
 const roomType = number => row('room_types', number, {
@@ -84,7 +103,7 @@ const test = (name, fn) => cases.push([name, fn]);
 
 test('mount loads the read-only snapshot and never provisions, seeds or writes', async () => {
   const app = setup(); await app.on_mount(); app.build();
-  assert.equal(calls.filter(call => call[0] === 'tables').length, 2);
+  assert.equal(calls.filter(call => call[0] === 'tables').length, 2, app.state.failure);
   assert.equal(calls.filter(call => call[0] === 'rows').length, 9);
 });
 
@@ -129,13 +148,17 @@ test('all plain-list pages are fetched with limit and offset', async () => {
 });
 
 test('missing, duplicate and unsafe tables fail closed', async () => {
-  for (const mode of ['missing', 'duplicate', 'permission']) {
+  for (const mode of ['missing', 'duplicate', 'permission', 'position', 'choices', 'metadata', 'table_metadata']) {
     const app = setup();
     Workpeg.wpGetTables = async ns => {
       let tables = allNames.filter(name => namespace(name) === ns).map(table);
       if (ns === 'roomay_hotel_v1' && mode === 'missing') tables = tables.filter(item => item.name !== 'rooms');
       if (ns === 'roomay_hotel_v1' && mode === 'duplicate') tables.push(table('rooms'));
       if (ns === 'roomay_hotel_v1' && mode === 'permission') tables.find(item => item.name === 'rooms').permission = '777';
+      if (ns === 'roomay_hotel_v1' && mode === 'position') tables.find(item => item.name === 'rooms').columns[1].position = 444;
+      if (ns === 'roomay_hotel_v1' && mode === 'choices') tables.find(item => item.name === 'rooms').columns[5].options.choices.pop();
+      if (ns === 'roomay_hotel_v1' && mode === 'metadata') tables.find(item => item.name === 'rooms').columns[0].metadata = {type: 'date'};
+      if (ns === 'roomay_hotel_v1' && mode === 'table_metadata') tables.find(item => item.name === 'rooms').metadata.extra.contract = 'wrong';
       return tables;
     };
     await app.load_snapshot(); assert.ok(app.state.failure); assert.equal(app.state.rooms.length, 0);

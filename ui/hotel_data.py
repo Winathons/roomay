@@ -1,6 +1,6 @@
 """Authenticated, read-only receptionist application over Workpeg tables.
 
-The UI compiles with Workpeg 0.149.1. It never provisions, seeds, or mutates
+The UI compiles with Workpeg 0.152.0. It never provisions, seeds, or mutates
 records and fails closed when the complete owner-only table contract cannot be
 read. Browser-local ``dates.today()`` is exposed rather than mislabelled as a
 persisted hotel timezone.
@@ -179,6 +179,47 @@ class HotelData(App):
             return "mutable_select"
         return "text"
 
+    def field_metadata(self, field):
+        if field in ["arrival", "departure", "start", "end"]:
+            return {"type": "date"}
+        if field in ["checked_in_at", "checked_out_at", "joined_at", "left_at", "created_at", "updated_at", "received_at", "acknowledge_by", "due_at", "assigned_at", "acknowledged_at", "in_progress_at", "resolved_at", "reopened_at", "cancelled_at", "escalated_at", "occurred_at"]:
+            return {"type": "datetime"}
+        return {}
+
+    def field_choices(self, table_name, field):
+        if table_name == "rooms" and field == "housekeeping":
+            return ["ready", "dirty", "cleaning", "inspection"]
+        if table_name == "reservations" and field == "source":
+            return ["advance", "walk_in"]
+        if table_name == "reservations" and field == "status":
+            return ["pending_confirmation", "confirmed", "cancelled"]
+        if table_name == "stays" and field == "status":
+            return ["checked_in", "checked_out"]
+        if table_name == "room_blocks" and field == "status":
+            return ["active", "released"]
+        if field == "origin":
+            return ["guest", "reception_desk", "phone", "staff"]
+        if field == "category":
+            return ["unknown", "extra_towels", "linen", "room_cleaning", "toiletries", "plumbing", "electrical", "air_conditioning", "room_equipment", "room_service", "dining", "minibar", "transport", "wake_up_call", "billing_question", "general_help"]
+        if field == "department" or field == "actor_department":
+            return ["housekeeping", "maintenance", "food_and_beverage", "reception"]
+        if field == "urgency":
+            return ["low", "normal", "high", "urgent"]
+        if field == "status" or field == "to_status":
+            return ["received", "assigned", "acknowledged", "in_progress", "resolved", "reopened", "cancelled", "escalated"]
+        if field == "event_type":
+            return ["created", "status_changed", "triaged"]
+        if field == "actor_kind":
+            return ["guest", "staff"]
+        if field == "commit_state":
+            return ["pending", "committed"]
+        return []
+
+    def expected_table_metadata(self, namespace):
+        if namespace == "roomay_hotel_v1":
+            return {"extra": {"contract": "roomay.hotel.v1"}}
+        return {"extra": {"contract": "roomay.service_requests.v1"}}
+
     async def find_tables(self, namespace):
         tables = await workpeg.get_tables(namespace)
         if self.timed_out:
@@ -202,28 +243,65 @@ class HotelData(App):
             if table.get("namespace") != namespace or str(table.get("permission")) != "700":
                 self.fail("Unsafe namespace or permissions for table: " + name + ".")
                 return None
+            table_metadata = table.get("metadata", {})
+            extra_metadata = table_metadata.get("extra", {})
+            if (len(table_metadata) != 1 or len(extra_metadata) != 1
+                    or extra_metadata.get("contract") != self.expected_table_metadata(namespace)["extra"]["contract"]):
+                self.fail("Table contract metadata mismatch for: " + name + ".")
+                return None
             table_id = table.get("uuid", "")
             if not self.valid_uuid(table_id) or not isinstance(table.get("columns"), list):
                 self.fail("Malformed table identifier or columns for: " + name + ".")
                 return None
             expected_fields = self.allowed_fields(name)
             optional_fields = self.optional_fields(name)
+            seen_fields = []
             if len(table["columns"]) != len(expected_fields):
                 self.fail("Column count mismatch for: " + name + ".")
                 return None
             business_columns = 0
             for column in table["columns"]:
                 field = column.get("id", "")
-                if field not in expected_fields or column.get("type") != self.field_type(field):
+                if (field not in expected_fields or field in seen_fields
+                        or column.get("name") != field
+                        or column.get("type") != self.field_type(field)):
                     self.fail("Column identity or type mismatch for: " + name + ".")
                     return None
+                seen_fields.append(field)
                 if column.get("required", False) != (field not in optional_fields):
                     self.fail("Required-column mismatch for: " + name + ".")
                     return None
+                expected_position = 500 if field == "business_id" else expected_fields.index(field) * 1000
+                if column.get("position") != expected_position:
+                    self.fail("Column position mismatch for: " + name + ".")
+                    return None
+                metadata = column.get("metadata", {})
+                expected_metadata_type = self.field_metadata(field).get("type", "")
+                if (len(metadata) != len(self.field_metadata(field))
+                        or metadata.get("type", "") != expected_metadata_type):
+                    self.fail("Column metadata mismatch for: " + name + ".")
+                    return None
+                expected_choices = self.field_choices(name, field)
+                options = column.get("options", {})
+                choices = options.get("choices", [])
+                if len(options) != (1 if expected_choices else 0):
+                    self.fail("Column options mismatch for: " + name + ".")
+                    return None
+                if len(choices) != len(expected_choices):
+                    self.fail("Column choices mismatch for: " + name + ".")
+                    return None
+                for index in range(len(expected_choices)):
+                    if (choices[index].get("ref") != expected_choices[index]
+                            or choices[index].get("tag") != expected_choices[index]):
+                        self.fail("Column choices mismatch for: " + name + ".")
+                        return None
                 if column.get("id") == "business_id" and column.get("type") == "uuid" and column.get("required"):
                     business_columns += 1
             if business_columns != 1:
                 self.fail("Business identity column mismatch for: " + name + ".")
+                return None
+            if len(seen_fields) != len(expected_fields):
+                self.fail("Column set mismatch for: " + name + ".")
                 return None
             found[name] = table_id
         return found

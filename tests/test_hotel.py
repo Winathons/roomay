@@ -228,7 +228,7 @@ class HotelRules(unittest.TestCase):
     def test_schema_uses_documented_types_and_choices(self):
         tables = proposed_tables()
         for table in tables:
-            self.assertEqual(table["permission"], 700)
+            self.assertEqual(table["permission"], "700")
             for column in table["columns"]:
                 self.assertIn(column["type"], {"text", "number", "uuid", "boolean", "datetime", "mutable_select"})
         tables[0]["columns"][0]["name"] = "mutated"
