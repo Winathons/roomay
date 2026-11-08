@@ -5,11 +5,12 @@ This is a **development runbook**, not evidence that a live Workpeg connection i
 ## Current confirmed state (2026-11-06)
 
 - GitHub: `Winathons/roomay`, default branch `main`.
-- Local developer verified Python 3.13.5, Workpeg SDK `0.149.1`, `workpeg ui build ui/`, and `workpeg doctor . --offline` with no issues.
+- Local developer verified Python 3.13.5 and Workpeg SDK `0.152.0`; UI build and offline doctor pass in the pinned environment.
 - Starter page displayed `Hello from roomay` at `localhost:8081`.
 - **Approved:** Developer portal shows the `roomay` Peg registered and **Approved**; the owner confirms it is associated with the separate `Roomay AI` development business.
 - **Workpeg support-confirmed:** a Peg UI using authenticated staff-session table helpers can test data **locally with `--fake-cloud` and `--peg-namespace roomay` without a published/installed release**. Function/save-hook publishing is a separate workflow.
-- **Not yet verified:** actual authenticated Workpeg table operations, remote table creation, persistent row writes, multi-user permissions or Peg publishing. **No Releases Yet** does not block this UI-only smoke test.
+- **Owner-reported:** authenticated receptionist table discovery in Roomay AI now returns HTTP 200 for `roomay_hotel_v1`; `room_types` is reported missing or unreadable and no provisioning was attempted.
+- **Not yet verified:** table creation, row create/update, persisted read-back after reload, or multi-user permissions. No release is published and this task does not perform hosted writes.
 
 ## 1. Separate development business (owner action)
 

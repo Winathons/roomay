@@ -26,6 +26,7 @@ def remote_table(key):
         "name": contract["name"],
         "namespace": contract["namespace"],
         "permission": "700",
+        "metadata": deepcopy(contract.get("metadata", {})),
         "columns": deepcopy(contract["columns"]),
     }
 
@@ -118,11 +119,21 @@ class ContractTests(unittest.TestCase):
             name = contract["name"]
             fields = transport.allowed_fields(name)
             self.assertEqual(fields, [column["id"] for column in contract["columns"]])
+            self.assertEqual(transport.expected_table_metadata(contract["namespace"]),
+                             contract["metadata"])
             optional = transport.optional_fields(name)
-            for column in contract["columns"]:
+            for index, column in enumerate(contract["columns"]):
                 self.assertEqual(transport.field_type(column["id"]), column["type"])
                 self.assertEqual(column["id"] in optional,
                                  not column.get("required", False))
+                self.assertEqual(transport.field_metadata(column["id"]),
+                                 column.get("metadata", {}))
+                expected_choices = [choice["ref"] for choice in
+                                    column.get("options", {}).get("choices", [])]
+                self.assertEqual(transport.field_choices(name, column["id"]),
+                                 expected_choices)
+                expected_position = 500 if column["id"] == "business_id" else index * 1000
+                self.assertEqual(column["position"], expected_position)
 
 
 class PaginationAndRowTests(unittest.TestCase):

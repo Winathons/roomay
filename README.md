@@ -4,7 +4,7 @@
 
 **Repository:** [Winathons/roomay](https://github.com/Winathons/roomay) · **Work board:** [Roomay in Linear](https://linear.app/workpeg/project/roomay-workpeg-hospitality-hackathon-7b7a7ce4b3b9) · **SDK:** [Workpeg documentation](https://developers.workpeg.com/docs/latest/)
 
-> **Project status (November 6, 2026):** The `roomay` Peg registration has been **approved** in the Workpeg developer portal and is associated with the separate Roomay AI development business. **No Peg release is published yet**, and live Workpeg table persistence and permissions have **not yet been verified**. The existing UI scaffold serves locally; the hotel domain model, fictional data and rules have **25 passing offline tests**. Do not confuse the local UI or a passing build with a deployed, data-connected hotel system.
+> **Project status (November 8, 2026):** The `roomay` Peg registration is approved and associated with the separate Roomay AI development business. The owner reports that authenticated table discovery now returns HTTP 200 for `roomay_hotel_v1`, but the required `room_types` table is missing or unreadable. **No table provisioning, persistent row writes, or permissions have been verified**, and no Peg release is published. Do not confuse successful discovery or a passing build with verified operational persistence.
 
 ## Start here — first-time team setup
 
@@ -25,7 +25,7 @@ seeds records, and enables no booking, check-in, assignment, or request writes.
 The former demo, diagnostic smoke, and raw adapter routes are not registered in
 the release router. Their source remains isolated for offline contract testing.
 See [WOR-34 implementation notes](docs/wor-34.md). Live installation,
-authentication, and persistence remain unverified because of the namespace blocker.
+authentication and persistence remain unverified; table discovery alone does not establish either.
 
 ### Step 1 — Clone the existing repository
 
@@ -85,7 +85,7 @@ workpeg ui serve ui/
 
 Open the **local address printed in your terminal** (the original scaffold used `http://localhost:8081/`, but the port may differ). The current starter interface may still show **“Hello from roomay”** while the real receptionist UI is being developed.
 
-Leave the terminal open while you use the browser. `Ctrl+C` stops the server. Edits to supported UI Python files usually trigger a rebuild and browser refresh. The receptionist route has an offline-verified Workpeg transport, but the live `roomay` Peg namespace is still blocked; a successful build is not proof of authenticated persistence.
+Leave the terminal open while you use the browser. `Ctrl+C` stops the server. Edits to supported UI Python files usually trigger a rebuild and browser refresh. The receptionist route has an offline-verified Workpeg transport, and the owner reports successful authenticated table discovery; a successful build or table listing is not proof of persistent hotel records.
 
 ### Step 4 — Run the offline tests and build
 
