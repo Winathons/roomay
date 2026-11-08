@@ -22,6 +22,44 @@ class GuestChatDemoFlowTests(unittest.TestCase):
     def send(self, text, **kwargs):
         return self.demo.send_message(self.session_id, text, **kwargs)
 
+    def test_greeting_is_not_a_hotel_request(self):
+        for greeting in ("Hi", "Hi are you here", "Hello!", "Good evening", "Thanks"):
+            with self.subTest(greeting=greeting):
+                result = self.send(greeting)
+                self.assertEqual(result["state"], "ready")
+                self.assertIsNone(result["pending"])
+                self.assertFalse(result["submitted"])
+                self.assertFalse(result["persisted"])
+                self.assertNotIn("Which room", result["messages"][-1]["text"])
+        self.assertEqual(self.demo._sessions[self.session_id].scope.existing_requests, [])
+
+    def test_room_only_then_greeting_preserves_missing_issue_context(self):
+        self.assertEqual(self.send("Hi")["state"], "ready")
+        room = self.send("205")
+        self.assertEqual(room["state"], "needs_clarification")
+        self.assertIn("describe the issue", room["messages"][-1]["text"])
+        greeting = self.send("Hi are you here")
+        self.assertEqual(greeting["state"], "needs_clarification")
+        self.assertIsNone(greeting["pending"])
+        issue = self.send("The AC is not cooling")
+        self.assertEqual(issue["state"], "awaiting_confirmation")
+        self.assertEqual(issue["pending"]["summary"]["department"], "Maintenance")
+        self.assertIn("room 205", issue["pending"]["summary"]["description"])
+        self.assertNotIn("Hi are you here", issue["pending"]["summary"]["description"])
+        self.assertIn("for the Maintenance team", issue["messages"][-1]["text"])
+
+    def test_natural_reception_triage_copy_and_no_greeting_ticket(self):
+        result = self.send("There is a loud vibration in room 205.")
+        self.assertEqual(result["state"], "awaiting_confirmation")
+        self.assertIn("for Reception to review and triage", result["messages"][-1]["text"])
+        self.assertNotIn("for Reception will", result["messages"][-1]["text"])
+        self.assertFalse(result["submitted"])
+
+    def test_greeting_preface_does_not_hide_real_service_request(self):
+        result = self.send("Hi, my AC isn't cooling in room 205.")
+        self.assertEqual(result["state"], "awaiting_confirmation")
+        self.assertEqual(result["pending"]["summary"]["department"], "Maintenance")
+
     def test_pidgin_maintenance_request_requires_review_and_confirmation(self):
         view = self.send("Abeg, my AC no dey cool for room 205.")
         self.assertEqual(view["state"], "awaiting_confirmation")
