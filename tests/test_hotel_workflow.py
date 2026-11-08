@@ -14,6 +14,7 @@ from domain.access_control import (
     authorize_access,
     project_guest_profile,
 )
+from domain.checkout_commands import OperationContext, prepare_checkout
 from domain.fixtures import synthetic_hotel, uid
 from domain.hotel import room_eligibility, validate_snapshot
 from domain.reception import build_reception_snapshot
@@ -247,6 +248,58 @@ class HotelWorkflowTests(unittest.TestCase):
         self.assertEqual(len(self.hotel["stays"]), 2)
         self.assertEqual(len(self.hotel["stay_guests"]), 2)
         self.assertTrue(all(plan.persisted is False for plan in (request_plan, confirmation, check_in)))
+
+    def test_checkout_changes_physical_occupancy_only_in_test_copy_and_leaves_room_dirty(self):
+        hotel = synthetic_hotel()
+        original = deepcopy(hotel)
+        context = OperationContext(
+            business_id=BUSINESS_ID, snapshot_business_id=BUSINESS_ID,
+            hotel_id=HOTEL_ID, snapshot_hotel_id=HOTEL_ID,
+            actor_id=uid("workflow-checkout-reception"), actor_role="receptionist",
+            authorization_verified=True, snapshot_fresh=True,
+            serialization_guard_held=True,
+            authoritative_now="2026-11-09T10:00:00+01:00",
+        )
+        with patch("domain.checkout_commands.ZoneInfo",
+                   return_value=timezone(timedelta(hours=1))):
+            plan = prepare_checkout(
+                hotel, stay_id=uid("stay"),
+                checked_out_at="2026-11-09T09:00:00+01:00",
+                today="2026-11-09", hotel_timezone="Africa/Lagos",
+                idempotency_key="workflow-checkout-op-0001", context=context,
+            )
+
+        test_copy = deepcopy(hotel)
+        test_copy["stays"] = [
+            plan.stay_after if row["entity_id"] == plan.stay_id else row
+            for row in test_copy["stays"]
+        ]
+        test_copy["stay_guests"] = [
+            next((after for after in plan.occupants_after
+                  if after["entity_id"] == row["entity_id"]), row)
+            for row in test_copy["stay_guests"]
+        ]
+        test_copy["rooms"] = [
+            plan.room_after if row["entity_id"] == plan.room_id else row
+            for row in test_copy["rooms"]
+        ]
+        validate_snapshot(test_copy)
+        stay = next(row for row in test_copy["stays"] if row["entity_id"] == plan.stay_id)
+        room = next(row for row in test_copy["rooms"] if row["entity_id"] == plan.room_id)
+        occupant = next(row for row in test_copy["stay_guests"]
+                        if row["entity_id"] == uid("occupant"))
+        self.assertEqual(stay["status"], "checked_out")
+        self.assertEqual(occupant["left_at"], stay["checked_out_at"])
+        self.assertEqual(room["housekeeping"], "dirty")
+        self.assertFalse(any(
+            row["room_id"] == plan.room_id and row["status"] == "checked_in"
+            for row in test_copy["stays"]
+        ))
+        self.assertEqual(test_copy["reservations"], hotel["reservations"])
+        self.assertEqual(test_copy["room_blocks"], hotel["room_blocks"])
+        self.assertEqual(hotel, original)
+        self.assertEqual(hotel["stays"][0]["status"], "checked_in")
+        self.assertFalse(plan.persisted)
 
     def test_duplicate_and_overlapping_reservations_are_rejected_safely(self):
         first = self.append_pending_request(
