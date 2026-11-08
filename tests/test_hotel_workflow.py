@@ -222,6 +222,20 @@ class HotelWorkflowTests(unittest.TestCase):
             self.assertEqual(reception["metrics"]["in_house"], 2)
             self.assertEqual(reception["requests"][0]["status"], "resolved")
 
+            overdue_reception = build_reception_snapshot(
+                self.hotel, [request], today="2026-11-09",
+            )
+            overdue_room = next(
+                row for row in overdue_reception["rooms"] if row["number"] == "204"
+            )
+            self.assertEqual(overdue_room["occupancy"], "In house")
+            overdue_guest = next(
+                row for row in overdue_reception["in_house"] if row["room"] == "204"
+            )
+            self.assertEqual(overdue_guest["departure_status"], "OVERDUE")
+            self.assertEqual(overdue_reception["departures"], [])
+            self.assertEqual(check_in.stay_record["status"], "checked_in")
+
             guest_view = request_view(
                 request, guest_actor, self.staff, snapshot=self.hotel,
             )

@@ -15,7 +15,7 @@ transaction, or successful save.
 | Staff reservation confirmation | **PASS — offline plan only** | `prepare_authorized_room_confirmation` proposes the pending-to-confirmed transition when the supplied `WriteContext` passes. | Context booleans are claims, not Workpeg authorization or a concurrency lock. No reservation was saved. |
 | Room eligibility | **PASS — pure domain rule** | Same-room eligibility, assignment conflict, date overlap, occupancy, room enablement, housekeeping readiness, and active maintenance blocks use `domain.hotel` rules. | An eligibility result is advisory and does not reserve inventory. |
 | Authorized check-in | **PASS — offline plan only** | `prepare_check_in` requires confirmed assignment, valid occupants, trusted-clock claims, IANA hotel timezone, matching hotel-local operational date, and room readiness. | No trusted server clock, hosted staff authorization, or serialization guard was contacted or established. The test supplies these claims and patches the timezone lookup deterministically. |
-| Physical stay creation | **PASS — test snapshot only** | The test copies the returned stay plan into its in-memory fixture, re-validates the complete hotel snapshot, and passes it to the canonical receptionist projection, which shows the room In house. | The plan is not persisted and is not an actual check-in. |
+| Physical stay creation | **PASS — test snapshot only** | The test copies the returned stay plan into its in-memory fixture, re-validates the complete hotel snapshot, and passes it to the canonical receptionist projection, which shows the room In house. On Nov 9, after its Nov 8 scheduled departure, the checked-in stay remains In house and is labeled OVERDUE, not checked out. | The plan is not persisted and is not an actual check-in. |
 | Registered occupant association | **PASS — test snapshot only** | The stay guest references the intended guest; `validate_snapshot` and the offline guest-profile policy accept the active registered occupant. | The `AccessContext` and hotel mapping are synthetic, forgeable values; Workpeg role enforcement is not tested. |
 | Guest service request | **PASS — offline command plan** | `create_request` verifies the guest against the active stay and creates a received plumbing request routed to Maintenance. | The request and its audit event are pending plans, not persisted records. Request text is synthetic. |
 | Department routing and status transitions | **PASS — offline command plans** | The test routes to Maintenance and prepares Received → Assigned → Acknowledged → In Progress → Resolved. It checks each proposed audit event and uses test-local state for the next transition. | Test-local state is not the Workpeg write/reconciliation path. Events remain `pending`; no department permissions or audit persistence were verified. |
@@ -36,8 +36,8 @@ The new cross-workflow suite is `tests/test_hotel_workflow.py`:
   covers stale and unauthorized command context, wrong-business access, and an
   invalid Received-to-Resolved service transition.
 - `test_guest_request_to_checked_in_guest_service_lifecycle` covers duplicate
-  check-in attempts, legitimate active-occupant association, and wrong-guest
-  request access.
+  check-in attempts, legitimate active-occupant association, wrong-guest request
+  access, and continued physical occupancy after the scheduled departure date.
 - `test_check_in_plan_readback_is_not_a_persistence_claim` exercises the
   existing read-back classifier and confirms that its absent-row result remains
   a guarded retry classification, not a saved stay.
@@ -47,6 +47,13 @@ cases in `tests/test_hotel.py`, `tests/test_reservation_commands.py`,
 `tests/test_service_requests.py`, and `tests/test_access_control.py`. The
 compiled UI test suites are mocked and forbid network access; they are not
 hosted Workpeg workflow evidence.
+
+`tests/test_workpeg_adapter.py::test_historical_request_room_is_rejected_when_current_stay_room_differs`
+models a valid current hotel snapshot where the checked-in stay and its
+reservation refer to a different valid room than a prior request's original
+`room_id`. It verifies the current adapter rejects that snapshot as
+`invalid_service_request`. The prior request remains unchanged. This is the
+adapter's present fail-closed behavior, not a room-transfer implementation.
 
 ## Implementation gaps and hosted blockers
 
@@ -72,6 +79,12 @@ hosted Workpeg workflow evidence.
 - **NOT IMPLEMENTED — checkout and handoff:** Define and implement an authorized
   checkout operation, occupant departure/audit treatment, and housekeeping handoff
   before claiming this workflow.
+- **NOT IMPLEMENTED — room transfers (WOR-12):** The current adapter requires a
+  request's historical `room_id` to equal the stay's current room and therefore
+  fails closed after a hypothetical room change. Do not rewrite old request
+  records or weaken this check. A trusted, authorized room-transfer contract
+  with an auditable room-history association is required before legitimate
+  transfers can be supported.
 - Guest reservation submission, guest channel identity, and hosted cross-guest /
   cross-department denial require separate authenticated UI and Workpeg tests.
 
