@@ -34,8 +34,12 @@ classifier result; those values must never be copied from guest input or tool
 arguments.
 
 Each message includes a channel-adapter interaction ID to reconcile redelivery.
-The same ID and same channel/text returns the same sanitized response; reuse
-with different content is refused. Up to 64 distinct interactions are retained
+The same ID and same channel/text normally returns the same sanitized response;
+reuse with different content is refused. A cached awaiting-confirmation response
+is never returned with its original action handle once its proposal is no longer
+active (because a newer message superseded it or it was confirmed/cancelled);
+the replay instead returns a safe `confirmation_expired` status without an
+actionable handle. Up to 64 distinct interactions are retained
 per session; the gateway refuses additional messages rather than evicting
 idempotency state. The action gateway creates a random
 confirmation handle, stores the exact text and validated action context on the
