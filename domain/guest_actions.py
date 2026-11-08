@@ -96,7 +96,19 @@ class GuestActionGateway:
                 if previous is not None:
                     if previous[0] != fingerprint:
                         raise GuestActionError("interaction_id_conflict")
-                    return deepcopy(previous[1])
+                    cached = deepcopy(previous[1])
+                    # Redelivery must never re-offer a confirmation superseded
+                    # by a later message, even when the old message ID matches.
+                    if cached["state"] == "awaiting_confirmation":
+                        handle = (cached.get("proposal") or {}).get("handle")
+                        pending = record.pending
+                        if pending is None or pending["handle"] != handle:
+                            return self._public_result(
+                                "confirmation_expired",
+                                "That earlier request is no longer awaiting confirmation. "
+                                "Please review your latest request.",
+                            )
+                    return cached
                 if len(record.interactions) >= MAX_SESSION_INTERACTIONS:
                     raise GuestActionError("interaction_capacity_reached")
                 # A new message invalidates any previous unconfirmed proposal.
