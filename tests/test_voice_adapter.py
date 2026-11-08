@@ -177,6 +177,35 @@ class YarnClientTests(unittest.TestCase):
             client.open_audio("hello", "voice", 8000)
         self.assertEqual(caught.exception.code, "provider_audio_format_invalid")
 
+    def test_truncated_pcm_is_classified_as_malformed_audio(self):
+        # Three bytes cannot represent a complete sequence of 16-bit PCM samples.
+        response = FakeResponse(b"\x10\x00\xff")
+        client = YarnConversationClient(YARN_KEY, opener=FakeOpener(response=response))
+        stream = client.open_audio("hello", "voice", 24000)
+        with self.assertRaises(ProviderError) as caught:
+            b"".join(stream)
+        self.assertEqual(caught.exception.code, "provider_audio_malformed")
+        self.assertEqual(caught.exception.status, 502)
+        self.assertTrue(response.closed)
+
+    def test_default_chunk_size_favors_early_streaming(self):
+        response = FakeResponse(pcm_sine_samples(3000))
+        requested_sizes = []
+        original_read = response.read
+
+        def record_read(size):
+            requested_sizes.append(size)
+            return original_read(size)
+
+        response.read = record_read
+        stream = YarnConversationClient(
+            YARN_KEY, opener=FakeOpener(response=response)
+        ).open_audio("hello", "voice", 24000)
+        self.assertTrue(next(stream))
+        self.assertEqual(requested_sizes[0], 2048)
+        stream.close()
+        self.assertTrue(response.closed)
+
     def test_upstream_disconnect_closes_the_response(self):
         response = FakeResponse(pcm_sine_samples(200), fail_after=32)
         stream = YarnConversationClient(YARN_KEY, opener=FakeOpener(response=response),
