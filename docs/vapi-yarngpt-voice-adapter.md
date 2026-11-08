@@ -117,6 +117,33 @@ do not assume a fixed per-character or per-call price. YarnGPT notes its API
 has no sandbox/test key and provider calls spend credits, so every real trial
 requires the owner to approve the spend first.
 
+## First-audio latency acceptance plan
+
+The YarnGPT streaming client's default upstream read was reduced from 8,192 to
+2,048 bytes to favor earlier first output. This is **not a measured speed
+improvement**: network buffering, source PCM rate, Python resampling work, WSGI
+server buffering, Vapi and caller connection can still dominate response delay.
+Keep the source audio streaming; do not wait for the full synthesis to finish.
+
+During a separately approved live trial, compare a native Vapi voice and the
+YarnGPT custom-voice bridge under the same transcriber, model, prompt and
+network conditions. For at least 10 short test interactions per voice, record:
+
+- Caller speech-end to **first audible sound** (p50/p95), measured at the
+  browser/caller, not inferred from HTTP response headers alone.
+- YarnGPT upstream request to first PCM byte, adapter first response byte, and
+  full audio completion, with no text/transcripts/phone numbers in logs.
+- Interruption/barge-in stop time, stalled streams, disconnected-call cleanup,
+  error rate, generated audio duration and per-call voice-provider charge.
+
+The initial *engineering targets*, not guarantees, are first audible speech
+typically under one second and p95 below 1.5 seconds. If that is not met,
+investigate the STT endpointing window, model first-token delay, provider
+buffering and geographic routing before buying infrastructure. Optimize with
+measurements: reducing chunks can increase CPU/transport overhead and does
+not guarantee lower latency. Never describe this offline-tested adapter as a
+live low-latency hotel receptionist until the whole pipeline is tested.
+
 ## Current limitations and release gates
 
 - No YarnGPT request, Vapi call, voice catalogue query, key generation, public
