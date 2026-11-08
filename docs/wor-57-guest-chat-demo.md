@@ -10,7 +10,7 @@ Workpeg route or a second hotel database.
 From the repository root in PowerShell:
 
 ```powershell
-..\.venv\Scripts\python.exe tools\guest_chat_demo.py
+..\.venv\Scripts\python.exe -m tools.guest_chat_demo
 ```
 
 Open `http://127.0.0.1:8765/`. Stop the server with `Ctrl+C`. The server binds
