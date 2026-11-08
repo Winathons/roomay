@@ -2,15 +2,16 @@
 
 This is the Phase A, offline-verified integration boundary for Roomay's real
 hotel data. It does not provision tables, seed inventory, contact Workpeg, or
-claim that persistence works. The currently observed live blocker remains:
+claim that persistence works. The owner reports that the authenticated
+receptionist route now lists tables in the Roomay AI development business with
+HTTP 200 for namespace `roomay_hotel_v1`; the UI reports `room_types` missing
+or unreadable and confirms that it attempted no provisioning. This is evidence
+for table discovery only. Table creation, row writes, read-back persistence,
+and permission behavior remain unverified. Codex made no live Workpeg calls.
 
-```text
-HTTP 400
-{"peg-namespace":"Unknown peg namespace 'roomay'."}
-```
-
-WOR-28 owns that namespace and installation investigation. Do not work around
-it with a different Peg, business, token, or unreviewed release.
+This supersedes the historical `Unknown peg namespace 'roomay'` observation;
+WOR-28 remains open until authorized authenticated persistence and permissions
+are verified. Do not switch Pegs, businesses, tokens, or releases on speculation.
 
 ## Runtime boundary
 
@@ -34,14 +35,14 @@ explicit stale marker. It does not confirm reservations: the documented SDK
 has no transaction, unique constraint, conditional update or compare-and-swap
 helper, so local eligibility cannot make a concurrency-safe booking.
 
-## SDK 0.149.1 and official documentation evidence
+## SDK 0.152.0 and official documentation evidence
 
 The installed distribution was inspected at
 `.venv/Lib/site-packages/workpeg/`:
 
 | Evidence | Verified behavior |
 | --- | --- |
-| `ui/compiler/ast_parser.py`, `_WORKPEG_TABLE_HELPERS` | `get_tables([namespace])`; `get_table(uuid)`; `create_table(table)`; `update_table(uuid, patch)`; `delete_table(uuid)`; `get_rows(uuid, limit=..., offset=...)`; `get_row(uuid, row_id)`; `add_row(uuid, row)`; `add_rows(uuid, rows)`; `update_row(uuid, row_id, patch)`; `delete_row(uuid, row_id)` compile. Only `limit` and `offset` are accepted keywords for `get_rows`. |
+| `ui/compiler/ast_parser.py`, `_WORKPEG_TABLE_HELPERS` | On the pinned 0.152.0 SDK, `get_tables([namespace])`; `get_table(uuid)`; `create_table(table)`; `update_table(uuid, patch)`; `delete_table(uuid)`; `get_rows(uuid, limit=..., offset=...)`; `get_row(uuid, row_id)`; `add_row(uuid, row)`; `add_rows(uuid, rows)`; `update_row(uuid, row_id, patch)`; `delete_row(uuid, row_id)` compile. Only `limit` and `offset` are accepted keywords for `get_rows`. |
 | `ui/runtime/workpeg-runtime.js`, `wpGetTables` / `wpGetRows` | Calls are protected and scoped to the active URL business. Namespace is URL encoded. Row windows are sent as non-negative integer `limit`/`offset` values. |
 | Official Tables & Rows documentation | A table is addressed by its returned UUID. `get_rows` returns a plain list ordered by descending position. Row `id` is a read-only integer and `fingerprint` is an opaque change marker. |
 | Official Tables & Rows documentation | Table aliases are write-only and currently serve schema inheritance; they cannot resolve a runtime table UUID. Discovery therefore verifies namespace, exact name, permission and columns. |
@@ -97,7 +98,7 @@ alias will be returned.
   and missing outcomes. A changed fingerprint is evidence of change, not proof
   that this caller won a race.
 - A trusted writer must serialize reservation confirmation and re-read the
-  authoritative rows. Workpeg 0.149.1 documents no atomic uniqueness or CAS
+  authoritative rows. Workpeg 0.152.0 documents no atomic uniqueness or CAS
   primitive, so the production concurrency mechanism remains an integration
   requirement, not an optimistic UI behavior.
 

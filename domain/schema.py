@@ -51,7 +51,7 @@ TABLES = {
 def proposed_tables():
     """Fresh payload-shaped specifications, not a migration or API adapter."""
     from copy import deepcopy
-    return [dict(name=name, namespace="roomay_hotel_v1", permission=700,
+    return [dict(name=name, namespace="roomay_hotel_v1", permission="700",
                  columns=[dict(deepcopy(column), position=(i + 1) * 1000)
                           for i, column in enumerate([ref("entity_id"), *columns])])
             for name, columns in TABLES.items()]

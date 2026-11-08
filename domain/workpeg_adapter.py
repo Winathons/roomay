@@ -129,12 +129,20 @@ def validate_table_response(contract, table):
         raise AdapterError("schema_column_mismatch")
     for column_id, wanted in expected.items():
         found = actual[column_id]
+        if found.get("name") != wanted["name"]:
+            raise AdapterError("schema_name_mismatch")
         if found.get("type") != wanted["type"]:
             raise AdapterError("schema_type_mismatch")
         if bool(found.get("required", False)) != bool(wanted.get("required", False)):
             raise AdapterError("schema_required_mismatch")
-        if wanted["type"] == "mutable_select" and _choice_refs(found) != _choice_refs(wanted):
-            raise AdapterError("schema_choices_mismatch")
+        if found.get("position") != wanted.get("position"):
+            raise AdapterError("schema_position_mismatch")
+        if found.get("options", {}) != wanted.get("options", {}):
+            raise AdapterError("schema_options_mismatch")
+        if found.get("metadata", {}) != wanted.get("metadata", {}):
+            raise AdapterError("schema_column_metadata_mismatch")
+    if table.get("metadata", {}) != contract.get("metadata", {}):
+        raise AdapterError("schema_table_metadata_mismatch")
     return table_uuid
 
 
