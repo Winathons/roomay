@@ -53,7 +53,7 @@ After successful integrated validation, make one reviewed **`staging` → `main`
 
 The UI-only check (after merging the staging workflow PR) should:
 - Trigger on PRs targeting `staging` and `main`, and optionally pushes to them.
-- Run Python syntax validation and Workpeg Python→JS compilation with `workpeg==0.149.1`.
+- Run Python syntax validation and Workpeg Python→JS compilation with `workpeg==0.152.0`.
 - Avoid starting a Workpeg server, `--fake-cloud`, live table operations, Docker publishing, or AI inference.
 - Run without secrets. A failed check blocks promotion/release until investigated.
 
@@ -69,7 +69,7 @@ Codex automatically reads repository-level `AGENTS.md`. Have it implement a spec
 Work on Roomay issue WOR-<ID> in github.com/Winathons/roomay.
 Read AGENTS.md, CONTRIBUTING.md, docs/staging.md, and the issue's full description/acceptance criteria.
 Use latest staging as the base, on a dedicated WOR-<ID>-... branch.
-Inspect the real installed Workpeg 0.149.1 SDK and official docs; do not invent APIs.
+Inspect the real installed Workpeg 0.152.0 SDK and official docs; do not invent APIs.
 Implement only this issue, using Workpeg native UI/tables where supported.
 Never use actual hotel data, tokens, --fake-cloud, paid AI inference or production publishing.
 Run syntax checks, workpeg ui build ui/, and focused tests; document exact pass/fail results.

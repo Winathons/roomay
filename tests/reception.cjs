@@ -5,12 +5,22 @@ const vm = require('node:vm');
 const assert = require('node:assert/strict');
 
 globalThis.window = globalThis;
-globalThis.addEventListener = () => {};
+let loadHandler;
+globalThis.addEventListener = (event, handler) => { if (event === 'load') loadHandler = handler; };
 globalThis.fetch = () => { throw new Error('NETWORK FORBIDDEN IN RECEPTION TEST'); };
 const output = process.argv[2];
 vm.runInThisContext(fs.readFileSync(path.join(output, 'workpeg-runtime.js'), 'utf8'));
-vm.runInThisContext(fs.readFileSync(path.join(output, 'app.js'), 'utf8') +
-  '\nglobalThis.ReceptionTest = HotelData;');
+let registeredRoutes;
+Workpeg.router = routes => { registeredRoutes = routes; };
+vm.runInThisContext(fs.readFileSync(path.join(output, 'app.js'), 'utf8'));
+assert.equal(typeof loadHandler, 'function');
+loadHandler();
+assert.ok(Array.isArray(registeredRoutes), 'generated router registers its compiled routes');
+const ReceptionTest = registeredRoutes.find(route => route.path === '/b/[business_id]/reception').app;
+assert.equal(typeof ReceptionTest, 'function');
+const Home = registeredRoutes.find(route => route.path === '/').app;
+const homeTree = JSON.stringify(new Home().build());
+assert.match(homeTree, /Roomay reception is available inside an authenticated Workpeg business\./);
 Workpeg.stateHandler = () => ({});
 Workpeg.routeParam = () => '00000000-0000-4000-8000-000000000034';
 

@@ -10,7 +10,7 @@
 
 **You'll need:**
 - **Git** and access to the [Roomay GitHub repository](https://github.com/Winathons/roomay).
-- **Python 3.10 or newer**. The original development setup used Python **3.13.5** with `workpeg==0.149.1`.
+- **Python 3.10 or newer**. The development setup uses Python **3.13.5** with `workpeg==0.152.0`.
 - A terminal (Windows PowerShell, macOS Terminal or Linux shell) and an editor such as VS Code.
 - Internet access to clone and install packages the first time.
 
@@ -73,7 +73,7 @@ source .venv/bin/activate
 python -m pip install -r requirements-dev.txt
 ```
 
-The repository pins Workpeg in `requirements-dev.txt` (currently **`workpeg==0.149.1`**). Please **do not casually upgrade** the SDK; Workpeg is pre-1.0 and changes may break the Python UI compiler. The `.venv/` directory is Git-ignored.
+The repository pins Workpeg in `requirements-dev.txt` (currently **`workpeg==0.152.0`**). Please **do not casually upgrade** the SDK; Workpeg is pre-1.0 and changes may break the Python UI compiler. The `.venv/` directory is Git-ignored.
 
 ### Step 3 — Run Roomay locally
 

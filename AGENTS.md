@@ -4,7 +4,7 @@
 - **Roomay is a real Workpeg-native hotel operations product.** The November 13–14, 2026 Workpeg Hospitality Hackathon is a development milestone, not an excuse to substitute nonfunctional screens for a working system.
 - Product requirements are genuine Workpeg-persisted room inventory, bookings, stays, service requests, multi-role staff operations and verified guest channels. A passing compile or synthetic UI is not a completed product.
 - [Linear Roomay project](https://linear.app/workpeg/project/roomay-workpeg-hospitality-hackathon-7b7a7ce4b3b9) owns requirements, issues, acceptance criteria and progress.
-- [Official Workpeg SDK documentation](https://developers.workpeg.com/docs/latest/) is authoritative for platform APIs. Inspect installed SDK `0.149.1` and documentation before using widgets, table helpers, functions, schemas, or CLI commands. **Do not invent Workpeg APIs.**
+- [Official Workpeg SDK documentation](https://developers.workpeg.com/docs/latest/) is authoritative for platform APIs. Inspect installed SDK `0.152.0` and documentation before using widgets, table helpers, functions, schemas, or CLI commands. **Do not invent Workpeg APIs.**
 - Read `README.md`, `CONTRIBUTING.md`, `docs/staging.md`, and relevant Linear issue before modifying code.
 
 ## Git workflow

@@ -5,12 +5,19 @@ const vm = require('node:vm');
 const assert = require('node:assert/strict');
 
 globalThis.window = globalThis;
-globalThis.addEventListener = () => {};
+let loadHandler;
+globalThis.addEventListener = (event, handler) => { if (event === 'load') loadHandler = handler; };
 globalThis.fetch = () => { throw new Error('NETWORK FORBIDDEN IN TESTS'); };
 const output = process.argv[2];
 vm.runInThisContext(fs.readFileSync(path.join(output, 'workpeg-runtime.js'), 'utf8'));
-vm.runInThisContext(fs.readFileSync(path.join(output, 'app.js'), 'utf8') +
-  '\nglobalThis.HotelDataTest = HotelData;');
+let registeredRoutes;
+Workpeg.router = routes => { registeredRoutes = routes; };
+vm.runInThisContext(fs.readFileSync(path.join(output, 'app.js'), 'utf8'));
+assert.equal(typeof loadHandler, 'function');
+loadHandler();
+assert.ok(Array.isArray(registeredRoutes), 'generated router registers its compiled routes');
+const HotelDataTest = registeredRoutes.find(route => route.path === '/b/[business_id]/reception').app;
+assert.equal(typeof HotelDataTest, 'function');
 Workpeg.stateHandler = () => ({});
 Workpeg.setInterval = () => {};
 
