@@ -400,9 +400,12 @@ class DevRoomTypesRows(App):
         if self.busy and not self.timed_out:
             self.ticks += 1
             if self.ticks >= 30:
+                # Keep the page locked while the original request may still be
+                # in flight. Releasing busy here permits a new operation to
+                # reset timed_out and race a late response (including a write).
                 self.timed_out = True
-                self.busy = False
-                self.failure = "Operation timed out. Stop and have the owner reconcile; no automatic retry is available."
+                self.uncertain = True
+                self.failure = "Operation timed out. This page is locked. Wait for the request to settle, then reconcile the actual saved rows as owner before any new write. Do not retry."
 
     def build(self):
         return Column(
