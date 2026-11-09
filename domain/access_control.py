@@ -349,7 +349,7 @@ def project_service_request(
             record_guest_id=request.get("guest_id"), stay_id=request.get("stay_id"),
             room_id=request.get("room_id"),
         )
-        fields = ("request_id", "category", "description", "urgency", "status",
+        fields = ("category", "description", "urgency", "status",
                   "created_at", "updated_at")
     elif actor.role == "department_staff":
         authorize_access(

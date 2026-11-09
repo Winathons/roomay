@@ -1,9 +1,11 @@
 # WOR-14 service-request lifecycle
 
-This document describes implemented, offline business logic and a **proposed**
-Workpeg persistence contract. It is not evidence of hosted persistence. The live
-Peg namespace/table resolution problem remains tracked in WOR-28, so no Workpeg
-API was called and no table or function was published for WOR-14.
+This document describes the implemented service-request domain logic and
+proposed Workpeg persistence contract. The owner has since verified the nine
+development tables and one synthetic received request plus pending audit event
+through the Roomay AI development business. That proves this test record was
+persisted; it does not verify staff permissions or a staff-side lifecycle
+writer. This offline staff action task makes no Workpeg API call or hosted write.
 
 ## Implemented domain contract
 
@@ -82,7 +84,7 @@ Official SDK evidence:
 - [Save hooks](https://developers.workpeg.com/docs/latest/hooks/) documents that
   pre-save hooks can reject ordinary writes, post-save hooks cannot roll a write
   back, and the declarative agent path currently does not run pre-save hooks.
-- Installed SDK 0.149.1 source confirms the helper signatures in
+- Installed SDK 0.152.0 source confirms the helper signatures in
   `ui/compiler/ast_parser.py` and the protected browser calls in
   `ui/runtime/workpeg-runtime.js`.
 

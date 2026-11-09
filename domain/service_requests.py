@@ -527,7 +527,7 @@ def triage_request(request, category, actor, staff_directory, *, at, operation_k
 
 
 def request_view(request, actor, staff_directory, *, snapshot=None):
-    """Return a copy only when the actor may see this business/guest request."""
+    """Return a role-scoped request view after validating the active actor."""
     validate_request(request)
     trusted = _trusted_actor(actor, request["hotel_id"], staff_directory)
     if trusted["kind"] == "guest":
@@ -536,6 +536,10 @@ def request_view(request, actor, staff_directory, *, snapshot=None):
         if snapshot is None:
             raise AuthorizationError("active_stay_required")
         _active_stay(snapshot, request["stay_id"], request["room_id"], request["guest_id"])
+        return {key: deepcopy(request[key]) for key in (
+            "category", "description", "urgency", "status", "created_at",
+            "updated_at",
+        )}
     else:
         privileged = _is_admin(trusted) or trusted["department"] == "reception"
         departmental = trusted["department"] == request["department"]
@@ -556,7 +560,7 @@ def reconcile_write(plan, persisted_request, persisted_events):
     """Choose the only safe next persistence step after a write or timeout.
 
     The adapter must serialize mutations for one request while applying an action.
-    Workpeg 0.149.1 has no documented compare-and-swap primitive.
+    Workpeg SDK 0.152.0 documentation does not describe compare-and-swap.
     """
     if not isinstance(plan, dict) or set(plan) != {"base_request", "target_request", "event"}:
         raise RequestError("invalid_write_plan")
