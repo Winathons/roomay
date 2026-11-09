@@ -150,6 +150,28 @@ test('uncertain insert outcomes lock further writes and never retry', async () =
   const before = calls.length; await app.insert_row(); assert.equal(calls.length, before);
   assert.ok(!JSON.stringify(app.state).includes('PRIVATE RESPONSE'));
 });
+test('timeout leaves in-flight write locked and prevents late-response races', async () => {
+  setup(); await prepareInsert();
+  let resolve;
+  addBehavior = () => new Promise(done => { resolve = done; });
+  const pending = app.insert_row();
+  await new Promise(done => setImmediate(done));
+  assert.equal(count('add'), 1);
+  for (let index = 0; index < 30; index++) app.watch_timeout();
+  assert.equal(app.state.timed_out, true);
+  assert.equal(app.state.uncertain, true);
+  assert.equal(app.state.busy, true, 'do not release busy while a timed-out write is in flight');
+  const before = calls.length;
+  await app.insert_row();
+  await app.read_rows();
+  assert.equal(calls.length, before, 'no other request can reset timed_out');
+  resolve({id:72,fingerprint:'fp-72-a',permission:700,
+    inherit_business_permission:true,inherit_individual_permissions:false,data:data()});
+  await pending;
+  assert.equal(app.state.uncertain, true);
+  assert.equal(app.state.busy, true);
+  assert.doesNotMatch(app.state.last_success, /inserted and verified/);
+});
 test('missing native ID/fingerprint or mismatched readback is uncertain', async () => {
   setup(); await prepareInsert(); addBehavior = async payload => ({data:payload.data}); await app.insert_row();
   assert.equal(app.state.uncertain, true);
