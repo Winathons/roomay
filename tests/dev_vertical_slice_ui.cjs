@@ -212,12 +212,26 @@ test('failed or malformed write/readback is uncertain and cannot retry',async()=
   const app=setup(); await prepare(app); approveWrite(app);
   addBehavior=async()=>{throw new Error('HTTP 500 SECRET BODY');}; await app.create_prepared();
   assert.equal(app.state.uncertain,true); assert.equal(count('add_row'),1);
+  assert.match(app.state.error,/Outcome uncertain; do not retry/);
+  assert.doesNotMatch(app.state.error,/No write was attempted/);
   assert.ok(!JSON.stringify(app.state).includes('SECRET BODY'));
   await app.create_prepared(); assert.equal(count('add_row'),1);
   const app2=setup(); await prepare(app2); approveWrite(app2);
   getRowBehavior=async(uuid,rowId)=>fixtureRow({business_id:business,...expected.records.rooms[0]},rowId,'mismatched-readback');
   await app2.create_prepared(); assert.equal(app2.state.uncertain,true);
   assert.match(app2.state.error,/Direct row read-back/);
+});
+test('authorization errors after a write starts remain uncertain and never claim read-only failure',async()=>{
+  const app=setup(); await prepare(app); approveWrite(app);
+  addBehavior=async()=>{throw new Error('HTTP 403 provider denied after possible mutation');};
+  await app.create_prepared();
+  assert.equal(count('add_row'),1);
+  assert.equal(app.state.uncertain,true);
+  assert.match(app.state.error,/Authorization error during or after row creation/);
+  assert.match(app.state.error,/Outcome uncertain; do not retry/);
+  assert.doesNotMatch(app.state.error,/No write was attempted/);
+  await app.create_prepared();
+  assert.equal(count('add_row'),1,'no second write while outcome is unknown');
 });
 test('timeout keeps the in-flight lock and ignores a late create result',async()=>{
   const app=setup(); await prepare(app); approveWrite(app);
