@@ -1,17 +1,19 @@
 # Workpeg hotel integration contract (WOR-29)
 
-This is the Phase A, offline-verified integration boundary for Roomay's real
-hotel data. It does not provision tables, seed inventory, contact Workpeg, or
-claim that persistence works. The owner reports that the authenticated
-receptionist route now lists tables in the Roomay AI development business with
-HTTP 200 for namespace `roomay_hotel_v1`; the UI reports `room_types` missing
-or unreadable and confirms that it attempted no provisioning. This is evidence
-for table discovery only. Table creation, row writes, read-back persistence,
-and permission behavior remain unverified. Codex made no live Workpeg calls.
+This is the Phase A integration boundary for Roomay's real hotel data. The
+owner reports that the Roomay AI development business has an existing
+`roomay_hotel_v1/room_types` table at permission `700`, and has verified table
+creation, direct GET/listing, fictional row create/update/read-back, and
+persistence after independent browser reload. This hosted evidence is owner
+reported; Codex made no live Workpeg calls. The other eight canonical tables,
+staff permission behavior, and production integration remain unverified. The
+WOR-59 planner does not modify or recreate the existing table or row.
 
-This supersedes the historical `Unknown peg namespace 'roomay'` observation;
-WOR-28 remains open until authorized authenticated persistence and permissions
-are verified. Do not switch Pegs, businesses, tokens, or releases on speculation.
+The historical `Unknown peg namespace 'roomay'` and `room_types` missing
+observations are superseded by the owner's later development verification.
+WOR-28 remains open until role permissions and all required persistence
+criteria are completed. Do not switch Pegs, businesses, tokens, or releases
+on speculation.
 
 ## Runtime boundary
 
@@ -102,7 +104,7 @@ alias will be returned.
   primitive, so the production concurrency mechanism remains an integration
   requirement, not an optimistic UI behavior.
 
-## Owner-run live validation after WOR-28
+## Remaining owner-run validation after first persistence proof
 
 These steps are intentionally not performed by Codex or automated tests:
 
@@ -112,15 +114,15 @@ These steps are intentionally not performed by Codex or automated tests:
    `/b/<verified-business-uuid>/reception`.
 3. Let the authenticated route load, then use Refresh records. Capture the exact
    status without exposing cookies, tokens, business IDs, or record data.
-4. If tables do not yet exist, review `table_contracts()` as a migration plan.
-   Provision only through a separately approved, owner-operated change; never
-   from page load or this read route.
-5. With synthetic records in the isolated development business, verify all
-   pages, native row IDs, fingerprints, reload persistence, a full-data update,
-   failed-write read-back, and cross-business denial.
-6. Only after authenticated create/read/update/reload and concurrency behavior
-   are proven should WOR-29 acceptance be reconsidered. Keep WOR-29 In Progress
-   meanwhile.
+4. Preserve the existing owner-reported `room_types` table and fictional test
+   row. Review the eight remaining schemas with the WOR-59 runbook; provision
+   only one table at a time after separate owner approval.
+5. For each approved table, verify native UUID, exact schema/permission,
+   create-response/direct-GET/fresh-list agreement, reload persistence, and
+   sanitized reconciliation after any uncertain result.
+6. Verify role denial, row-level grants, cross-business isolation and trusted
+   hotel identity mapping. Keep WOR-28, WOR-29 and WOR-8 In Progress until
+   hosted acceptance criteria are complete.
 
 ## WOR-34 implementation
 

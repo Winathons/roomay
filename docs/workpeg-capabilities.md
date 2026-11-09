@@ -9,7 +9,7 @@ This is a **development runbook**, not evidence that a live Workpeg connection i
 - Starter page displayed `Hello from roomay` at `localhost:8081`.
 - **Approved:** Developer portal shows the `roomay` Peg registered and **Approved**; the owner confirms it is associated with the separate `Roomay AI` development business.
 - **Workpeg support-confirmed:** a Peg UI using authenticated staff-session table helpers can test data **locally with `--fake-cloud` and `--peg-namespace roomay` without a published/installed release**. Function/save-hook publishing is a separate workflow.
-- **Owner-reported:** authenticated receptionist table discovery in Roomay AI now returns HTTP 200 for `roomay_hotel_v1`; `room_types` is reported missing or unreadable and no provisioning was attempted.
+- **Owner-reported (updated 2026-11-09):** the first `roomay_hotel_v1/room_types` table is present with owner-only permission `700`; fictional row create, update, read-back and persistence after independent browser reload were verified. This supersedes the earlier missing/unreadable report. The remaining eight tables and staff/row-level permission behavior remain unverified.
 - **Not yet verified:** table creation, row create/update, persisted read-back after reload, or multi-user permissions. No release is published and this task does not perform hosted writes.
 
 ## 1. Separate development business (owner action)
