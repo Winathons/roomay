@@ -250,7 +250,9 @@ test('historical request keeps its original room after a legitimate room change'
   const snapshot = validRelationshipSnapshot();
   snapshot['Roomay Service Requests'] = [{
     request_id: uuid(10009), stay_id: uuid(10006), guest_id: uuid(10004),
-    room_id: uuid(10002), description: 'Original-room request', status: 'resolved',
+    hotel_id: uuid(10010), room_id: uuid(10002), description: 'Original-room request',
+    category: 'room_cleaning', department: 'housekeeping', triage_required: false,
+    status: 'resolved', last_event_id: uuid(10011),
   }];
   assert.equal(snapshot.stays[0].room_id, uuid(10003));
   assert.equal(snapshot['Roomay Service Requests'][0].room_id, uuid(10002));

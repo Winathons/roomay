@@ -481,22 +481,69 @@ class HotelData(App):
                     or block["start"] >= block["end"]):
                 return self.fail("Maintenance block has an invalid room or date interval.")
         request_ids = []
+        requests_by_id = {}
         for request in loaded["Roomay Service Requests"]:
             if request["request_id"] in request_ids:
                 return self.fail("Duplicate service request identity.")
             request_ids.append(request["request_id"])
+            requests_by_id[request["request_id"]] = request
+            category_departments = {
+                "extra_towels": "housekeeping", "linen": "housekeeping",
+                "room_cleaning": "housekeeping", "toiletries": "housekeeping",
+                "plumbing": "maintenance", "electrical": "maintenance",
+                "air_conditioning": "maintenance", "room_equipment": "maintenance",
+                "room_service": "food_and_beverage", "dining": "food_and_beverage",
+                "minibar": "food_and_beverage", "transport": "reception",
+                "wake_up_call": "reception", "billing_question": "reception",
+                "general_help": "reception",
+            }
+            expected_department = category_departments.get(request["category"], "reception")
+            expected_triage = request["category"] not in category_departments
+            if (request["department"] != expected_department
+                    or request["triage_required"] != expected_triage):
+                return self.fail("Service request category and department routing disagree.")
             if (request["stay_id"] not in stays or request["room_id"] not in rooms
                     or request["guest_id"] not in guests):
                 return self.fail("Service request references unknown hotel records.")
             if request["stay_id"] + ":" + request["guest_id"] not in occupant_pairs:
                 return self.fail("Service request guest is not a registered occupant.")
+        audit_sequences = {}
         for event in loaded["Roomay Service Request Audit"]:
-            if event["request_id"] not in request_ids:
+            request = requests_by_id.get(event["request_id"])
+            if request is None:
                 return self.fail("Service request audit references an unknown request.")
+            if event["hotel_id"] != request["hotel_id"]:
+                return self.fail("Service request audit hotel does not match its request.")
+            if (event["sequence"] != int(event["sequence"])
+                    or event["sequence"] < 1):
+                return self.fail("Service request audit sequence is invalid.")
+            sequences = audit_sequences.get(event["request_id"], [])
+            audit_sequences[event["request_id"]] = sequences
+            if event["sequence"] in sequences:
+                return self.fail("Service request audit sequence is duplicated.")
+            sequences.append(event["sequence"])
+            if self.instant_epoch(event["occurred_at"]) is None:
+                return self.fail("Service request audit timestamp is invalid.")
         return True
 
     def intervals_overlap(self, a_start, a_end, b_start, b_end):
         return a_start < b_end and b_start < a_end
+
+    def ordered_audit_events(self, audit_items):
+        ordered = []
+        previous_sequence = 0
+        for _index in range(len(audit_items)):
+            candidate = None
+            for event in audit_items:
+                if (event["sequence"] > previous_sequence
+                        and (candidate is None
+                             or event["sequence"] < candidate["sequence"])):
+                    candidate = event
+            if candidate is None:
+                return ordered
+            ordered.append(candidate)
+            previous_sequence = candidate["sequence"]
+        return ordered
 
     def readiness_reasons(self, booking, room):
         reasons = []
@@ -571,6 +618,15 @@ class HotelData(App):
             if booking:
                 guest = [item for item in self.guests
                          if item["entity_id"] == booking["guest_id"]][0]
+            registered_occupants = []
+            if stay:
+                registered_occupants = [
+                    next((item for item in self.guests
+                          if item["entity_id"] == occupant["guest_id"]),
+                         {"display_name": "Unknown"}).get("display_name", "Unknown")
+                    for occupant in self.stay_guests
+                    if occupant["stay_id"] == stay["entity_id"]
+                ]
             blocks = [block for block in self.room_blocks
                       if block["room_id"] == room["entity_id"]
                       and block["status"] == "active"
@@ -589,9 +645,11 @@ class HotelData(App):
                                                "departure": booking["departure"]})
                 elif booking["departure"] == self.operational_date:
                     departure_status = "Due today"
-                in_house.append({"guest": guest["display_name"], "room": room["number"],
+                in_house.append({"guest": ", ".join(registered_occupants), "room": room["number"],
                                  "departure": booking["departure"],
-                                 "departure_status": departure_status})
+                                 "departure_status": departure_status,
+                                 "reservation_status": booking["status"],
+                                 "stay_status": stay["status"]})
                 if booking["departure"] == self.operational_date:
                     departures.append({"guest": guest["display_name"],
                                        "room": room["number"]})
@@ -609,16 +667,51 @@ class HotelData(App):
                 "housekeeping": room["housekeeping"],
                 "maintenance": "Blocked" if blocks else "Clear",
                 "maintenance_reason": blocks[0]["reason"] if blocks else "",
-                "guest": guest["display_name"] if guest else "",
+                "guest": (", ".join(registered_occupants) if stay
+                          else guest["display_name"] if guest else ""),
+                "reservation_status": booking["status"] if booking else "",
+                "stay_status": stay["status"] if stay else "",
                 "enabled": room["enabled"],
             })
         room_numbers = {room["entity_id"]: room["number"] for room in self.rooms}
-        request_cards = [{
-            "request_id": request["request_id"], "description": request["description"],
-            "category": request["category"], "department": request["department"],
-            "urgency": request["urgency"], "status": request["status"],
-            "room": room_numbers.get(request["room_id"], "Unknown"),
-        } for request in self.service_requests]
+        audit_by_request = {}
+        for event in self.request_audit:
+            audit_items = audit_by_request.get(event["request_id"], [])
+            audit_items.append(event)
+            audit_by_request[event["request_id"]] = audit_items
+        request_cards = []
+        for request in self.service_requests:
+            audit_history = self.ordered_audit_events(
+                audit_by_request.get(request["request_id"], []))
+            latest = next((event for event in audit_history
+                           if event["event_id"] == request["last_event_id"]), None)
+            if not audit_history:
+                audit_status = "No audit event visible"
+            elif latest is None:
+                audit_status = "Audit history incomplete; latest request event is not visible"
+            elif latest["to_status"] != request["status"]:
+                audit_status = "Audit history does not match the current request status"
+            elif latest["commit_state"] == "pending":
+                audit_status = "Latest audit event pending commit; delivery is not represented"
+            else:
+                audit_status = "Latest event marked committed; delivery is not represented"
+            guest = next((item["display_name"] for item in self.guests
+                          if item["entity_id"] == request["guest_id"]), "Unknown")
+            request_cards.append({
+                "request_id": request["request_id"], "description": request["description"],
+                "category": request["category"], "department": request["department"],
+                "urgency": request["urgency"], "status": request["status"],
+                "room": room_numbers.get(request["room_id"], "Unknown"),
+                "guest": guest, "audit_status": audit_status,
+                "audit_history": [{
+                    "sequence": event["sequence"], "event_type": event["event_type"],
+                    "from_status": event["from_status"], "to_status": event["to_status"],
+                    "actor_kind": event["actor_kind"],
+                    "actor_department": event["actor_department"],
+                    "occurred_at": event["occurred_at"],
+                    "commit_state": event["commit_state"],
+                } for event in audit_history],
+            })
         open_statuses = ["received", "assigned", "acknowledged", "in_progress",
                          "reopened", "escalated"]
         self.metrics = [
@@ -733,7 +826,16 @@ class HotelData(App):
                             gap=2,
                         ),
                         Column(
-                            Tag("WORKPEG RECORDS", tone="success", size="sm"),
+                            Tag("WORKPEG RECORDS (READ ONLY)", tone="success", size="sm",
+                                visible=self.view_state == "loaded"),
+                            Tag("WORKPEG INVENTORY EMPTY", tone="warning", size="sm",
+                                visible=self.view_state == "empty_inventory"),
+                            Tag("CHECKING WORKPEG ACCESS", tone="warning", size="sm",
+                                visible=self.view_state == "loading"),
+                            Tag("WORKPEG READ NOT VERIFIED", tone="warning", size="sm",
+                                visible=(self.view_state == "connection_unavailable"
+                                         or self.view_state == "authentication_required"
+                                         or self.view_state == "access_denied")),
                             Text(f"Business {route.business_id}", variant="caption", style={"color": "#e8f2ee"}),
                             gap=6,
                         ),
@@ -883,6 +985,7 @@ class HotelData(App):
                                         Divider(spacing=4),
                                         Text(f"Housekeeping - {room['housekeeping']}", variant="caption", tone="muted"),
                                         Text(f"Maintenance - {room['maintenance']}", variant="caption", tone="muted"),
+                                        Text(f"Reservation: {room['reservation_status'] or 'None'} - Stay: {room['stay_status'] or 'None'}", variant="caption", tone="muted"),
                                         Button("View details", on_click=lambda: self.select_room(room["number"]), variant="text", size="sm"),
                                         gap=8,
                                     ), padding=18, width=242, radius=16, color="#ffffff",
@@ -898,6 +1001,7 @@ class HotelData(App):
                                         Row(Text(f"Room {room['number']} details", variant="subheading", weight="bold"), Tag("READ ONLY", tone="info", size="sm"), justify="space_between", align="center", gap=12),
                                         Text(f"{room['room_type']} - {room['occupancy']}", weight="semibold"),
                                         Text(room["guest"] if room["guest"] else "No guest linked"),
+                                        Text(f"Reservation: {room['reservation_status'] or 'None'} - Physical stay: {room['stay_status'] or 'None'}", variant="caption", tone="muted"),
                                         Text(f"Housekeeping: {room['housekeeping']} - Maintenance: {room['maintenance']}", variant="caption", tone="muted"),
                                         Text(room["maintenance_reason"], tone="warning", visible=room["maintenance_reason"] != ""),
                                         Text("Booking, assignment, and check-in writes are disabled until a protected writer is verified.", variant="caption", tone="muted"),
@@ -916,7 +1020,12 @@ class HotelData(App):
                                         Row(Tag(request["urgency"], tone="warning", size="sm"), Tag(request["status"], tone="info", size="sm"), justify="space_between", align="center", gap=8),
                                         Text(request["description"], weight="semibold"),
                                         Text(f"{request['category']} - {request['department']}", variant="caption", tone="muted"),
-                                        Text(f"Room {request['room']}", variant="caption", tone="muted"),
+                                        Text(f"{request['guest']} - Room {request['room']}", variant="caption", tone="muted"),
+                                        Text(request["audit_status"], variant="caption", tone="warning"),
+                                        Column(*[
+                                            Text(f"Audit {event['sequence']}: {event['event_type']} - {event['from_status'] or 'start'} → {event['to_status']} · {event['commit_state']} · {event['occurred_at']}", variant="caption", tone="muted")
+                                            for event in request["audit_history"]
+                                        ], gap=5),
                                         gap=9,
                                     ), padding=18, width=320, radius=16, color="#ffffff", style={"border": "1px solid #dce7e2"})
                                     for request in self.request_cards
