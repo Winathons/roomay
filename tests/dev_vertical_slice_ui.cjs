@@ -137,6 +137,15 @@ test('exact room type preview uses preserved entity ID; no preview write occurs'
   const app=setup(); await prepare(app);
   assert.equal(app.state.selected_step,'rooms');
   assert.deepEqual(app.state.selected_payload.data,{business_id:business,...expected.records.rooms[0]});
+  assert.match(app.state.selected_preview,/position=1000/);
+  assert.match(app.state.selected_preview,/namespace=active/);
+  assert.match(app.state.selected_preview,/inherit_business_permission=true/);
+  assert.match(app.state.selected_preview,/inherit_individual_permissions=false/);
+  assert.ok(app.state.selected_preview.includes('data.business_id='+business));
+  assert.ok(app.state.selected_preview.includes('data.number=205'));
+  assert.ok(app.state.selected_preview.includes('data.room_type_id='+expected.room_type.entity_id));
+  assert.ok(app.state.selected_preview.includes('data.housekeeping=ready'));
+  assert.doesNotMatch(app.state.selected_preview,/\\[object Object\\]/);
   assert.equal(count('add_row'),0);
   assert.equal(rowsByKey.room_types.length,1);
   await app.create_prepared(); assert.equal(count('add_row'),0,'missing exact typed confirmation cannot write');
