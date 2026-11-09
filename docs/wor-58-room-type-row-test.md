@@ -113,8 +113,12 @@ owner decision in the isolated Roomay AI development business.
 There is no delete, rollback, bulk insert, automatic write, or automatic retry
 after an uncertain result. A timeout, disconnect, denial, missing ID or
 fingerprint, malformed response, or read-back mismatch locks writes in that
-page session. Reconcile the table with the owner before any new attempt. Do not
-click a write again just because its response was lost.
+page session. On timeout the controller deliberately keeps the page busy
+and locked, because the original protected request could still finish after the
+UI stops waiting. Wait for the request to settle, then reconcile the actual
+table and rows in a new owner-authenticated session before any further write.
+Never attempt another call in the timed-out page, and do not click a write
+again just because its response was lost.
 
 ## SDK and security limitations
 
