@@ -63,9 +63,17 @@ not enforce uniqueness or relationships as foreign keys.
    refuses to operate without owner acknowledgement.
 3. Enter the current hotel-local date, the IANA zone `Africa/Lagos`, and a
    current hotel-local wall timestamp. Do not use the browser clock as an
-   authority. The offline domain tests inject a deterministic IANA zone because
-   this Windows environment lacks a system tz database; the compiled UI uses
-   Workpeg's documented `dates` capability.
+   authority. **Before the first approved row write, record the exact approved
+   date, IANA zone and wall timestamp privately and reuse those identical
+   values on every page reload for this entire seven-row plan.** They determine
+   check-in, request and audit instants; changing the time mid-sequence changes
+   expected records and will correctly stop partial-row reconciliation.
+   Never fabricate a new "current" time to bypass that stop. If the operator
+   crosses a hotel-local day boundary before the plan is complete, stop and
+   review the time/business rules instead of changing existing rows or
+   relabeling the old stay as current. The offline domain tests inject a
+   deterministic IANA zone because this Windows environment lacks a system
+   tz database; the compiled UI uses Workpeg's documented `dates` capability.
 4. Choose **Inspect all nine schemas and complete row inventories**. Confirm
    that the existing room type appears exactly once and remains capacity 3.
    Review every table row count and any failure. An empty list is only the
