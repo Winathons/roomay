@@ -408,6 +408,7 @@ class DevSchemaMigration(App):
                     # incompatible tables. Never label that a validation success
                     # or retain an earlier approved inspection baseline.
                     self.reviewed_signature = ""
+                    self.last_success = "None"
                     self.failure = "Inventory has blockers or missing required room_types. No table was validated for migration; no change was attempted."
                     self.operation_status = "Read-only inspection blocked; owner review required"
                     return
