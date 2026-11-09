@@ -545,6 +545,7 @@ class DevVerticalSlice(App):
         self.timed_out = False
         self.ticks = 0
         self.status = "Reading all nine schemas and complete row inventories"
+        write_started = False
         try:
             inventory = await self.fresh_inventory()
             if inventory is None or self.timed_out: return
@@ -625,6 +626,7 @@ class DevVerticalSlice(App):
                     return
                 name = "Roomay Service Requests" if self.selected_step == "service_requests" else ("Roomay Service Request Audit" if self.selected_step == "service_request_audit" else self.selected_step)
                 row_uuid = inventory["ids"][self.table_key(name)]
+                write_started = True
                 self.write_started = True
                 self.write_started_this_page = True
                 self.uncertain = True
@@ -666,7 +668,7 @@ class DevVerticalSlice(App):
                 return
         except Exception as exception:
             message = str(exception)
-            if self.write_started:
+            if write_started:
                 # An error after add_row began cannot prove whether Workpeg
                 # persisted the row, even for HTTP 401/403 or read-back errors.
                 self.uncertain = True
