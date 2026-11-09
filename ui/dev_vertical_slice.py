@@ -545,7 +545,6 @@ class DevVerticalSlice(App):
         self.timed_out = False
         self.ticks = 0
         self.status = "Reading all nine schemas and complete row inventories"
-        write_started = False
         try:
             inventory = await self.fresh_inventory()
             if inventory is None or self.timed_out: return
@@ -667,12 +666,18 @@ class DevVerticalSlice(App):
                 return
         except Exception as exception:
             message = str(exception)
-            if "HTTP 401" in message:
-                self.error = "Authentication failed or expired (401). No success claim was made."
+            if self.write_started:
+                # An error after add_row began cannot prove whether Workpeg
+                # persisted the row, even for HTTP 401/403 or read-back errors.
+                self.uncertain = True
+                if "HTTP 401" in message or "HTTP 403" in message:
+                    self.error = "Authorization error during or after row creation. Outcome uncertain; do not retry. Reconcile as owner."
+                else:
+                    self.error = "Create or verification failed after write began. Outcome uncertain; do not retry. Reconcile as owner."
+            elif "HTTP 401" in message:
+                self.error = "Authentication failed or expired (401). No write was attempted."
             elif "HTTP 403" in message:
-                self.error = "Access denied (403). Verify the owner and Roomay AI development business."
-            elif write_started:
-                self.error = "Create failed, timed out, or disconnected. Outcome uncertain; do not retry."
+                self.error = "Access denied (403). No write was attempted."
             else:
                 self.error = "Inventory read failed, was malformed, or is incomplete. No write was attempted."
         finally:
