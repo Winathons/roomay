@@ -84,6 +84,20 @@ test('inspection verifies existing room_types and lists the eight remaining cand
   assert.match(JSON.stringify(app.state.table_lines),/rooms \/ missing_or_unreadable/);
   assert.equal(app.state.prepared,false);
 });
+test('blocked read-only inspection does not claim validation or retain an old baseline',async()=>{
+  const app=setup();
+  await app.inspect();
+  assert.match(app.state.last_success,/room_types validated/);
+  assert.ok(app.state.reviewed_signature.length>0);
+  hotelTables.length=0; // Simulates a newly unreadable/missing required existing table.
+  await app.inspect();
+  assert.equal(app.state.reviewed_signature,'');
+  assert.equal(app.state.last_success,'None');
+  assert.equal(app.state.prepared,false);
+  assert.match(app.state.failure,/missing required room_types/);
+  assert.match(app.state.operation_status,/blocked/);
+  assert.equal(count('create_table'),0);
+});
 test('wrong business and absent owner attestation fail before protected reads',async()=>{
   let app=setup(); routeBusiness='00000000-0000-4000-8000-000000000099'; await app.inspect(); assert.equal(calls.length,0);
   app=setup(); app.state.owner_attestation=''; await app.inspect(); assert.equal(calls.length,0);
