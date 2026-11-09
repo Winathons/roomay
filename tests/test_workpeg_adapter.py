@@ -218,6 +218,27 @@ class SnapshotAndWriteContractTests(unittest.TestCase):
         with self.assertRaisesRegex(AdapterError, "invalid_service_request"):
             normalize_snapshot(BUSINESS_ID, broken)
 
+    def test_audit_hotel_scope_and_sequence_are_validated(self):
+        rows = remote_snapshot()
+        plan = service_request_plan(synthetic_hotel())
+        rows["service_requests"] = [remote_row(
+            "service_requests", plan["target_request"], 90)]
+        rows["service_request_audit"] = [remote_row(
+            "service_request_audit", plan["event"], 91)]
+        wrong_hotel = deepcopy(rows)
+        wrong_hotel["service_request_audit"][0]["data"]["hotel_id"] = uid("other-hotel")
+        with self.assertRaisesRegex(AdapterError, "service_request_audit_hotel_mismatch"):
+            normalize_snapshot(BUSINESS_ID, wrong_hotel)
+
+        duplicate_sequence = deepcopy(rows)
+        second = deepcopy(duplicate_sequence["service_request_audit"][0])
+        second["id"] = 92
+        second["fingerprint"] = "second-audit-fingerprint"
+        second["data"]["event_id"] = uid("second-audit-event")
+        duplicate_sequence["service_request_audit"].append(second)
+        with self.assertRaisesRegex(AdapterError, "duplicate_service_request_audit_sequence"):
+            normalize_snapshot(BUSINESS_ID, duplicate_sequence)
+
     def test_historical_request_room_is_rejected_when_current_stay_room_differs(self):
         hotel = synthetic_hotel()
         plan = service_request_plan(hotel)

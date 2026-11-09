@@ -8,6 +8,10 @@ from pathlib import Path
 from domain.fixtures import synthetic_hotel
 from domain.hotel import room_eligibility
 from domain.reception import build_reception_snapshot
+from domain.workpeg_adapter import normalize_snapshot
+from tests.test_vertical_slice import (
+    BUSINESS, DATE, add_expected_prefix, prepare, rows_inventory,
+)
 from ui.hotel_data import HotelData
 
 
@@ -15,6 +19,54 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class ReceptionProjectionTests(unittest.TestCase):
+    def test_verified_vertical_slice_projects_distinct_reservation_stay_guest_and_audit(self):
+        target = prepare(rows_inventory())
+        complete = add_expected_prefix(rows_inventory(), target, 7)
+        normalized = normalize_snapshot(BUSINESS, {
+            "room_types": complete["room_types"], "rooms": complete["rooms"],
+            "guests": complete["guests"], "reservations": complete["reservations"],
+            "stays": complete["stays"], "stay_guests": complete["stay_guests"],
+            "room_blocks": complete["room_blocks"],
+            "service_requests": complete["Roomay Service Requests"],
+            "service_request_audit": complete["Roomay Service Request Audit"],
+        })
+        view = build_reception_snapshot(
+            normalized["hotel"], normalized["service_requests"], DATE,
+            normalized["service_request_audit"],
+        )
+        room = next(item for item in view["rooms"] if item["number"] == "205")
+        request = view["requests"][0]
+        self.assertEqual(room["reservation_status"], "confirmed")
+        self.assertEqual(room["stay_status"], "checked_in")
+        self.assertEqual(room["occupancy"], "In house")
+        self.assertEqual(room["guest"], "WOR-60 Fictional Guest (Synthetic)")
+        self.assertEqual(request["room"], "205")
+        self.assertEqual(request["category"], "extra_towels")
+        self.assertEqual(request["department"], "housekeeping")
+        self.assertEqual(request["status"], "received")
+        self.assertEqual(request["audit_history"][0]["commit_state"], "pending")
+        self.assertIn("delivery is not represented", request["audit_status"])
+        self.assertNotIn("operation_signature", request["audit_history"][0])
+        self.assertNotIn("actor_id", request["audit_history"][0])
+
+    def test_partial_or_inconsistent_audit_is_truthful_or_rejected(self):
+        target = prepare(rows_inventory())
+        complete = add_expected_prefix(rows_inventory(), target, 6)
+        normalized = normalize_snapshot(BUSINESS, {
+            "room_types": complete["room_types"], "rooms": complete["rooms"],
+            "guests": complete["guests"], "reservations": complete["reservations"],
+            "stays": complete["stays"], "stay_guests": complete["stay_guests"],
+            "room_blocks": complete["room_blocks"],
+            "service_requests": complete["Roomay Service Requests"],
+            "service_request_audit": [],
+        })
+        view = build_reception_snapshot(
+            normalized["hotel"], normalized["service_requests"], DATE, [],
+        )
+        self.assertEqual(view["requests"][0]["status"], "received")
+        self.assertEqual(view["requests"][0]["audit_history"], [])
+        self.assertEqual(view["requests"][0]["audit_status"], "No audit event visible")
+
     def test_today_projection_preserves_reservation_and_stay_distinction(self):
         view = build_reception_snapshot(synthetic_hotel(), [], "2026-11-06")
         self.assertEqual(view["metrics"], {

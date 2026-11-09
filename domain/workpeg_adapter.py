@@ -288,10 +288,20 @@ def normalize_snapshot(business_id, rows_by_table):
     audit, refs = decode_rows("service_request_audit", business_id,
                               rows_by_table["service_request_audit"])
     references.extend(refs)
-    request_ids = {request["request_id"] for request in requests}
+    requests_by_id = {request["request_id"]: request for request in requests}
+    audit_sequences = {}
     for event in audit:
-        if event["request_id"] not in request_ids:
+        request = requests_by_id.get(event["request_id"])
+        if request is None:
             raise AdapterError("orphan_service_request_audit")
+        if event["hotel_id"] != request["hotel_id"]:
+            raise AdapterError("service_request_audit_hotel_mismatch")
+        if type(event["sequence"]) is not int or event["sequence"] < 1:
+            raise AdapterError("invalid_service_request_audit_sequence")
+        sequences = audit_sequences.setdefault(event["request_id"], set())
+        if event["sequence"] in sequences:
+            raise AdapterError("duplicate_service_request_audit_sequence")
+        sequences.add(event["sequence"])
     return {
         "hotel": hotel,
         "service_requests": requests,

@@ -110,4 +110,51 @@ assert.match(rendered, /Access denied/);
 assert.match(rendered, /Connection unavailable/);
 assert.doesNotMatch(rendered, /DEMO DATA|Fictional|create_table|add_row|update_row|â|Â/);
 
-console.log('compiled reception controller: dates, overdue stays and three room callbacks passed');
+// Exercise the compiled projection with the exact relationship shape used by
+// the canonical WOR-60 synthetic vertical slice, including persisted audit
+// rows. Canary private fields must not enter the rendered receptionist tree.
+const sliceApp = new ReceptionTest();
+sliceApp.state.operational_date = '2026-11-08';
+sliceApp.state.room_types = [{entity_id: id(101), name: 'Roomay TEST Room Type (Fictional)', capacity: 3}];
+sliceApp.state.rooms = [{entity_id: id(102), number: '205', room_type_id: id(101),
+  enabled: true, housekeeping: 'ready'}];
+sliceApp.state.guests = [{entity_id: id(103), display_name: 'WOR-60 Fictional Guest (Synthetic)'}];
+sliceApp.state.reservations = [{entity_id: id(104), guest_id: id(103), room_type_id: id(101),
+  room_id: id(102), arrival: '2026-11-08', departure: '2026-11-10', party_size: 1,
+  source: 'advance', status: 'confirmed'}];
+sliceApp.state.stays = [{entity_id: id(105), reservation_id: id(104), room_id: id(102),
+  checked_in_at: '2026-11-08T15:00:00+00:00', status: 'checked_in'}];
+sliceApp.state.stay_guests = [{entity_id: id(106), stay_id: id(105), guest_id: id(103),
+  joined_at: '2026-11-08T15:00:00+00:00'}];
+sliceApp.state.room_blocks = [];
+sliceApp.state.service_requests = [{request_id: id(107), hotel_id: id(108), stay_id: id(105),
+  room_id: id(102), guest_id: id(103), origin: 'reception_desk', category: 'extra_towels',
+  description: 'Synthetic WOR-60 extra-towels request for Room 205.', urgency: 'normal',
+  department: 'housekeeping', status: 'received', last_event_id: id(109), triage_required: false}];
+sliceApp.state.request_audit = [{event_id: id(109), hotel_id: id(108), request_id: id(107),
+  sequence: 1, event_type: 'created', from_status: null, to_status: 'received',
+  actor_id: 'PRIVATE-ACTOR-CANARY', actor_kind: 'staff', actor_department: 'reception',
+  reason: 'PRIVATE-REASON-CANARY', occurred_at: '2026-11-08T15:01:00+00:00',
+  commit_state: 'pending', operation_id: 'PRIVATE-OPERATION-CANARY',
+  operation_signature: 'PRIVATE-SIGNATURE-CANARY'}];
+sliceApp.state.view_state = 'loaded';
+sliceApp.state.status = 'Records loaded successfully';
+sliceApp.project_records();
+assert.equal(sliceApp.state.in_house_cards[0].guest, 'WOR-60 Fictional Guest (Synthetic)');
+assert.equal(sliceApp.state.in_house_cards[0].reservation_status, 'confirmed');
+assert.equal(sliceApp.state.in_house_cards[0].stay_status, 'checked_in');
+assert.equal(sliceApp.state.request_cards[0].room, '205');
+assert.equal(sliceApp.state.request_cards[0].department, 'housekeeping');
+assert.equal(sliceApp.state.request_cards[0].status, 'received');
+assert.match(sliceApp.state.request_cards[0].audit_status, /delivery is not represented/);
+const sliceTree = JSON.stringify(sliceApp.build());
+assert.match(sliceTree, /Roomay TEST Room Type/);
+assert.match(sliceTree, /WOR-60 Fictional Guest \(Synthetic\)/);
+assert.match(sliceTree, /Reservation: confirmed - Physical stay: checked_in/);
+assert.match(sliceTree, /extra_towels - housekeeping/);
+assert.match(sliceTree, /received/);
+assert.match(sliceTree, /Audit 1: created - start/);
+assert.match(sliceTree, /delivery is not represented/);
+assert.doesNotMatch(sliceTree, /PRIVATE-ACTOR-CANARY|PRIVATE-REASON-CANARY|PRIVATE-OPERATION-CANARY|PRIVATE-SIGNATURE-CANARY/);
+
+console.log('compiled reception controller: Room 205 vertical slice, audit privacy, dates, overdue stays and three room callbacks passed');
