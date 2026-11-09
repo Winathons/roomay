@@ -1,5 +1,10 @@
 # WOR-34 receptionist application
 
+> The historical namespace rejection described in this document was later
+> resolved in the Roomay AI development business. The owner reports verified
+> persistence for the existing `room_types` table; the remaining table schemas
+> and staff permissions are separate open gates. This route remains read-only.
+
 WOR-34 replaces the release demo with an authenticated, business-scoped,
 read-only receptionist route:
 

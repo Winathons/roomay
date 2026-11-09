@@ -4,6 +4,12 @@
 document and `domain/schema_provisioning.py` produce reviewable plans and
 validate mock/read-back responses. They do not call Workpeg or expose a
 provisioning route. Workpeg remains the only intended operational database.
+
+> **Historical evidence note (updated November 9, 2026):** The missing or
+> unreadable `room_types` observation below is superseded by the owner's later
+> verified development-table evidence. The existing owner-only table and
+> fictional row must be preserved. WOR-59 prepares the remaining eight tables
+> offline; no Workpeg call or provisioning occurs in this change.
 The narrower first-table, owner-operated procedure is documented in
 [WOR-29 Phase B](wor-29-first-table-test.md); it is a separate dev-only
 artifact and does not alter the release router.

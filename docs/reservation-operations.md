@@ -45,7 +45,7 @@ Official SDK references:
 
 ## Operational integration checklist
 
-1. Resolve **WOR-28**: Workpeg currently returns `400 Unknown peg namespace 'roomay'`; no authenticated persistence has been demonstrated.
+1. Historical blocker superseded: the owner reports that authenticated access and persistence for the existing development `room_types` table have now been verified. WOR-28 remains open for role permissions and the remaining hosted integration criteria; do not treat the former HTTP 400 namespace error as current status.
 2. Verify table/schema and owner role permissions, plus any real support for atomic confirmation or a serialized trusted gateway under **WOR-29** and **WOR-22**. Do not invent platform guarantees.
 3. Adapt the pure plans to an actual, authenticated Workpeg reservation service. Fetch a **complete fresh** snapshot, authorize the actor, recheck constraints at commit time, perform the guarded state transition and verify the actual persisted record.
 4. Register the actual read-only booking request and staff confirmation experiences under business-scoped routes, not the temporary fixture route. Show honest pending/confirmed status and error/recovery.

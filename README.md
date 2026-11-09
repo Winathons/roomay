@@ -4,7 +4,7 @@
 
 **Repository:** [Winathons/roomay](https://github.com/Winathons/roomay) · **Work board:** [Roomay in Linear](https://linear.app/workpeg/project/roomay-workpeg-hospitality-hackathon-7b7a7ce4b3b9) · **SDK:** [Workpeg documentation](https://developers.workpeg.com/docs/latest/)
 
-> **Project status (November 8, 2026):** The `roomay` Peg registration is approved and associated with the separate Roomay AI development business. The owner reports that authenticated table discovery now returns HTTP 200 for `roomay_hotel_v1`, but the required `room_types` table is missing or unreadable. **No table provisioning, persistent row writes, or permissions have been verified**, and no Peg release is published. Do not confuse successful discovery or a passing build with verified operational persistence.
+> **Project status (November 9, 2026):** The owner reports authenticated development access and persistence verification for the existing owner-only `roomay_hotel_v1/room_types` table: table creation, direct GET/listing, fictional row create/update/read-back, and persistence after independent browser reload. This does not verify the remaining eight tables, staff-role permissions, production persistence, or a published Peg release. Do not modify or recreate the existing `room_types` table or its fictional record.
 
 ## Start here — first-time team setup
 
@@ -24,8 +24,9 @@ The release router exposes the read-only receptionist application at
 seeds records, and enables no booking, check-in, assignment, or request writes.
 The former demo, diagnostic smoke, and raw adapter routes are not registered in
 the release router. Their source remains isolated for offline contract testing.
-See [WOR-34 implementation notes](docs/wor-34.md). Live installation,
-authentication and persistence remain unverified; table discovery alone does not establish either.
+See [WOR-34 implementation notes](docs/wor-34.md). Authenticated development
+`room_types` persistence is owner-reported verified; multi-table provisioning,
+role permissions and production integration remain unverified.
 
 ### Step 1 — Clone the existing repository
 
