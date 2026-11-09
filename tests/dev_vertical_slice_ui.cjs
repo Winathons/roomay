@@ -145,7 +145,7 @@ test('exact room type preview uses preserved entity ID; no preview write occurs'
   assert.ok(app.state.selected_preview.includes('data.number=205'));
   assert.ok(app.state.selected_preview.includes('data.room_type_id='+expected.room_type.entity_id));
   assert.ok(app.state.selected_preview.includes('data.housekeeping=ready'));
-  assert.doesNotMatch(app.state.selected_preview,/\\[object Object\\]/);
+  assert.doesNotMatch(app.state.selected_preview,/\[object Object\]/);
   assert.equal(count('add_row'),0);
   assert.equal(rowsByKey.room_types.length,1);
   await app.create_prepared(); assert.equal(count('add_row'),0,'missing exact typed confirmation cannot write');
