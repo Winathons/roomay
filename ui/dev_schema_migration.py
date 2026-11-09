@@ -402,9 +402,17 @@ class DevSchemaMigration(App):
                 return
             self.show_plan(plan)
             if operation == "inspect":
-                self.reviewed_signature = plan["signature"]
                 self.prepared = False
-                self.last_success = "Both namespaces inspected; room_types was validated and never modified"
+                if not plan["valid_inventory"]:
+                    # A readable response can still have missing/duplicate or
+                    # incompatible tables. Never label that a validation success
+                    # or retain an earlier approved inspection baseline.
+                    self.reviewed_signature = ""
+                    self.failure = "Inventory has blockers or missing required room_types. No table was validated for migration; no change was attempted."
+                    self.operation_status = "Read-only inspection blocked; owner review required"
+                    return
+                self.reviewed_signature = plan["signature"]
+                self.last_success = "Both namespaces inspected; existing room_types validated and never modified"
                 self.operation_status = "Read-only inspection complete"
                 return
             if not plan["valid_inventory"]:
