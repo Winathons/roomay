@@ -481,6 +481,20 @@ class DevVerticalSlice(App):
                 "inherit_business_permission": True,
                 "inherit_individual_permissions": False}
 
+    def preview_payload(self, payload):
+        # Do not stringify the whole Python dict: Workpeg's UI compiler maps
+        # str(object) to "[object Object]" in the browser. Expand every scalar
+        # that will actually be submitted so the owner can review it first.
+        preview = ("position=" + str(payload["position"])
+                   + " | namespace=" + str(payload["namespace"])
+                   + " | inherit_business_permission="
+                   + str(payload["inherit_business_permission"])
+                   + " | inherit_individual_permissions="
+                   + str(payload["inherit_individual_permissions"]))
+        for key in payload["data"]:
+            preview = preview + " | data." + key + "=" + str(payload["data"][key])
+        return preview
+
     def record_for_step(self, records, step):
         for key in records:
             if key == step: return records[key][0]
@@ -595,7 +609,7 @@ class DevVerticalSlice(App):
                 record = self.record_for_step(records, check["step"])
                 if record is None: self.error = "No safe next row is available."; return
                 self.selected_payload = self.payload_for(check["step"], record)
-                self.selected_preview = str(self.selected_payload)
+                self.selected_preview = self.preview_payload(self.selected_payload)
                 self.confirmation = ""
                 self.last_success = "One exact row prepared for review only; no write sent"
                 self.status = "Prepared one row: " + check["step"] + ". Inspect payload and confirm separately."
