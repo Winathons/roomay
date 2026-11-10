@@ -17,6 +17,10 @@
 **Node 24 is required for the compiled UI offline tests.** No Docker, Supabase,
 Firebase, Workpeg API token or separate database is needed for local UI/testing.
 Workpeg account access becomes important later for authenticated business records.
+The real guest service backend is separately documented in
+[docs/guest-service-backend.md](docs/guest-service-backend.md); it requires a
+configured PostgreSQL instance and owner-provisioned Workpeg OIDC/read-only
+server access. It is not started by the Workpeg UI development server.
 
 The release router exposes the read-only receptionist application at
 `/b/<business_id>/reception`. It reads the nine-table

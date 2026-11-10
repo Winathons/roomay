@@ -23,9 +23,11 @@ jobs:
         with:
           python-version: "3.12"
           cache: pip
-          cache-dependency-path: requirements-dev.txt
+          cache-dependency-path: |
+            requirements-dev.txt
+            server-requirements.txt
 
-      - name: Install pinned Workpeg SDK
+      - name: Install Workpeg SDK and backend test dependencies
         run: python -m pip install -r requirements-dev.txt
 
       - name: Set up Node for compiled UI offline tests
@@ -34,7 +36,7 @@ jobs:
           node-version: "24"
 
       - name: Python syntax check
-        run: python -m compileall -q ui function domain tests
+        run: python -m compileall -q ui function domain tests backend migrations
 
       - name: Offline hotel rules and compiled smoke UI
         run: python -m unittest discover -s tests -v
