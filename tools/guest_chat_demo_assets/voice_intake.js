@@ -11,12 +11,21 @@
     let listening = false;
     let transcript = "";
     let baseText = "";
+    let baseWasVoiceDraft = false;
     let lastError = "";
     let voiceDraft = false;
     let available = false;
     let busy = false;
 
     const updateButton = () => { button.disabled = busy || !available; };
+    const controller = (supported, ready = Promise.resolve()) => ({
+      get supported() { return supported && available; },
+      get listening() { return listening; },
+      get voiceDraft() { return voiceDraft; },
+      ready,
+      clearDraft() { transcript = ""; setDraft(false); },
+      setBusy(value) { busy = value === true; updateButton(); },
+    });
 
     const setStatus = (message) => { status.textContent = message; };
     const setListening = (value) => {
@@ -38,7 +47,7 @@
     if (!Recognition) {
       button.disabled = true;
       setStatus("Voice input is not supported in this browser. Type your message instead.");
-      return { supported: false, get listening() { return listening; }, get voiceDraft() { return voiceDraft; }, clearDraft: () => setDraft(false), setBusy: () => {} };
+      return controller(false);
     }
 
     try {
@@ -46,7 +55,7 @@
     } catch (_error) {
       button.disabled = true;
       setStatus("Voice input is unavailable here. Type your message instead.");
-      return { supported: false, get listening() { return listening; }, get voiceDraft() { return voiceDraft; }, clearDraft: () => setDraft(false), setBusy: () => {} };
+      return controller(false);
     }
 
     // An older/vendor implementation without this property may use a remote
@@ -56,23 +65,59 @@
         || typeof recognition.stop !== "function") {
       button.disabled = true;
       setStatus("Private on-device voice input is not supported in this browser. Type your message instead.");
-      return { supported: false, get listening() { return listening; }, get voiceDraft() { return voiceDraft; }, clearDraft: () => setDraft(false), setBusy: () => {} };
+      return controller(false);
     }
 
     recognition.lang = "en-NG";
     recognition.continuous = false;
     recognition.interimResults = true;
     recognition.processLocally = true;
-    available = true;
-    updateButton();
-    setStatus("On-device voice is ready if this browser has the en-NG language pack. Press Start voice input to grant microphone access.");
+    button.disabled = true;
+    button.setAttribute("aria-busy", "true");
+    setStatus("Checking for an installed on-device en-NG dictation pack…");
+
+    if (typeof Recognition.available !== "function") {
+      button.setAttribute("aria-busy", "false");
+      setStatus("This browser cannot verify its on-device en-NG language pack. Type your message instead.");
+      return controller(false);
+    }
+
+    let availabilityCheck;
+    try {
+      availabilityCheck = Recognition.available({
+        langs: ["en-NG"], processLocally: true, quality: "dictation",
+      });
+    } catch (_error) {
+      availabilityCheck = Promise.reject(new Error("availability_check_failed"));
+    }
+    const ready = Promise.resolve(availabilityCheck).then((result) => {
+      button.setAttribute("aria-busy", "false");
+      if (result === "available") {
+        available = true;
+        updateButton();
+        setStatus("On-device en-NG dictation is available. Press Start voice input to grant microphone access.");
+      } else if (result === "downloadable") {
+        setStatus("The on-device en-NG language pack is not installed. Roomay will not download it; type your message instead.");
+      } else if (result === "downloading") {
+        setStatus("The on-device en-NG language pack is still downloading. Roomay did not start the download; type your message instead for now.");
+      } else if (result === "unavailable") {
+        setStatus("On-device en-NG dictation is unavailable in this browser. Type your message instead.");
+      } else {
+        setStatus("On-device en-NG availability could not be verified. Type your message instead.");
+      }
+    }).catch(() => {
+      button.setAttribute("aria-busy", "false");
+      setStatus("On-device en-NG availability could not be verified. Type your message instead.");
+    });
 
     recognition.onstart = () => {
       transcript = "";
       lastError = "";
-      setDraft(false);
+      setDraft(baseWasVoiceDraft);
       setListening(true);
-      setStatus("Listening on this device. Speak, then stop or wait for recognition to finish.");
+      setStatus(baseText
+        ? "Listening on this device. Existing text is being kept; new recognized words will be appended."
+        : "Listening on this device. Speak, then stop or wait for recognition to finish.");
     };
 
     recognition.onresult = (event) => {
@@ -134,10 +179,10 @@
         }
         input.focus();
       } else if (!lastError) {
-        setDraft(false);
+        setDraft(baseWasVoiceDraft);
         setStatus("No clear speech was recognized. Type your message instead.");
       } else {
-        setDraft(false);
+        setDraft(baseWasVoiceDraft);
       }
     };
 
@@ -156,9 +201,10 @@
       // microphone permission is never requested on page load or navigation.
       transcript = "";
       lastError = "";
-      // Preserve typed text; a prior voice-only draft is replaced by a fresh
-      // attempt, while ordinary typed content is retained before the transcript.
-      baseText = voiceDraft ? "" : input.value.trim();
+      // Every existing draft is preserved. New recognition is appended so a
+      // second recording cannot silently replace guest edits.
+      baseText = input.value.trim();
+      baseWasVoiceDraft = voiceDraft;
       try {
         recognition.start();
       } catch (_error) {
@@ -166,19 +212,7 @@
       }
     });
 
-    return {
-      supported: true,
-      get listening() { return listening; },
-      get voiceDraft() { return voiceDraft; },
-      clearDraft() {
-        transcript = "";
-        setDraft(false);
-      },
-      setBusy(value) {
-        busy = value === true;
-        updateButton();
-      },
-    };
+    return controller(true, ready);
   }
 
   globalThis.RoomayVoiceIntake = { attachVoiceIntake };

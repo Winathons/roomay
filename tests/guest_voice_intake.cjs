@@ -43,7 +43,15 @@ class MockRecognition {
   constructor() { this.processLocally = false; this.results = []; this.startCalls = 0; this.stopCalls = 0; MockRecognition.latest = this; }
   start() { this.startCalls += 1; if (this.onstart) this.onstart(); }
   stop() { this.stopCalls += 1; }
+  static available(options) {
+    MockRecognition.availabilityOptions = options;
+    if (MockRecognition.availabilityError) return Promise.reject(new Error('availability denied'));
+    return Promise.resolve(MockRecognition.availabilityResult || 'available');
+  }
 }
+MockRecognition.availabilityResult = 'available';
+MockRecognition.availabilityError = false;
+MockRecognition.availabilityOptions = null;
 
 test('unsupported browsers keep typed input available', () => {
   const h = voiceHarness(null);
@@ -63,20 +71,27 @@ test('cloud-only recognizers are rejected instead of sending audio to a service'
   assert.equal(h.status.textContent.includes('Private on-device'), true);
 });
 
-test('microphone start is only invoked by the direct button gesture and is local en-NG', () => {
+test('microphone start waits for verified local en-NG dictation and a direct button gesture', async () => {
   const h = voiceHarness(MockRecognition);
+  assert.equal(h.button.disabled, true, 'voice stays disabled while pack status is checked');
+  await h.voice.ready;
   const recognition = MockRecognition.latest;
   assert.equal(recognition.startCalls, 0, 'page initialization must not request microphone access');
   assert.equal(recognition.processLocally, true);
   assert.equal(recognition.lang, 'en-NG');
+  assert.equal(Array.from(MockRecognition.availabilityOptions.langs).join(','), 'en-NG');
+  assert.equal(MockRecognition.availabilityOptions.processLocally, true);
+  assert.equal(MockRecognition.availabilityOptions.quality, 'dictation');
+  assert.equal(h.button.disabled, false);
   h.button.emit('click');
   assert.equal(recognition.startCalls, 1);
   assert.equal(h.button.attributes['aria-pressed'], 'true');
   assert.match(h.status.textContent, /Listening on this device/);
 });
 
-test('denied microphone access reports a safe typed fallback', () => {
+test('denied microphone access reports a safe typed fallback', async () => {
   const h = voiceHarness(MockRecognition);
+  await h.voice.ready;
   h.input.value = 'My typed note stays here';
   h.button.emit('click');
   const recognition = MockRecognition.latest;
@@ -87,8 +102,43 @@ test('denied microphone access reports a safe typed fallback', () => {
   assert.equal(h.voice.voiceDraft, false);
 });
 
-test('missing en-NG local pack disables voice without downloading anything', () => {
+test('downloadable, downloading and unavailable packs stay typed-only without installing', async () => {
+  for (const [result, expected] of [
+    ['downloadable', /not installed.*will not download/i],
+    ['downloading', /still downloading.*did not start/i],
+    ['unavailable', /dictation is unavailable/i],
+  ]) {
+    MockRecognition.availabilityResult = result;
+    const h = voiceHarness(MockRecognition);
+    await h.voice.ready;
+    assert.equal(h.button.disabled, true);
+    assert.match(h.status.textContent, expected);
+    h.button.emit('click');
+    assert.equal(MockRecognition.latest.startCalls, 0);
+    assert.equal(typeof MockRecognition.latest.install, 'undefined');
+  }
+  MockRecognition.availabilityResult = 'available';
+});
+
+test('missing or failed availability API fails closed to typed input', async () => {
+  class NoAvailability extends MockRecognition {}
+  NoAvailability.available = undefined;
+  const missing = voiceHarness(NoAvailability);
+  await missing.voice.ready;
+  assert.equal(missing.button.disabled, true);
+  assert.match(missing.status.textContent, /cannot verify.*Type your message/i);
+
+  MockRecognition.availabilityError = true;
+  const failed = voiceHarness(MockRecognition);
+  await failed.voice.ready;
+  assert.equal(failed.button.disabled, true);
+  assert.match(failed.status.textContent, /could not be verified.*Type your message/i);
+  MockRecognition.availabilityError = false;
+});
+
+test('unexpected language-pack loss after availability still refuses cloud fallback', async () => {
   const h = voiceHarness(MockRecognition);
+  await h.voice.ready;
   h.button.emit('click');
   const recognition = MockRecognition.latest;
   recognition.onerror({ error: 'language-not-supported' });
@@ -98,8 +148,9 @@ test('missing en-NG local pack disables voice without downloading anything', () 
   assert.equal(typeof recognition.install, 'undefined');
 });
 
-test('interrupted speech keeps partial transcript editable and unsent', () => {
+test('interrupted speech keeps partial transcript editable and unsent', async () => {
   const h = voiceHarness(MockRecognition);
+  await h.voice.ready;
   h.button.emit('click');
   const recognition = MockRecognition.latest;
   recognition.onresult({ results: [{ isFinal: false, 0: { transcript: 'Abeg towels room 205' } }] });
@@ -112,8 +163,29 @@ test('interrupted speech keeps partial transcript editable and unsent', () => {
   assert.equal(h.input.value, 'Edited text');
 });
 
-test('empty recognition leaves no transcript to submit', () => {
+test('a second recording appends to an edited transcript without replacing it', async () => {
   const h = voiceHarness(MockRecognition);
+  await h.voice.ready;
+  h.button.emit('click');
+  let recognition = MockRecognition.latest;
+  recognition.onresult({ results: [{ isFinal: true, 0: { transcript: 'bring towels' } }] });
+  recognition.onend();
+  h.input.value = 'Please bring two clean towels to my room.';
+
+  h.button.emit('click');
+  recognition = MockRecognition.latest;
+  assert.equal(recognition.startCalls, 2);
+  assert.match(h.status.textContent, /Existing text is being kept/);
+  recognition.onresult({ results: [{ isFinal: true, 0: { transcript: 'before dinner' } }] });
+  assert.equal(h.input.value, 'Please bring two clean towels to my room. before dinner');
+  recognition.onend();
+  assert.equal(h.input.value, 'Please bring two clean towels to my room. before dinner');
+  assert.equal(h.voice.voiceDraft, true);
+});
+
+test('empty recognition leaves no transcript to submit', async () => {
+  const h = voiceHarness(MockRecognition);
+  await h.voice.ready;
   h.input.value = 'Existing typed request';
   h.button.emit('click');
   MockRecognition.latest.onend();
@@ -122,8 +194,9 @@ test('empty recognition leaves no transcript to submit', () => {
   assert.match(h.status.textContent, /No clear speech/);
 });
 
-test('overlong transcript is shown for editing rather than silently truncated', () => {
+test('overlong transcript is shown for editing rather than silently truncated', async () => {
   const h = voiceHarness(MockRecognition);
+  await h.voice.ready;
   h.button.emit('click');
   const text = 'x'.repeat(1001);
   MockRecognition.latest.onresult({ results: [{ isFinal: true, 0: { transcript: text } }] });
@@ -162,6 +235,7 @@ function makeAppHarness({ Recognition = MockRecognition } = {}) {
 test('edited transcript is explicitly sent once through the existing typed-intake endpoint', async () => {
   const h = makeAppHarness();
   await new Promise(resolve => setTimeout(resolve, 0));
+  await new Promise(resolve => setTimeout(resolve, 0));
   assert.equal(h.recognition.startCalls, 0);
   h.elements['voice-button'].emit('click');
   h.recognition.onresult({ results: [{ isFinal: true, 0: { transcript: 'rough transcript' } }] });
@@ -181,6 +255,7 @@ test('edited transcript is explicitly sent once through the existing typed-intak
 
 test('malformed overlong recognized content is blocked before request intake', async () => {
   const h = makeAppHarness();
+  await new Promise(resolve => setTimeout(resolve, 0));
   await new Promise(resolve => setTimeout(resolve, 0));
   h.elements['voice-button'].emit('click');
   h.recognition.onresult({ results: [{ isFinal: true, 0: { transcript: 'z'.repeat(1001) } }] });
