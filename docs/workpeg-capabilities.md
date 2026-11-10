@@ -1,24 +1,24 @@
 # Workpeg integration readiness — WOR-6
 
-This is a **development runbook**, not evidence that a live Workpeg connection is already working.
+This development runbook contains earlier setup procedures. For the current owner-verified live-data checkpoint and the **next required read-only restricted-account test**, see [WOR-28 restricted-account acceptance](wor-28-restricted-account-acceptance.md). Do not repeat earlier table or row creation steps.
 
-## Current confirmed state (2026-11-06)
+## Current checkpoint (November 10, 2026; historical setup context follows)
 
 - GitHub: `Winathons/roomay`, default branch `main`.
 - Local developer verified Python 3.13.5 and Workpeg SDK `0.152.0`; UI build and offline doctor pass in the pinned environment.
 - Starter page displayed `Hello from roomay` at `localhost:8081`.
 - **Approved:** Developer portal shows the `roomay` Peg registered and **Approved**; the owner confirms it is associated with the separate `Roomay AI` development business.
 - **Workpeg support-confirmed:** a Peg UI using authenticated staff-session table helpers can test data **locally with `--fake-cloud` and `--peg-namespace roomay` without a published/installed release**. Function/save-hook publishing is a separate workflow.
-- **Owner-reported (updated 2026-11-09):** the first `roomay_hotel_v1/room_types` table is present with owner-only permission `700`; fictional row create, update, read-back and persistence after independent browser reload were verified. This supersedes the earlier missing/unreadable report. The remaining eight tables and staff/row-level permission behavior remain unverified.
-- **Not yet verified:** table creation, row create/update, persisted read-back after reload, or multi-user permissions. No release is published and this task does not perform hosted writes.
+- **Owner-reported (updated 2026-11-10):** all nine canonical Workpeg tables now exist in Roomay AI with owner-only permission `700`. The `room_types` fictional test row (capacity 3) survived create/update/reload. The fictional Room 205 guest, reservation, active stay, registered occupant, extra-towels request and audit row were persisted and displayed by the read-only receptionist UI. These are owner observations, not independent staff-role evidence.
+- **Still open under WOR-28:** independent restricted/non-owner staff denial and any allowed-role permission evidence. The request's latest audit event was owner-observed as pending, so staff transitions remain blocked pending authorized reconciliation. This documentation update performs no hosted calls, writes, grants or release.
 
 ## 1. Separate development business (owner action)
 
 WOR-28 provides an offline-verified diagnostic source module, but WOR-34 no
 longer registers `/b/<business_id>/dev-smoke` in the release router. See the
 [owner runbook](dev-smoke.md) for SDK evidence,
-fake-cloud run instructions, exact manual test steps and an offline screenshot. No live
-persistence/permissions evidence has been added; WOR-28 and WOR-6 remain In Progress.
+fake-cloud run instructions, exact manual test steps and an offline screenshot. Owner-observed live
+persistence evidence is now recorded for the fictional Room 205 workflow. WOR-6 is Done; WOR-28 remains In Progress until independent restricted-account permission acceptance.
 
 Use a **dedicated Workpeg development account/business** containing fictional hotel data. Do not develop against a customer hotel or an intended production account.
 
@@ -60,9 +60,11 @@ Two key design constraints:
 1. **Never assume public guest access works like authenticated staff access.** The SDK documents staff membership requirements for its REST table APIs. Confirm a supported public channel before implementing a guest portal, or design a tightly scoped server-only gateway. Never embed developer tokens in the browser.
 2. `PATCH` replaces the row's **entire** `data` object when that field is supplied, despite being a partial update of the row overall. Read, merge relevant `data` keys, then save; do not wipe other fields accidentally.
 
-## 3. First persistent-data smoke test (fictional only)
+## 3. Historical first persistent-data smoke procedure — do not repeat
 
-After authenticated dev business access is available:
+The originally prescribed setup steps below are retained as project history. The first row persistence and later fictional Room 205 workflow were already verified by the owner; **do not create another table or seed again**. The next live test is **read-only** per [WOR-28 restricted-account acceptance](wor-28-restricted-account-acceptance.md).
+
+Earlier setup instructions were:
 
 1. Create a small `Roomay Dev Smoke` table belonging to the Roomay Peg and a development-only namespace, e.g., `roomay_smoke`.
 2. Define required `room_number` text and optional `status` text columns using supported table schema types. Keep table access owner-only unless a second staff account is specifically being tested.
@@ -88,10 +90,10 @@ Comment on [WOR-6](https://linear.app/workpeg/issue/WOR-6/configure-isolated-wor
 - Screenshot with sensitive values removed
 - Open blocker for public guest access / publishing, if any
 
-Keep WOR-6 **In Progress** until the table test actually succeeds.
+WOR-6 is **Done** on the owner-verified persistence evidence. Keep WOR-28 **In Progress** until an independent non-owner permission test is observed, recorded, and accepted.
 
 ## 5. Later Roomay architecture (not part of smoke test)
 
-The offline hotel model and fictional fixtures already exist in `domain/` (WOR-8 Phase A; 25 tests). Once [WOR-28](https://linear.app/workpeg/issue/WOR-28) proves real Workpeg table persistence and permissions, [WOR-29](https://linear.app/workpeg/issue/WOR-29) connects approved schemas to those tables and safely seeds fictional room records. Do not provision all tables or real guest data before validating Workpeg behavior.
+The offline hotel model and fictional fixtures already exist in `domain/` (WOR-8 Phase A; 25 tests). The nine canonical schemas and fictional Room 205 workflow are owner-reported as persisted and visible to the read-only receptionist; WOR-29 remains In Progress pending its broader acceptance criteria. WOR-28 is now specifically blocked on **independent staff permission testing**, not another migration or seeding exercise. No real guest data or unapproved staff access.
 
 The product goal remains a Workpeg-native hotel operating experience with precise reservations vs. in-house occupancy and separate maintenance/housekeeping readiness, using synthetic data until privacy and correctness are verified.
