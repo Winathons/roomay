@@ -202,7 +202,8 @@ class AccessControlContractTests(unittest.TestCase):
             request=self.request, snapshot=self.hotel,
             trusted_snapshot_hotel_id=self.hotel_id,
         )
-        self.assertEqual(view["request_id"], self.request["request_id"])
+        self.assertEqual(view["status"], self.request["status"])
+        self.assertNotIn("request_id", view)
         self.assertNotIn("room_id", view)
         wrong_guest = AccessContext(**{**guest.__dict__, "guest_id": uid("Guest A")})
         with self.assertRaisesRegex(AccessDenied, "guest_scope_denied"):

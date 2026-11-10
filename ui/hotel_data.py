@@ -1023,7 +1023,7 @@ class HotelData(App):
                                         Text(f"{request['guest']} - Room {request['room']}", variant="caption", tone="muted"),
                                         Text(request["audit_status"], variant="caption", tone="warning"),
                                         Column(*[
-                                            Text(f"Audit {event['sequence']}: {event['event_type']} - {event['from_status'] or 'start'} → {event['to_status']} · {event['commit_state']} · {event['occurred_at']}", variant="caption", tone="muted")
+                                            Text(f"Audit {event['sequence']}: {event['event_type']} - {event['from_status'] or 'start'} -> {event['to_status']} - {event['commit_state']} - {event['occurred_at']}", variant="caption", tone="muted")
                                             for event in request["audit_history"]
                                         ], gap=5),
                                         gap=9,

@@ -240,7 +240,11 @@ class HotelWorkflowTests(unittest.TestCase):
             guest_view = request_view(
                 request, guest_actor, self.staff, snapshot=self.hotel,
             )
-            self.assertEqual(guest_view["guest_id"], GUEST_ID)
+            self.assertEqual(guest_view["status"], "resolved")
+            for private_field in ("request_id", "guest_id", "stay_id", "hotel_id",
+                                  "room_id", "assigned_staff_id", "last_event_id",
+                                  "last_operation_signature", "idempotency_key"):
+                self.assertNotIn(private_field, guest_view)
             other_guest = dict(guest_actor, guest_id=uid("Guest B"))
             with self.assertRaisesRegex(AuthorizationError, "cross_guest_access"):
                 request_view(request, other_guest, self.staff, snapshot=self.hotel)
