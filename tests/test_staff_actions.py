@@ -57,10 +57,10 @@ class FakeIdentityResolver:
 
 
 class FakeRequestReader:
-    def __init__(self, request):
+    def __init__(self, request, events):
         self.value = {"business_id": BUSINESS, "hotel_id": HOTEL_ID,
                       "request": deepcopy(request), "fingerprint": "fp-1",
-                      "events": []}
+                      "events": deepcopy(events)}
         self.calls = []
 
     def read_request(self, request_id, business_id):
@@ -68,7 +68,7 @@ class FakeRequestReader:
         return deepcopy(self.value)
 
 
-def initial_request():
+def initial_request_outcome():
     hotel = synthetic_hotel()
     directory = staff_directory()
     guest_id = uid("Guest C")
@@ -83,7 +83,13 @@ def initial_request():
         directory, [], at="2026-11-06T12:00:00+01:00",
         request_id=uid("wor49-request"),
     )
-    return result["request"]
+    return result
+
+
+def committed(event):
+    result = deepcopy(event)
+    result["commit_state"] = "committed"
+    return result
 
 
 def action_command(request, action, operation_key, **extra):
@@ -95,9 +101,11 @@ def action_command(request, action, operation_key, **extra):
 
 class StaffActionGatewayTests(unittest.TestCase):
     def setUp(self):
-        self.request = initial_request()
+        creation = initial_request_outcome()
+        self.request = creation["request"]
+        self.creation_event = committed(creation["plan"]["event"])
         self.identity = FakeIdentityResolver()
-        self.reader = FakeRequestReader(self.request)
+        self.reader = FakeRequestReader(self.request, [self.creation_event])
         self.gateway = StaffActionGateway(
             self.identity, self.reader,
             lambda: "2026-11-06T12:01:00+01:00",
@@ -226,9 +234,14 @@ class StaffActionGatewayTests(unittest.TestCase):
             with self.subTest(invalid=invalid), self.assertRaises(StaffActionError):
                 self.gateway.prepare("session", invalid)
 
-        assigned = self.gateway.prepare("session", action_command(
-            self.request, "assign", "assign", assignee_id="housekeeper")).plan["target_request"]
+        assigned_plan = self.gateway.prepare("session", action_command(
+            self.request, "assign", "assign",
+            assignee_id="housekeeper")).plan
+        assigned = assigned_plan["target_request"]
         self.reader.value["request"] = assigned
+        self.reader.value["events"] = [
+            self.creation_event, committed(assigned_plan["event"]),
+        ]
         identity = FakeIdentityResolver(actor_id="housekeeper", department="housekeeping")
         gateway = StaffActionGateway(identity, self.reader, lambda: next(NOWS))
         command = action_command(assigned, "escalate", "urgent-escalation",
@@ -252,17 +265,60 @@ class StaffActionGatewayTests(unittest.TestCase):
                                  assignee_id="housekeeper")
         planned = self.gateway.prepare("session", command)
         current = deepcopy(planned.plan["target_request"])
-        event = deepcopy(planned.plan["event"])
-        event["commit_state"] = "committed"
-        self.reader.value.update(request=current, fingerprint="fp-2", events=[event])
+        event = committed(planned.plan["event"])
+        self.reader.value.update(
+            request=current, fingerprint="fp-2",
+            events=[self.creation_event, event],
+        )
         repeated = self.gateway.prepare("session", command)
         self.assertEqual(repeated.state, "verified_duplicate")
         self.assertTrue(repeated.persisted)
 
         event["commit_state"] = "pending"
-        self.reader.value["events"] = [event]
-        with self.assertRaisesRegex(StaffActionError, "duplicate_outcome_uncertain"):
+        self.reader.value["events"] = [self.creation_event, event]
+        with self.assertRaisesRegex(StaffActionError, "unreconciled_request_audit"):
             self.gateway.prepare("session", command)
+
+    def test_new_transition_refuses_missing_pending_duplicate_and_mismatched_audit(self):
+        command = action_command(
+            self.request, "assign", "audit-gate", assignee_id="housekeeper")
+        valid = self.reader.value["events"]
+        cases = {
+            "missing": [],
+            "pending": [dict(valid[0], commit_state="pending")],
+            "duplicate": [valid[0], valid[0]],
+            "wrong_request": [dict(valid[0], request_id=uid("other-request"))],
+            "wrong_version": [dict(valid[0], sequence=2)],
+            "wrong_status": [dict(valid[0], to_status="assigned")],
+            "wrong_event_id": [dict(valid[0], event_id=uid("other-event"))],
+            "wrong_operation_link": [dict(valid[0], operation_id=uid("other-operation"))],
+            "wrong_signature": [dict(valid[0], operation_signature="0" * 64)],
+            "gap": [dict(valid[0], sequence=2)],
+            "malformed": [{**valid[0], "unexpected": "field"}],
+        }
+        for name, events in cases.items():
+            with self.subTest(name=name):
+                self.reader.value["events"] = deepcopy(events)
+                with self.assertRaisesRegex(
+                        StaffActionError, "unreconciled_request_audit"):
+                    self.gateway.prepare("session", command)
+        self.reader.value["events"] = valid
+        self.assertEqual(self.gateway.prepare("session", command).state, "prepared")
+
+    def test_later_action_refuses_uncommitted_prior_event_even_if_request_matches(self):
+        command = action_command(
+            self.request, "assign", "prior-pending", assignee_id="housekeeper")
+        plan = self.gateway.prepare("session", command).plan
+        target = deepcopy(plan["target_request"])
+        pending = deepcopy(plan["event"])
+        self.reader.value.update(
+            request=target,
+            events=[self.creation_event, pending],
+        )
+        next_command = action_command(target, "acknowledge", "next-action")
+        next_command["expected_fingerprint"] = "fp-2"
+        with self.assertRaisesRegex(StaffActionError, "unreconciled_request_audit"):
+            self.gateway.prepare("session", next_command)
 
     def test_pending_audit_request_commit_order_and_partial_failure_reconcile(self):
         plan = self.gateway.prepare("session", action_command(

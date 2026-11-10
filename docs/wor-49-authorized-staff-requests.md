@@ -50,6 +50,16 @@ projection; department staff see only their routed department and do not receive
 guest/stay/hotel/idempotency/audit-linkage fields. The guest status projection
 continues to show only the guest's request fields and never staff/audit identity.
 
+Before any new transition is prepared, the gateway requires the complete audit
+chain from sequence 1 through the request version. Every event must be
+well-formed, uniquely linked, correctly sequenced, status-consistent and
+committed; the latest event must match the request's ID, hotel, version, status,
+last event ID, operation signature and update timestamp. Missing or pending
+history blocks action with a sanitized reconciliation error. This also means
+the owner's currently observed request, whose latest audit event is pending,
+remains readable but cannot receive a new staff action until an authorized
+read-back reconciliation resolves it.
+
 ## Workpeg permission model verified in documentation and SDK 0.152.0
 
 Workpeg's table permission is three Unix-style digits: owner, business staff,

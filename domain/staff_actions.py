@@ -7,14 +7,15 @@ Plans remain unpersisted; Workpeg row writes and permission grants are not made.
 """
 from copy import deepcopy
 from dataclasses import dataclass
-from uuid import UUID
+from uuid import NAMESPACE_URL, UUID, uuid5
 
 from .access_control import (
     AccessContext, AccessDenied, authorize_access, project_service_request,
 )
+from .hotel import parse_instant
 from .service_requests import (
-    AuthorizationError, ConflictError, RequestError, reconcile_write,
-    transition_request,
+    AuthorizationError, ConflictError, DEPARTMENTS, RequestError, STATUSES,
+    TRANSITIONS, reconcile_write, transition_request, validate_request,
 )
 
 
@@ -57,6 +58,119 @@ def _uuid(value):
         return str(UUID(value)) == value
     except (ValueError, TypeError, AttributeError):
         return False
+
+
+def _audit_history_is_consistent(request, events):
+    """Require the complete, committed audit chain for the current request.
+
+    Audit rows can omit nullable Workpeg columns, so normalize only those
+    optional fields. Unknown/missing required fields, gaps, duplicate IDs,
+    pending events, or a chain that does not describe the request are refused.
+    """
+    if not isinstance(events, list) or not events:
+        return False
+    normalized = []
+    required = {
+        "event_id", "operation_id", "operation_signature", "request_id",
+        "hotel_id", "sequence", "event_type", "to_status", "actor_id",
+        "actor_kind", "occurred_at", "commit_state",
+    }
+    optional = {"from_status", "actor_department", "reason"}
+    for event in events:
+        if (not isinstance(event, dict) or required - set(event)
+                or set(event) - required - optional):
+            return False
+        item = dict(event)
+        for name in optional:
+            item.setdefault(name, None)
+        if (not all(_uuid(item.get(name)) for name in
+                    ("event_id", "operation_id", "request_id", "hotel_id"))
+                or item["event_id"] != str(uuid5(
+                    NAMESPACE_URL, "roomay:request-event:" + item["operation_id"]))
+                or not isinstance(item["operation_signature"], str)
+                or len(item["operation_signature"]) != 64
+                or any(char not in "0123456789abcdef"
+                       for char in item["operation_signature"])
+                or type(item["sequence"]) is not int
+                or item["sequence"] < 1
+                or item["event_type"] not in ("created", "status_changed", "triaged")
+                or item["to_status"] not in STATUSES
+                or not isinstance(item["actor_id"], str)
+                or not item["actor_id"].strip()
+                or item["actor_kind"] not in ("guest", "staff")
+                or item["commit_state"] != "committed"):
+            return False
+        try:
+            occurred = parse_instant(item["occurred_at"])
+        except (TypeError, ValueError):
+            return False
+        department = item["actor_department"]
+        if item["actor_kind"] == "guest":
+            if department is not None:
+                return False
+        elif department not in DEPARTMENTS:
+            return False
+        if item["event_type"] == "created":
+            if (item["sequence"] != 1 or item["from_status"] is not None
+                    or item["to_status"] != "received"):
+                return False
+        elif item["event_type"] == "triaged":
+            if (item["sequence"] == 1 or item["from_status"] != "received"
+                    or item["to_status"] != "received"
+                    or item["actor_kind"] != "staff"
+                    or department != "reception"):
+                return False
+        elif (item["sequence"] == 1 or item["from_status"] not in STATUSES):
+            return False
+        reason = item["reason"]
+        if reason is not None and (not isinstance(reason, str) or not reason.strip()):
+            return False
+        normalized.append((item, occurred))
+
+    normalized.sort(key=lambda pair: pair[0]["sequence"])
+    if len(normalized) != request.get("version"):
+        return False
+    event_ids = set()
+    operation_ids = set()
+    previous_status = None
+    previous_time = None
+    for index, (event, occurred) in enumerate(normalized, start=1):
+        if (event["sequence"] != index
+                or event["event_id"] in event_ids
+                or event["operation_id"] in operation_ids
+                or event["request_id"] != request.get("request_id")
+                or event["hotel_id"] != request.get("hotel_id")
+                or (previous_time is not None and occurred < previous_time)):
+            return False
+        event_ids.add(event["event_id"])
+        operation_ids.add(event["operation_id"])
+        if index > 1:
+            if event["event_type"] == "triaged":
+                if previous_status != "received":
+                    return False
+            elif (event["event_type"] != "status_changed"
+                    or event["from_status"] != previous_status
+                    or event["to_status"] not in TRANSITIONS[previous_status]):
+                return False
+        previous_status = event["to_status"]
+        previous_time = occurred
+
+    latest = normalized[-1][0]
+    try:
+        updated_at_matches = previous_time == parse_instant(request["updated_at"])
+    except (KeyError, TypeError, ValueError):
+        return False
+    try:
+        validate_request(request)
+    except RequestError:
+        return False
+    return bool(
+        latest["event_id"] == request["last_event_id"]
+        and latest["operation_signature"] == request["last_operation_signature"]
+        and latest["sequence"] == request["version"]
+        and latest["to_status"] == request["status"]
+        and updated_at_matches
+    )
 
 
 def project_staff_inbox(context, requests, *, business_id, record_business_id):
@@ -196,6 +310,8 @@ class StaffActionGateway:
                 or not loaded["fingerprint"]
                 or not isinstance(loaded["events"], list)):
             raise StaffActionError("service_request_scope_or_shape_mismatch")
+        if not _audit_history_is_consistent(request, loaded["events"]):
+            raise StaffActionError("unreconciled_request_audit")
 
         actor = {"actor_id": identity["actor_id"], "hotel_id": identity["hotel_id"],
                  "kind": "staff"}
