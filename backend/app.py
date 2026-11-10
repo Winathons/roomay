@@ -28,6 +28,9 @@ STAFF_TTL = timedelta(minutes=15)
 GUEST_TTL = timedelta(minutes=30)
 INVITE_TTL = timedelta(minutes=30)
 PROPOSAL_TTL = timedelta(minutes=10)
+INVITATIONS_PER_STAFF_HOUR = 20
+PREPARES_PER_GUEST_HOUR = 20
+TRANSITIONS_PER_STAFF_HOUR = 120
 ACTIVE_MEMBER_ROLES = {"owner", "admin", "member"}
 ALLOWED_GUEST_CATEGORIES = {
     "extra_towels", "linen", "room_cleaning", "toiletries", "plumbing",
@@ -302,10 +305,21 @@ def create_app(*, session_factory, hotel_reader, settings, clock=_now,
         invitation_id = str(uuid4())
         now = clock()
         with session_factory.begin() as db:
+            # Serialize the per-actor quota across sessions and workers. The
+            # active binding is stable and already established by OIDC policy.
+            binding = db.scalar(select(StaffBinding).where(
+                StaffBinding.business_id == staff["business_id"],
+                StaffBinding.workpeg_subject == staff["workpeg_subject"],
+                StaffBinding.active.is_(True)).with_for_update())
+            if (not binding or binding.actor_id != staff["actor_id"]
+                    or binding.hotel_id != staff["hotel_id"]
+                    or binding.department != staff["department"]
+                    or set(binding.roles or []) != set(staff["roles"])):
+                raise HTTPException(403, "invitation_issuance_denied")
             issued_recently = db.scalar(select(func.count()).select_from(GuestInvitation).where(
                 GuestInvitation.issued_by == staff["actor_id"],
                 GuestInvitation.created_at >= now - timedelta(hours=1))) or 0
-            if issued_recently >= 20:
+            if issued_recently >= INVITATIONS_PER_STAFF_HOUR:
                 raise HTTPException(429, "invitation_rate_limited")
             db.add(GuestInvitation(invitation_id=invitation_id, token_hash=_digest(token), business_id=staff["business_id"],
                                    hotel_id=staff["hotel_id"], guest_id=body.guest_id,
@@ -459,13 +473,16 @@ def create_app(*, session_factory, hotel_reader, settings, clock=_now,
             raise HTTPException(409, "request_conflict")
         try:
             with session_factory.begin() as db:
-                guest = db.get(GuestSession, _digest(cookie))
+                # Locking the guest session makes the rolling quota atomic
+                # across simultaneous requests and PostgreSQL workers.
+                guest = db.scalar(select(GuestSession).where(
+                    GuestSession.token_hash == _digest(cookie)).with_for_update())
                 if not guest or guest.revoked_at or _expired(guest.expires_at, clock()):
                     raise HTTPException(401, "guest_session_expired")
                 recent_prepares = db.scalar(select(func.count()).select_from(PendingRequest).where(
                     PendingRequest.session_hash == guest.token_hash,
                     PendingRequest.created_at >= clock() - timedelta(hours=1))) or 0
-                if recent_prepares >= 20:
+                if recent_prepares >= PREPARES_PER_GUEST_HOUR:
                     raise HTTPException(429, "request_rate_limited")
                 db.add(PendingRequest(id=handle, session_hash=guest.token_hash,
                                       operation_key=operation_key,
@@ -665,6 +682,17 @@ def create_app(*, session_factory, hotel_reader, settings, clock=_now,
         if body.action != "assign" and body.assignee_id is not None:
             raise HTTPException(400, "invalid_transition_shape")
         with session_factory.begin() as db:
+            # This stable identity row serializes transition quota checks
+            # across different requests handled by the same staff member.
+            binding = db.scalar(select(StaffBinding).where(
+                StaffBinding.business_id == staff["business_id"],
+                StaffBinding.workpeg_subject == staff["workpeg_subject"],
+                StaffBinding.active.is_(True)).with_for_update())
+            if (not binding or binding.actor_id != staff["actor_id"]
+                    or binding.hotel_id != staff["hotel_id"]
+                    or binding.department != staff["department"]
+                    or set(binding.roles or []) != set(staff["roles"])):
+                raise HTTPException(403, "staff_access_revoked")
             record = db.scalar(select(OperationalRequest).where(
                 OperationalRequest.business_id == staff["business_id"],
                 OperationalRequest.hotel_id == staff["hotel_id"],
@@ -691,6 +719,14 @@ def create_app(*, session_factory, hotel_reader, settings, clock=_now,
             if result["kind"] == "duplicate":
                 return {"persisted": True,
                         "request": _staff_public_request(result["request"])}
+            actor_events = db.scalars(select(OperationalAudit.event_id).where(
+                OperationalAudit.business_id == staff["business_id"],
+                OperationalAudit.hotel_id == staff["hotel_id"],
+                OperationalAudit.occurred_at >= clock() - timedelta(hours=1),
+                OperationalAudit.event_data["actor_id"].as_string() == staff["actor_id"])
+                .limit(TRANSITIONS_PER_STAFF_HOUR)).all()
+            if len(actor_events) >= TRANSITIONS_PER_STAFF_HOUR:
+                raise HTTPException(429, "staff_transition_rate_limited")
             plan = result["plan"]
             event = dict(plan["event"])
             event["commit_state"] = "committed"

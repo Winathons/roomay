@@ -9,13 +9,14 @@ import os
 from pathlib import Path
 import unittest
 from uuid import uuid4
+from unittest.mock import patch
 
 from alembic import command
 from alembic.config import Config
-from sqlalchemy import create_engine, select
+from sqlalchemy import create_engine, func, select
 from sqlalchemy.engine import make_url
 
-from backend.models import Base, OperationalAudit, OperationalRequest
+from backend.models import Base, GuestSession, OperationalAudit, OperationalRequest, PendingRequest
 from tests.test_guest_backend import GuestBackendTests, LocalClient
 
 
@@ -137,6 +138,30 @@ class PostgreSQLGuestBackendIntegrationTests(GuestBackendTests):
             self.assertEqual([row.sequence for row in audits], [1, 2, 3])
             self.assertTrue(all(row.commit_state == "committed" for row in audits))
         housekeeping.close()
+        guest.close()
+
+    def test_concurrent_guest_prepares_serialize_the_hourly_rate_limit(self):
+        guest = self.issue_and_redeem()
+        cookies = dict(guest.cookies)
+
+        def prepare(_):
+            client = LocalClient(self.app, self.origin)
+            client.cookies.update(cookies)
+            try:
+                return self.origin_post(client, "/guest/requests/prepare", json={
+                    "category": "extra_towels", "description": "Please bring towels",
+                    "urgency": "normal", "idempotency_key": str(uuid4()),
+                }).status_code
+            finally:
+                client.close()
+
+        with patch("backend.app.PREPARES_PER_GUEST_HOUR", 1):
+            with ThreadPoolExecutor(max_workers=2) as pool:
+                statuses = list(pool.map(prepare, range(2)))
+        self.assertEqual(sorted(statuses), [200, 429])
+        with self.sessions() as db:
+            self.assertEqual(db.scalar(select(func.count()).select_from(PendingRequest)), 1)
+            self.assertIsNotNone(db.scalar(select(GuestSession)))
         guest.close()
 
 

@@ -160,6 +160,35 @@ be generated or pasted into a tracked `.env` file.
    inbox. For guest access, a mapped receptionist issues and securely delivers
    a one-time invitation to a guest whose active stay they have verified.
 
+### Request limits and reverse-proxy boundary
+
+The backend enforces rolling one-hour quotas in PostgreSQL: 20 guest request
+preparations per guest session, 20 invitations issued per mapped staff actor,
+and 120 new staff lifecycle transitions per mapped staff actor. Existing
+idempotent retries remain reconcilable. The quota checks lock the corresponding
+guest-session or staff-binding row inside the same transaction, so concurrent
+workers cannot all pass the same count. A rejected transition rolls back its
+request and audit changes. These limits are application controls, not a
+substitute for edge abuse protection.
+
+Unauthenticated OIDC start/callback and invitation-redemption traffic still
+requires IP-based throttling and request-body size limits at a trusted HTTPS
+reverse proxy or ingress. Roomay does not trust `X-Forwarded-For` or similar
+client headers as identity, and it does not yet implement its own trusted-proxy
+IP parser or distributed pre-authentication limiter. Do not expose Uvicorn
+directly to the internet. Configure the proxy to overwrite forwarded headers,
+rate-limit these routes, cap request bodies and header sizes, enforce TLS, and
+redact callback query strings from logs. Keep the Uvicorn listener on loopback
+or a private network reachable only from that proxy. Verify proxy trust and
+limits in the selected deployment before production.
+
+Staff sessions are rechecked against local authorization mappings on each
+request; mapping revocation takes effect on the next call. Workpeg membership
+revocation is not live-polled and can remain effective until the 15-minute
+staff-session expiry. Guest sessions expire after 30 minutes, are revocable,
+and active stay/occupant scope is re-read from Workpeg for each protected
+guest action.
+
 The Postgres 16 acceptance suite (`python -m unittest
 tests.test_backend_postgres -v`) runs only when `ROOMAY_TEST_DATABASE_URL` is
 set to the loopback Compose database at `127.0.0.1:55432/roomay`. It applies

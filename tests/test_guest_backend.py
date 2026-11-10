@@ -12,6 +12,7 @@ import tempfile
 import threading
 from concurrent.futures import ThreadPoolExecutor
 from unittest import TestCase
+from unittest.mock import patch
 from uuid import uuid4
 
 from fastapi import HTTPException, Request, Response
@@ -598,6 +599,59 @@ class GuestBackendTests(TestCase):
         }, headers={"Origin": ""})
         self.assertEqual(response.status_code, 403)
         self.assertEqual(response.json(), {"detail": "request_origin_denied"})
+        guest.close()
+
+    def test_guest_request_prepare_hourly_limit_is_enforced(self):
+        guest = self.issue_and_redeem()
+        with patch("backend.app.PREPARES_PER_GUEST_HOUR", 0):
+            response = self.origin_post(guest, "/guest/requests/prepare", json={
+                "category": "extra_towels", "description": "Please bring towels",
+                "urgency": "normal", "idempotency_key": str(uuid4()),
+            })
+        self.assertEqual(response.status_code, 429)
+        self.assertEqual(response.json(), {"detail": "request_rate_limited"})
+        with self.sessions() as db:
+            self.assertEqual(db.scalar(select(PendingRequest)), None)
+        guest.close()
+
+    def test_invitation_hourly_limit_is_enforced_without_returning_a_code(self):
+        self.assertEqual(self.staff_login(self.client, "reception-code").status_code, 303)
+        stay_id = self.reader.snapshot["stays"][0]["entity_id"]
+        guest_id = self.reader.snapshot["stay_guests"][0]["guest_id"]
+        with patch("backend.app.INVITATIONS_PER_STAFF_HOUR", 0):
+            response = self.origin_post(
+                self.client, f"/staff/stays/{stay_id}/guest-invitations",
+                json={"stay_id": stay_id, "guest_id": guest_id})
+        self.assertEqual(response.status_code, 429)
+        self.assertEqual(response.json(), {"detail": "invitation_rate_limited"})
+        self.assertEqual(set(response.json()), {"detail"})
+        with self.sessions() as db:
+            self.assertEqual(db.scalar(select(GuestInvitation)), None)
+
+    def test_staff_transition_rate_limit_rolls_back_request_and_audit(self):
+        guest = self.issue_and_redeem()
+        prepared = self.origin_post(guest, "/guest/requests/prepare", json={
+            "category": "extra_towels", "description": "Please bring towels",
+            "urgency": "normal", "idempotency_key": str(uuid4()),
+        }).json()
+        created = self.origin_post(guest, "/guest/requests/confirm", json={
+            "confirmation_handle": prepared["confirmation_handle"],
+        })
+        self.assertEqual(created.status_code, 200)
+        with patch("backend.app.TRANSITIONS_PER_STAFF_HOUR", 0):
+            response = self.origin_post(
+                self.client,
+                f"/staff/requests/{created.json()['reference']}/transitions",
+                json={"action": "assign", "operation_key": str(uuid4()),
+                      "assignee_id": "staff-housekeeping"})
+        self.assertEqual(response.status_code, 429)
+        self.assertEqual(response.json(), {"detail": "staff_transition_rate_limited"})
+        with self.sessions() as db:
+            saved = db.get(OperationalRequest, created.json()["reference"])
+            events = db.scalars(select(OperationalAudit).where(
+                OperationalAudit.request_id == created.json()["reference"])).all()
+            self.assertEqual(saved.request_data["status"], "received")
+            self.assertEqual(len(events), 1)
         guest.close()
 
 

@@ -20,7 +20,7 @@ class FakeHTTP:
         self.calls = []
 
     def get(self, url, *, params, headers, timeout, allow_redirects):
-        self.calls.append((url, params, headers, timeout))
+        self.calls.append((url, params, headers, timeout, allow_redirects))
         return self.response
 
 
@@ -46,6 +46,9 @@ class WorkpegReaderTests(TestCase):
         self.assertEqual(table["uuid"], self.table["uuid"])
         self.assertEqual(http.calls[0][1], {"namespace": "roomay_hotel_v1"})
         self.assertEqual(http.calls[0][2], {"Authorization": "Bearer synthetic-test-secret"})
+        self.assertEqual(http.calls[0][0],
+                         f"https://api.workpeg.com/v1/businesses/{self.business}/tables/")
+        self.assertEqual(http.calls[0][3:], (8, False))
         self.assertEqual(len(http.calls), 1)
 
     def test_reader_normalizes_native_peg_uuid_and_rejects_invalid_configured_id(self):
