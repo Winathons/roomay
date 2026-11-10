@@ -4,6 +4,7 @@ Run with ``python -m backend.verify_workpeg_readonly`` after injecting the
 approved server-only key and exact development business/Peg UUIDs. Output is
 intentionally limited to sanitized status, canonical aliases, and row counts.
 """
+import argparse
 import json
 import os
 import sys
@@ -14,12 +15,26 @@ from backend.workpeg_reader import WorkpegHotelReader, WorkpegReadError
 from domain.workpeg_adapter import HOTEL_ALIASES
 
 
-def main():
+def main(argv=None):
+    parser = argparse.ArgumentParser(description="Read-only Roomay Workpeg hotel data check")
+    parser.add_argument(
+        "--diagnostic", action="store_true",
+        help="include allowlisted failure stage/status details; never includes response data",
+    )
+    args = parser.parse_args([] if argv is None else argv)
     workpeg_pk = os.environ.get("WORKPEG_PK", "")
     peg_id = os.environ.get("ROOMAY_WORKPEG_PEG_ID", "")
     business_id = os.environ.get("ROOMAY_WORKPEG_BUSINESS_ID", "")
     if not workpeg_pk or not peg_id or not business_id:
-        print(json.dumps({"status": "BLOCKED", "reason": "configuration_incomplete"}))
+        if args.diagnostic:
+            detail = {
+                "status": "BLOCKED", "stage": "authentication", "alias": None,
+                "http_status": None, "status_category": "configuration_invalid",
+                "error_code": "workpeg_read_configuration_missing",
+            }
+        else:
+            detail = {"status": "BLOCKED", "reason": "configuration_incomplete"}
+        print(json.dumps(detail, sort_keys=True))
         return 2
 
     try:
@@ -27,7 +42,15 @@ def main():
         if str(UUID(business_id)) != business_id:
             raise ValueError
     except (ValueError, TypeError, AttributeError):
-        print(json.dumps({"status": "BLOCKED", "reason": "configuration_invalid"}))
+        if args.diagnostic:
+            detail = {
+                "status": "BLOCKED", "stage": "authentication", "alias": None,
+                "http_status": None, "status_category": "configuration_invalid",
+                "error_code": "workpeg_read_configuration_invalid",
+            }
+        else:
+            detail = {"status": "BLOCKED", "reason": "configuration_invalid"}
+        print(json.dumps(detail, sort_keys=True))
         return 2
 
     try:
@@ -41,11 +64,21 @@ def main():
             {"alias": alias, "row_count": len(snapshot[key])}
             for key, alias in HOTEL_ALIASES.items()
         ]
-    except WorkpegReadError:
-        print(json.dumps({"status": "FAIL", "reason": "read_or_contract_check_failed"}))
+    except WorkpegReadError as error:
+        if args.diagnostic:
+            print(json.dumps({"status": "FAIL", **error.diagnostic()}, sort_keys=True))
+        else:
+            print(json.dumps({"status": "FAIL", "reason": "read_or_contract_check_failed"}))
         return 1
     except Exception:
-        print(json.dumps({"status": "FAIL", "reason": "read_or_contract_check_failed"}))
+        if args.diagnostic:
+            print(json.dumps({
+                "status": "FAIL", "stage": "unknown", "alias": None,
+                "http_status": None, "status_category": "unexpected_error",
+                "error_code": "workpeg_internal_error",
+            }, sort_keys=True))
+        else:
+            print(json.dumps({"status": "FAIL", "reason": "read_or_contract_check_failed"}))
         return 1
 
     print(json.dumps({
@@ -60,4 +93,4 @@ def main():
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    sys.exit(main(sys.argv[1:]))

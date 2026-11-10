@@ -147,6 +147,10 @@ be generated or pasted into a tracked `.env` file.
    IDs or credentials. A successful read proves this Peg can access those
    tables in that business; separately confirm the installation in the
    Workpeg business dashboard. Missing configuration fails before any request.
+   If it fails, rerun with `--diagnostic` to opt in to the failing stage,
+   canonical alias, HTTP status or safe status category, and stable allowlisted
+   error code. Normal mode keeps its generic failure response; diagnostics do
+   not include response bodies or arbitrary exception details.
 5. Apply the explicit schema migration with `alembic upgrade head`.
 6. Run behind a trusted HTTPS reverse proxy using
    `uvicorn backend.main:app --host 127.0.0.1 --port 8080 --no-access-log`.

@@ -16,10 +16,10 @@ SYNTHETIC_SECRET = "MOCK-ONLY-NOT-A-WORKPEG-CREDENTIAL"
 
 
 class ReadOnlyWorkpegCheckTests(TestCase):
-    def run_main(self):
+    def run_main(self, argv=None):
         output = io.StringIO()
         with redirect_stdout(output):
-            result = main()
+            result = main(argv)
         return result, output.getvalue()
 
     def test_missing_configuration_fails_without_creating_reader(self):
@@ -29,6 +29,18 @@ class ReadOnlyWorkpegCheckTests(TestCase):
         self.assertEqual(result, 2)
         self.assertEqual(json.loads(output), {
             "status": "BLOCKED", "reason": "configuration_incomplete"})
+        reader.assert_not_called()
+
+    def test_diagnostic_missing_configuration_has_no_secret_or_network(self):
+        with patch.dict(os.environ, {}, clear=True), patch(
+                "backend.verify_workpeg_readonly.WorkpegHotelReader") as reader:
+            result, output = self.run_main(["--diagnostic"])
+        self.assertEqual(result, 2)
+        self.assertEqual(json.loads(output), {
+            "status": "BLOCKED", "stage": "authentication", "alias": None,
+            "http_status": None, "status_category": "configuration_invalid",
+            "error_code": "workpeg_read_configuration_missing",
+        })
         reader.assert_not_called()
 
     def test_malformed_business_or_peg_fails_before_network(self):
@@ -85,3 +97,45 @@ class ReadOnlyWorkpegCheckTests(TestCase):
             "status": "FAIL", "reason": "read_or_contract_check_failed"})
         self.assertNotIn(SYNTHETIC_SECRET, output)
         self.assertNotIn("sensitive response body", output)
+
+    def test_diagnostic_mode_reports_only_sanitized_reader_details(self):
+        from backend.workpeg_reader import WorkpegReadError
+
+        values = {"WORKPEG_PK": SYNTHETIC_SECRET,
+                  "ROOMAY_WORKPEG_PEG_ID": PEG_ID,
+                  "ROOMAY_WORKPEG_BUSINESS_ID": BUSINESS_ID}
+        with patch.dict(os.environ, values, clear=True), patch(
+                "backend.verify_workpeg_readonly.WorkpegHotelReader") as reader_type:
+            reader_type.return_value.read_snapshot.side_effect = WorkpegReadError(
+                "workpeg_http_403", stage="table_discovery",
+                alias=next(iter(HOTEL_ALIASES.values())), http_status=403,
+                status_category="forbidden")
+            result, output = self.run_main(["--diagnostic"])
+        self.assertEqual(result, 1)
+        report = json.loads(output)
+        self.assertEqual(report, {
+            "status": "FAIL", "stage": "table_discovery",
+            "alias": next(iter(HOTEL_ALIASES.values())), "http_status": 403,
+            "status_category": "forbidden", "error_code": "workpeg_http_403",
+        })
+        for forbidden in (SYNTHETIC_SECRET, BUSINESS_ID, "Authorization", "https://",
+                          "sensitive", "stack", "traceback"):
+            self.assertNotIn(forbidden, output)
+
+    def test_unexpected_exception_diagnostic_is_allowlisted_and_stage_is_unknown(self):
+        values = {"WORKPEG_PK": SYNTHETIC_SECRET,
+                  "ROOMAY_WORKPEG_PEG_ID": PEG_ID,
+                  "ROOMAY_WORKPEG_BUSINESS_ID": BUSINESS_ID}
+        with patch.dict(os.environ, values, clear=True), patch(
+                "backend.verify_workpeg_readonly.WorkpegHotelReader") as reader_type:
+            reader_type.return_value.read_snapshot.side_effect = RuntimeError(
+                "raw response, URL, and " + SYNTHETIC_SECRET)
+            result, output = self.run_main(["--diagnostic"])
+        self.assertEqual(result, 1)
+        self.assertEqual(json.loads(output), {
+            "status": "FAIL", "stage": "unknown", "alias": None,
+            "http_status": None, "status_category": "unexpected_error",
+            "error_code": "workpeg_internal_error",
+        })
+        self.assertNotIn(SYNTHETIC_SECRET, output)
+        self.assertNotIn("raw response", output)
