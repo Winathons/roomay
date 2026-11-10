@@ -133,10 +133,20 @@ be generated or pasted into a tracked `.env` file.
    password, and set `ROOMAY_DATABASE_URL` to the same password. URL-encode
    password characters such as `@`, `:` or `/` inside the DSN.
 2. Start only the loopback-bound local database: `docker compose up -d roomay-db`.
-3. Load backend environment variables from a local secret manager; configure
+3. Install dependencies with `python -m pip install -r server-requirements.txt`.
+4. Load backend environment variables from a local secret manager; configure
    OIDC callback and public base URLs to use HTTPS. `ROOMAY_COOKIE_SECURE=true`
-   is required outside isolated tests.
-4. Install dependencies with `python -m pip install -r server-requirements.txt`.
+   is required outside isolated tests. Before OIDC setup, the server-side hotel read path can be checked without
+   starting the application or opening a session. Inject `WORKPEG_PK`,
+   `ROOMAY_WORKPEG_PEG_ID`, and `ROOMAY_WORKPEG_BUSINESS_ID` from the approved
+   secret/configuration source, then run
+   `python -m backend.verify_workpeg_readonly`. This makes only Workpeg GET
+   requests, validates all seven canonical hotel table schemas, Peg ownership,
+   permission `700`, pagination and snapshot relationships, and prints only
+   sanitized pass/fail, aliases and row counts. It never prints row contents,
+   IDs or credentials. A successful read proves this Peg can access those
+   tables in that business; separately confirm the installation in the
+   Workpeg business dashboard. Missing configuration fails before any request.
 5. Apply the explicit schema migration with `alembic upgrade head`.
 6. Run behind a trusted HTTPS reverse proxy using
    `uvicorn backend.main:app --host 127.0.0.1 --port 8080 --no-access-log`.
