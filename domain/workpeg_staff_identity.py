@@ -98,6 +98,7 @@ class TrustedWorkpegStaffResolver:
         workpeg_role = getattr(principal, "role", None)
         if (not isinstance(subject, str) or not subject.strip()
                 or not _uuid(business_id)
+                or not isinstance(workpeg_role, str)
                 or workpeg_role not in WORKPEG_STAFF_ROLES):
             raise TrustedStaffIdentityError("staff_identity_unverified")
 
@@ -136,13 +137,14 @@ class TrustedWorkpegStaffResolver:
                     or not isinstance(actor_id, str) or not actor_id.strip()
                     or binding in seen_subjects or actor_id in seen_actors
                     or row["hotel_id"] != hotel_id
+                    or not isinstance(department, str)
                     or department not in DEPARTMENTS
                     or type(row["active"]) is not bool
                     or not isinstance(roles, list)
-                    or len(roles) != len(set(roles))
                     or not all(isinstance(role, str)
                                and role in ROOMAY_STAFF_PRIVILEGES
-                               for role in roles)):
+                               for role in roles)
+                    or len(roles) != len(set(roles))):
                 raise TrustedStaffIdentityError("staff_directory_unverified")
             seen_subjects.add(binding)
             seen_actors.add(actor_id)
