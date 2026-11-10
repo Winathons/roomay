@@ -6,6 +6,7 @@
   <meta name="color-scheme" content="light">
   <title>Roomay | Offline Guest Chat</title>
   <link rel="stylesheet" href="/app.css">
+  <script src="/voice_intake.js" defer></script>
   <script src="/app.js" defer></script>
 </head>
 <body>
@@ -48,11 +49,21 @@
           <div id="confirmation" class="confirmation-slot"></div>
 
           <form id="chat-form" class="composer">
-            <label class="sr-only" for="guest-message">Your message</label>
+            <label class="sr-only" for="guest-message">Your message or reviewed voice transcript</label>
             <textarea id="guest-message" name="message" rows="2" maxlength="1000"
               placeholder="Type what you need…" autocomplete="off" required></textarea>
+            <div class="voice-tools" aria-label="Optional voice input">
+              <button id="voice-button" class="voice-button" type="button" disabled
+                aria-pressed="false" aria-describedby="voice-help voice-status">
+                Start voice input
+              </button>
+              <div class="voice-copy">
+                <p id="voice-help">Voice uses on-device en-NG speech recognition only. Roomay does not record or store audio. Your browser must already support this mode and have its language pack installed; Roomay will not download one.</p>
+                <p id="voice-status" class="voice-status" role="status" aria-live="polite">Checking whether this browser supports private on-device voice input…</p>
+              </div>
+            </div>
             <div class="composer-footer">
-              <span>Enter to send · Shift + Enter for a new line</span>
+              <span id="send-help">Review any transcript, then send · Shift + Enter for a new line</span>
               <button id="send-button" class="send-button" type="submit" aria-label="Send message">
                 <span>Send</span><span aria-hidden="true">↗</span>
               </button>

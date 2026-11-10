@@ -64,6 +64,13 @@ h1 { margin: 0; color: #15232a; font-size: clamp(30px, 4vw, 42px); line-height: 
 .composer textarea { display: block; width: 100%; min-height: 55px; resize: vertical; padding: 9px 2px; border: 0; outline: none; color: #25343b; font-size: 14px; line-height: 1.5; }
 .composer textarea::placeholder { color: #9aa5aa; }
 .composer textarea:focus-visible { outline: none; }
+.voice-tools { display: flex; align-items: flex-start; gap: 12px; padding: 6px 0 13px; border-top: 1px solid #f0f3f3; }
+.voice-button { flex: 0 0 auto; min-height: 38px; padding: 0 13px; border: 1px solid #c7d9d6; border-radius: 9px; background: #f3f8f7; color: #155f58; font-size: 12px; font-weight: 680; cursor: pointer; }
+.voice-button:hover:not(:disabled) { background: #e6f3f1; }
+.voice-button:disabled { cursor: not-allowed; color: #77858b; background: #f3f5f5; border-color: #e2e7e8; }
+.voice-copy { min-width: 0; }
+.voice-copy p { margin: 1px 0 0; color: #77858b; font-size: 11px; line-height: 1.45; }
+.voice-copy .voice-status { color: #466660; font-weight: 620; }
 .composer-footer { display: flex; align-items: center; justify-content: space-between; gap: 12px; color: #8b969b; font-size: 11px; }
 .send-button { min-height: 36px; padding: 0 14px; background: #087c72; color: white; font-size: 12px; }
 .send-button:disabled, .confirm-button:disabled, .cancel-button:disabled { cursor: wait; opacity: .58; }
@@ -126,6 +133,9 @@ h1 { margin: 0; color: #15232a; font-size: clamp(30px, 4vw, 42px); line-height: 
   .confirmation-slot { padding: 0 12px; }
   .review-card { margin-left: 0; }
   .composer { padding: 13px 13px 10px; }
+  .voice-tools { gap: 9px; }
+  .voice-button { padding: 0 9px; font-size: 11px; }
+  .voice-copy p { font-size: 10px; }
   .composer-footer > span { max-width: 170px; font-size: 10px; }
   .page-footer { flex-direction: column; padding-top: 17px; }
 }

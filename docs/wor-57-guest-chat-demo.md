@@ -24,6 +24,15 @@ synthetic room 205 scope. The page also tells the guest that this is fictional
 and not a real authenticated stay. A room number supplied in chat is never
 treated as proof of identity or access.
 
+The optional “Start voice input” control in this demo requires browser support
+for **on-device** Web Speech recognition and an already installed `en-NG`
+language pack. It never enables cloud recognition or downloads a language
+pack. Voice text appears in the editable message box and is not sent until the
+guest reviews it and submits it. If private on-device recognition is
+unsupported or denied, type the message instead. See
+[WOR-19 browser voice intake](wor-19-browser-voice-intake.md) for privacy,
+accessibility and test details.
+
 Try these messages:
 
 - `Hi` (greeting, no room or ticket requested)

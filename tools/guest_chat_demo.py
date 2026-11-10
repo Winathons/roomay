@@ -412,6 +412,7 @@ def make_server(demo=None, port=PORT_DEFAULT):
             paths = {
                 "/": ("index.html", "text/html; charset=utf-8"),
                 "/app.css": ("app.css", "text/css; charset=utf-8"),
+                "/voice_intake.js": ("voice_intake.js", "text/javascript; charset=utf-8"),
                 "/app.js": ("app.js", "text/javascript; charset=utf-8"),
             }
             asset = paths.get(self.path)
