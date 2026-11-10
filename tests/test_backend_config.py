@@ -9,7 +9,7 @@ class BackendConfigurationTests(TestCase):
             "database_url": "postgresql+psycopg://roomay:ignored@localhost/roomay",
             "workpeg_pk": "test-only-value",
             "workpeg_api": "https://api.workpeg.com",
-            "peg_id": "4812",
+            "peg_id": "6fca06b2-9bcb-4b24-bba4-60591fcadd8e",
             "business_id": "6fca06b2-9bcb-4b24-bba4-60591fcadd8e",
             "hotel_id": "1ec2baa5-37ca-41a3-bf03-b433bf0384a5",
             "oidc_client_id": "test-client",
@@ -41,6 +41,20 @@ class BackendConfigurationTests(TestCase):
             self.valid(oidc_client_id="").validate()
         with self.assertRaisesRegex(RuntimeError, "workpeg_business_and_peg_binding_invalid"):
             self.valid(business_id="browser-supplied").validate()
+
+    def test_peg_id_requires_uuid_and_normalizes_to_canonical_lowercase(self):
+        uppercase = "6FCA06B2-9BCB-4B24-BBA4-60591FCADD8E"
+        settings = self.valid(peg_id=uppercase)
+        self.assertIs(settings.validate(), settings)
+        self.assertEqual(settings.peg_id, uppercase.lower())
+
+    def test_peg_id_rejects_numeric_and_malformed_identifiers(self):
+        with self.assertRaisesRegex(RuntimeError, "backend_configuration_incomplete"):
+            self.valid(peg_id="").validate()
+        for invalid in ("4812", "not-a-uuid", "00000000-0000-0000-0000-00000000000Z"):
+            with self.subTest(peg_id=invalid):
+                with self.assertRaisesRegex(RuntimeError, "workpeg_business_and_peg_binding_invalid"):
+                    self.valid(peg_id=invalid).validate()
 
 
 if __name__ == "__main__":

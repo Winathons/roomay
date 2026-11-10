@@ -183,7 +183,12 @@ class GuestBackendTests(TestCase):
             URL.create("sqlite+pysqlite", database=database_file),
             connect_args={"check_same_thread": False, "timeout": 10},
         )
-        Base.metadata.create_all(self.engine)
+        self._configure_fixture(self.engine)
+
+    def _configure_fixture(self, engine, *, create_schema=True):
+        self.engine = engine
+        if create_schema:
+            Base.metadata.create_all(self.engine)
         self.sessions = sessionmaker(self.engine, expire_on_commit=False)
         self.reader = SnapshotReader()
         self.origin = "https://roomay.test"
@@ -531,6 +536,54 @@ class GuestBackendTests(TestCase):
         logout = self.origin_post(guest, "/guest/logout")
         self.assertEqual(logout.status_code, 200)
         self.assertEqual(guest.get("/guest/requests").status_code, 401)
+        guest.close()
+
+    def test_staff_and_guest_session_cookies_are_secure_and_http_only(self):
+        self.settings.cookie_secure = True
+
+        def cookie_from(response, name):
+            parsed = SimpleCookie()
+            for header in response.headers.getlist("set-cookie"):
+                parsed.load(header)
+            return parsed[name]
+
+        started = self.client.get("/auth/workpeg/start")
+        oidc_cookie = cookie_from(started, "roomay_oidc")
+        self.assertTrue(oidc_cookie["httponly"])
+        self.assertTrue(oidc_cookie["secure"])
+        self.assertEqual(oidc_cookie["samesite"], "lax")
+
+        logged_in = self.staff_login(self.client, "reception-code")
+        staff_cookie = cookie_from(logged_in, "roomay_staff")
+        self.assertTrue(staff_cookie["httponly"])
+        self.assertTrue(staff_cookie["secure"])
+        self.assertEqual(staff_cookie["samesite"], "strict")
+
+        stay_id = self.reader.snapshot["stays"][0]["entity_id"]
+        guest_id = self.reader.snapshot["stay_guests"][0]["guest_id"]
+        issued = self.origin_post(
+            self.client, f"/staff/stays/{stay_id}/guest-invitations",
+            json={"stay_id": stay_id, "guest_id": guest_id})
+        self.assertEqual(issued.status_code, 200, issued.text)
+        guest = LocalClient(self.app, base_url=self.origin)
+        redeemed = self.origin_post(
+            guest, "/guest/invitations/redeem",
+            json={"invitation": issued.json()["invitation"]})
+        self.assertEqual(redeemed.status_code, 200, redeemed.text)
+        guest_cookie = cookie_from(redeemed, "roomay_guest")
+        self.assertTrue(guest_cookie["httponly"])
+        self.assertTrue(guest_cookie["secure"])
+        self.assertEqual(guest_cookie["samesite"], "strict")
+        guest.close()
+
+    def test_cookie_authenticated_mutation_fails_closed_without_origin(self):
+        guest = self.issue_and_redeem()
+        response = guest.post("/guest/requests/prepare", json={
+            "category": "extra_towels", "description": "Please bring towels",
+            "urgency": "normal", "idempotency_key": str(uuid4()),
+        }, headers={"Origin": ""})
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(response.json(), {"detail": "request_origin_denied"})
         guest.close()
 
 

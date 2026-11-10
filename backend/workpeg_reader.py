@@ -2,6 +2,7 @@
 from urllib.parse import quote
 import requests
 
+from backend.config import normalize_peg_uuid
 from domain.workpeg_adapter import AdapterError, HOTEL_ALIASES, contract_by_key, decode_rows
 from domain.hotel import validate_snapshot
 
@@ -15,7 +16,11 @@ class WorkpegHotelReader:
     def __init__(self, *, api_base, workpeg_pk, peg_id, http=requests, timeout=8):
         if not api_base or not workpeg_pk or not peg_id:
             raise WorkpegReadError("workpeg_read_configuration_missing")
-        self.api_base, self._pk, self.peg_id = api_base.rstrip("/"), workpeg_pk, str(peg_id)
+        try:
+            normalized_peg_id = normalize_peg_uuid(peg_id)
+        except ValueError:
+            raise WorkpegReadError("workpeg_read_configuration_invalid") from None
+        self.api_base, self._pk, self.peg_id = api_base.rstrip("/"), workpeg_pk, normalized_peg_id
         self.http, self.timeout = http, timeout
 
     def _get(self, url, params=None):
@@ -44,8 +49,12 @@ class WorkpegHotelReader:
         if len(matches) != 1:
             raise WorkpegReadError("workpeg_table_missing_or_ambiguous")
         table = matches[0]
+        try:
+            table_peg_id = normalize_peg_uuid(table.get("peg"))
+        except ValueError:
+            raise WorkpegReadError("workpeg_table_ownership_mismatch") from None
         if (str(table.get("permission")) != "700"
-                or str(table.get("peg")) != self.peg_id
+                or table_peg_id != self.peg_id
                 or not isinstance(table.get("uuid"), str)):
             raise WorkpegReadError("workpeg_table_ownership_mismatch")
         contract = contract_by_key()[name]

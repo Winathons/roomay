@@ -124,7 +124,8 @@ retention, access monitoring and departmental staff training remain required.
 
 Requirements: Docker Desktop running, Python 3.10+, and an owner-configured
 Workpeg OIDC client plus a server-only `WORKPEG_PK` for the approved Roomay
-Peg, exact development business UUID and numeric Peg ID. Do not place secrets in browser code, Git, shell history, test fixtures or
+Peg, exact development business UUID and canonical Peg UUID from Workpeg table
+metadata. The UUID is normalized to lowercase before comparison. Do not place secrets in browser code, Git, shell history, test fixtures or
 logs. The Workpeg key must come from an approved secret manager and must never
 be generated or pasted into a tracked `.env` file.
 
@@ -144,6 +145,17 @@ be generated or pasted into a tracked `.env` file.
 7. Open `/staff`, sign in with Workpeg, and verify the authorized department
    inbox. For guest access, a mapped receptionist issues and securely delivers
    a one-time invitation to a guest whose active stay they have verified.
+
+The Postgres 16 acceptance suite (`python -m unittest
+tests.test_backend_postgres -v`) runs only when `ROOMAY_TEST_DATABASE_URL` is
+set to the loopback Compose database at `127.0.0.1:55432/roomay`. It applies
+the current Alembic migration in a randomly named, per-test schema, runs the
+real route handlers, and drops only that exact temporary schema afterward.
+It refuses other hosts, ports, database names, or PostgreSQL major versions.
+On Windows, load the DSN from the ignored `.env` into
+`$env:ROOMAY_TEST_DATABASE_URL` for the command and remove it from the
+environment afterward; do not print the DSN or pass it as a literal command
+argument.
 
 Never expose the backend directly to the public internet without TLS,
 rate-limiting, request-size limits, secure secret management, monitoring,

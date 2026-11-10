@@ -548,6 +548,10 @@ def create_app(*, session_factory, hotel_reader, settings, clock=_now,
                                           business_id=scope["business_id"], hotel_id=scope["hotel_id"],
                                           idempotency_key=request_data["idempotency_key"],
                                           request_data=request_data))
+                # PostgreSQL enforces the audit FK during INSERT. Flush the
+                # parent request first while keeping both writes in this same
+                # transaction; SQLite tests do not enforce that ordering.
+                db.flush()
                 db.add(OperationalAudit(event_id=event["event_id"], business_id=scope["business_id"],
                                         hotel_id=scope["hotel_id"], request_id=request_data["request_id"],
                                         operation_id=event["operation_id"], sequence=event["sequence"],

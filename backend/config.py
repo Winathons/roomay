@@ -4,6 +4,16 @@ import os
 from uuid import UUID
 
 
+def normalize_peg_uuid(value):
+    """Return Workpeg's Peg identifier in canonical UUID text form."""
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError("peg_uuid_invalid")
+    try:
+        return str(UUID(value.strip()))
+    except (ValueError, AttributeError, TypeError):
+        raise ValueError("peg_uuid_invalid") from None
+
+
 @dataclass(frozen=True)
 class Settings:
     database_url: str
@@ -52,10 +62,12 @@ class Settings:
         if not self.cookie_secure:
             raise RuntimeError("secure_cookies_required")
         try:
+            normalized_peg_id = normalize_peg_uuid(self.peg_id)
             if (str(UUID(self.business_id)) != self.business_id
                     or str(UUID(self.hotel_id)) != self.hotel_id
-                    or not self.peg_id.isdigit() or int(self.peg_id) <= 0):
+                    or not normalized_peg_id):
                 raise ValueError
         except (ValueError, TypeError, AttributeError):
             raise RuntimeError("workpeg_business_and_peg_binding_invalid") from None
+        object.__setattr__(self, "peg_id", normalized_peg_id)
         return self
