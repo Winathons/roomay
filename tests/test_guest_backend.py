@@ -20,7 +20,9 @@ from sqlalchemy.engine import URL
 from sqlalchemy.orm import sessionmaker
 from workpeg.auth import SignInStart, WorkpegIdentity
 
-from backend.app import PrepareBody, ConfirmBody, create_app, _digest
+from backend.app import (
+    GUEST_HTML, STAFF_HTML, PrepareBody, ConfirmBody, create_app, _digest,
+)
 from backend.models import (
     Base, GuestInvitation, GuestSession, HotelBinding, OperationalAudit,
     OperationalRequest, PendingRequest, StaffBinding, StaffSession,
@@ -230,6 +232,18 @@ class GuestBackendTests(TestCase):
                               hotel_reader=self.reader, settings=self.settings,
                               clock=lambda: AT, workpeg_auth=self.auth)
         self.client = LocalClient(self.app, base_url=self.origin)
+
+    def test_guest_and_staff_ui_report_only_verified_persistence(self):
+        self.assertIn("Confirm and save request", GUEST_HTML)
+        self.assertNotIn("Confirm and send request", GUEST_HTML)
+        self.assertIn("Request saved in Roomay. Hotel staff have not been notified.", GUEST_HTML)
+        self.assertIn(
+            "if(d.persisted!==true||!d.request||d.request.request_id!==row.request_id||d.request.status!==expected)",
+            STAFF_HTML,
+        )
+        self.assertIn("Status and audit persisted in Roomay.", STAFF_HTML)
+        self.assertNotIn("innerHTML", GUEST_HTML + STAFF_HTML)
+        self.assertIn("textContent=row.description", STAFF_HTML)
 
     def tearDown(self):
         self.client.close()
