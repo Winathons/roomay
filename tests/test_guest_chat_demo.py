@@ -298,10 +298,18 @@ class GuestChatDemoHttpTests(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertIn("OFFLINE DEMO — SYNTHETIC DATA — NO REQUEST SUBMITTED", html.decode("utf-8"))
         self.assertIn("default-src 'self'", headers["Content-Security-Policy"])
+        self.assertIn('src="/voice_intake.js"', html.decode("utf-8"))
+        self.assertIn("script-src 'self'", headers["Content-Security-Policy"])
         status, headers, app_js = self.dispatch("/app.js")
         self.assertEqual(status, 200)
         self.assertIn("text/javascript", headers["Content-Type"])
         self.assertIn("textContent", app_js.decode("utf-8"))
+        status, headers, voice_js = self.dispatch("/voice_intake.js")
+        self.assertEqual(status, 200)
+        self.assertIn("text/javascript", headers["Content-Type"])
+        self.assertIn("processLocally = true", voice_js.decode("utf-8"))
+        self.assertIn("aria-live=\"polite\"", html.decode("utf-8"))
+        self.assertIn("id=\"voice-button\"", html.decode("utf-8"))
 
     def test_browser_session_stays_server_side_and_never_returns_internal_contract(self):
         status, headers, body = self.dispatch("/api/session", method="POST", body=b"{}")

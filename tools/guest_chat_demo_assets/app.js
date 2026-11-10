@@ -5,10 +5,45 @@
   const form = document.getElementById("chat-form");
   const input = document.getElementById("guest-message");
   const sendButton = document.getElementById("send-button");
+  const voiceButton = document.getElementById("voice-button");
+  const voiceStatus = document.getElementById("voice-status");
   const confirmation = document.getElementById("confirmation");
   const feedback = document.getElementById("feedback");
   let view = null;
   let busy = false;
+  let voiceDraft = false;
+  let voiceListening = false;
+  let voice = null;
+
+  function updateComposerControls() {
+    sendButton.disabled = busy || voiceListening;
+    input.disabled = busy || voiceListening;
+    sendButton.querySelector("span").textContent = busy
+      ? "One moment"
+      : voiceDraft ? "Send reviewed transcript" : "Send";
+    sendButton.setAttribute("aria-label", busy ? "Sending message"
+      : voiceDraft ? "Send reviewed transcript" : "Send message");
+  }
+
+  if (globalThis.RoomayVoiceIntake && voiceButton && voiceStatus) {
+    voice = globalThis.RoomayVoiceIntake.attachVoiceIntake({
+      windowRef: globalThis,
+      button: voiceButton,
+      input,
+      status: voiceStatus,
+      onDraft(value) {
+        voiceDraft = value;
+        updateComposerControls();
+      },
+      onListening(value) {
+        voiceListening = value;
+        updateComposerControls();
+      },
+    });
+  } else if (voiceButton && voiceStatus) {
+    voiceButton.disabled = true;
+    voiceStatus.textContent = "Voice input is unavailable. Type your message instead.";
+  }
 
   async function post(path, body = {}) {
     const response = await fetch(path, {
@@ -82,15 +117,13 @@
     log.replaceChildren(...next.messages.map(makeMessage));
     renderReview(next.pending);
     log.scrollTop = log.scrollHeight;
-    sendButton.disabled = busy;
-    input.disabled = busy;
+    updateComposerControls();
   }
 
   function setBusy(value) {
     busy = value;
-    sendButton.disabled = value;
-    input.disabled = value;
-    sendButton.querySelector("span").textContent = value ? "One moment" : "Send";
+    if (voice) voice.setBusy(value);
+    updateComposerControls();
     feedback.textContent = value ? "Roomay is checking the request with offline rules…" : "";
   }
 
@@ -100,12 +133,14 @@
     try {
       render(await post(path, body));
       feedback.textContent = "";
+      return true;
     } catch (error) {
       feedback.textContent = error.status === 401
         ? "This demo session expired. Reload the page to start a new synthetic session."
         : error.status === 409
           ? "That confirmation is out of date. Review the latest chat before confirming."
           : "The offline demo could not complete that step. Please try again with a short message.";
+      return false;
     } finally {
       setBusy(false);
     }
@@ -115,9 +150,21 @@
     event.preventDefault();
     const text = input.value.trim();
     if (!text || busy) return;
-    input.value = "";
-    await act("/api/message", { text });
-    input.focus();
+    if (voiceListening) {
+      feedback.textContent = "Stop voice input and review the transcript before sending.";
+      return;
+    }
+    if (text.length > 1000) {
+      feedback.textContent = "Please edit the message to 1,000 characters or fewer before sending.";
+      input.focus();
+      return;
+    }
+    const sent = await act("/api/message", { text });
+    if (sent) {
+      input.value = "";
+      if (voice) voice.clearDraft();
+      input.focus();
+    }
   });
 
   input.addEventListener("keydown", (event) => {
