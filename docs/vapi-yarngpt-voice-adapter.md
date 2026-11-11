@@ -43,17 +43,17 @@ quality measurements are required before deployment.
 YarnGPT documents that voice IDs are exact, case-sensitive values from its
 authenticated `GET /api/v1/voices` catalogue, and that the catalogue changes.
 The current docs example uses `umar`, but that is not a stable guarantee. The
-docs do not publish stable Mary or Remi IDs. Since this task forbids live API
-calls, no current Mary/Remi/Umar ID was verified and none is hard-coded.
+The owner has approved the exact YarnGPT voice ID `remi` for Roomay's default.
+This change uses that value without making a live catalogue request. Mary and
+Umar remain optional aliases and are not required to configure the adapter.
 
-Before deployment, an authorized owner must use YarnGPT's authenticated voice
-catalogue to verify the exact current provider ID corresponding to each
-owner-approved Mary, Remi and Umar voice. Configure the exact values in the
-server's secret/configuration store as `YARNGPT_VOICE_MARY`,
-`YARNGPT_VOICE_REMI` and `YARNGPT_VOICE_UMAR`. The adapter accepts assistant
+Before deployment, an authorized owner may confirm the selected voices in
+YarnGPT's authenticated voice catalogue. Set `YARNGPT_VOICE_REMI=remi`;
+optionally configure `YARNGPT_VOICE_MARY` and `YARNGPT_VOICE_UMAR` if those
+voices should be available. The adapter accepts assistant
 IDs in `ROOMAY_VAPI_ASSISTANT_VOICE_MAP` as a JSON object mapping a saved Vapi
 assistant ID to one of the aliases `mary`, `remi` or `umar`; unmapped requests
-use `ROOMAY_TTS_DEFAULT_VOICE`. The assistant ID selects only among the
+use `ROOMAY_TTS_DEFAULT_VOICE`, which defaults to `remi`. The assistant ID selects only among the
 server-configured voice IDs and is not treated as authentication.
 
 ## Future deployment and Vapi setup
@@ -148,8 +148,9 @@ live low-latency hotel receptionist until the whole pipeline is tested.
 
 - No YarnGPT request, Vapi call, voice catalogue query, key generation, public
   deployment or credit use has occurred in this phase.
-- Current Mary/Remi/Umar provider IDs, account access, voice availability,
-  billing, real latency, reliability and pronunciation remain unverified.
+- The owner-approved `remi` ID is configured as default, but provider
+  availability, account access, billing, real latency, reliability and
+  pronunciation remain unverified because no live YarnGPT request was made.
 - Azure Speech `en-NG` remains the intended Vapi transcription choice; this
   adapter does not configure or test transcription.
 - Voice conversion is offline-verified but has not been reviewed by a speech
@@ -158,12 +159,13 @@ live low-latency hotel receptionist until the whole pipeline is tested.
   TLS, request logging and disconnect closure must be verified on the chosen
   host. A mid-stream failure can only terminate the stream; do not auto-retry
   or claim the caller heard the full response.
-- No hotel intent, authorization, guest identity, or Workpeg persistence is
-  handled. A future voice conversation flow must separately use
-  `domain/conversation_intake.py`, verify the active stay with a trusted
-  server-side adapter, request guest confirmation and hand off emergencies to
-  a monitored human process. This adapter itself never creates a service
-  request or claims it was submitted.
+- Hotel intent and caller routing are handled only by the separate
+  `voice_adapter.intent_tools` boundary described in
+  [the WOR-56 voice intake notes](wor-56-vapi-voice-intake.md). This TTS
+  adapter does not authenticate a guest or persist hotel operations. A future
+  voice request flow must verify an active stay through a trusted server-side
+  adapter, use the shared action gateway, persist request and audit state, and
+  hand off emergencies through a monitored human process.
 
 ## Official references
 

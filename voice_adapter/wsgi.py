@@ -22,7 +22,7 @@ class VoiceConfig:
     vapi_bearer_token: str
     yarngpt_api_key: str
     voice_ids: dict
-    default_voice: str = "mary"
+    default_voice: str = "remi"
     assistant_voice_map: dict = field(default_factory=dict)
     timeout_seconds: int = 20
 
@@ -33,17 +33,20 @@ class VoiceConfig:
             raise ValueError("yarngpt_api_key_required")
         if self.default_voice not in VOICE_ALIASES:
             raise ValueError("invalid_default_voice")
-        if not isinstance(self.voice_ids, dict):
+        if not isinstance(self.voice_ids, dict) or not self.voice_ids:
             raise ValueError("voice_ids_required")
-        for alias in VOICE_ALIASES:
-            value = self.voice_ids.get(alias)
+        if set(self.voice_ids) - VOICE_ALIASES:
+            raise ValueError("invalid_voice_ids")
+        for alias, value in self.voice_ids.items():
             if (not isinstance(value, str) or not value.strip() or value != value.strip()
                     or len(value) > 128):
-                raise ValueError("all_provider_voice_ids_required")
+                raise ValueError("invalid_provider_voice_id")
+        if self.default_voice not in self.voice_ids:
+            raise ValueError("default_provider_voice_id_required")
         if not isinstance(self.assistant_voice_map, dict):
             raise ValueError("invalid_assistant_voice_map")
         if any(not isinstance(key, str) or not key or not isinstance(value, str)
-               or value not in VOICE_ALIASES
+               or value not in self.voice_ids
                for key, value in self.assistant_voice_map.items()):
             raise ValueError("invalid_assistant_voice_map")
         if isinstance(self.timeout_seconds, bool) or not isinstance(self.timeout_seconds, int) or not 1 <= self.timeout_seconds <= 60:
@@ -56,7 +59,7 @@ class VoiceConfig:
             assistant_map = json.loads(env.get("ROOMAY_VAPI_ASSISTANT_VOICE_MAP", "{}"))
             voice_ids = {
                 "mary": env.get("YARNGPT_VOICE_MARY", ""),
-                "remi": env.get("YARNGPT_VOICE_REMI", ""),
+                "remi": env.get("YARNGPT_VOICE_REMI", "remi"),
                 "umar": env.get("YARNGPT_VOICE_UMAR", ""),
             }
         except (TypeError, ValueError):
@@ -64,8 +67,8 @@ class VoiceConfig:
         config = cls(
             vapi_bearer_token=env.get("ROOMAY_VAPI_BEARER_TOKEN", ""),
             yarngpt_api_key=env.get("YARNGPT_API_KEY", ""),
-            voice_ids=voice_ids,
-            default_voice=env.get("ROOMAY_TTS_DEFAULT_VOICE", "mary").lower(),
+            voice_ids={alias: value for alias, value in voice_ids.items() if value},
+            default_voice=env.get("ROOMAY_TTS_DEFAULT_VOICE", "remi").lower(),
             assistant_voice_map=assistant_map,
             timeout_seconds=int(env.get("YARNGPT_TIMEOUT_SECONDS", "20")),
         )
