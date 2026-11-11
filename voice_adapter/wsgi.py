@@ -6,6 +6,9 @@ import json
 import math
 import os
 import secrets
+import threading
+import time
+from collections import deque
 from dataclasses import dataclass, field
 
 from .yarngpt import ProviderError, YarnConversationClient
@@ -25,6 +28,9 @@ class VoiceConfig:
     default_voice: str = "remi"
     assistant_voice_map: dict = field(default_factory=dict)
     timeout_seconds: int = 20
+    rate_limit_requests: int = 10
+    rate_limit_window_seconds: int = 60
+    synthesis_deadline_seconds: int = 25
 
     def validate(self):
         if not isinstance(self.vapi_bearer_token, str) or len(self.vapi_bearer_token) < 32:
@@ -51,6 +57,18 @@ class VoiceConfig:
             raise ValueError("invalid_assistant_voice_map")
         if isinstance(self.timeout_seconds, bool) or not isinstance(self.timeout_seconds, int) or not 1 <= self.timeout_seconds <= 60:
             raise ValueError("invalid_timeout")
+        if (isinstance(self.rate_limit_requests, bool)
+                or not isinstance(self.rate_limit_requests, int)
+                or not 1 <= self.rate_limit_requests <= 1000):
+            raise ValueError("invalid_rate_limit_requests")
+        if (isinstance(self.rate_limit_window_seconds, bool)
+                or not isinstance(self.rate_limit_window_seconds, int)
+                or not 1 <= self.rate_limit_window_seconds <= 3600):
+            raise ValueError("invalid_rate_limit_window")
+        if (isinstance(self.synthesis_deadline_seconds, bool)
+                or not isinstance(self.synthesis_deadline_seconds, int)
+                or not 1 <= self.synthesis_deadline_seconds <= 120):
+            raise ValueError("invalid_synthesis_deadline")
 
     @classmethod
     def from_environment(cls, environ=None):
@@ -71,6 +89,9 @@ class VoiceConfig:
             default_voice=env.get("ROOMAY_TTS_DEFAULT_VOICE", "remi").lower(),
             assistant_voice_map=assistant_map,
             timeout_seconds=int(env.get("YARNGPT_TIMEOUT_SECONDS", "20")),
+            rate_limit_requests=int(env.get("ROOMAY_TTS_RATE_LIMIT_REQUESTS", "10")),
+            rate_limit_window_seconds=int(env.get("ROOMAY_TTS_RATE_LIMIT_WINDOW_SECONDS", "60")),
+            synthesis_deadline_seconds=int(env.get("ROOMAY_TTS_SYNTHESIS_DEADLINE_SECONDS", "25")),
         )
         config.validate()
         return config
@@ -140,10 +161,35 @@ def _parse_message(environ):
     return text.strip(), rate, assistant_id, call_id, timestamp
 
 
-def create_app(config, client=None):
+class _RequestRateLimiter:
+    """Bounded per-process sliding window for authenticated synthesis calls."""
+
+    def __init__(self, capacity, window_seconds, clock=time.monotonic):
+        self.capacity = capacity
+        self.window_seconds = window_seconds
+        self._clock = clock
+        self._events = deque()
+        self._lock = threading.Lock()
+
+    def allow(self):
+        with self._lock:
+            now = self._clock()
+            cutoff = now - self.window_seconds
+            while self._events and self._events[0] <= cutoff:
+                self._events.popleft()
+            if len(self._events) >= self.capacity:
+                retry_after = max(1, math.ceil(self.window_seconds - (now - self._events[0])))
+                return False, min(retry_after, self.window_seconds)
+            self._events.append(now)
+            return True, None
+
+
+def create_app(config, client=None, *, clock=time.monotonic):
     """Create a Vapi custom-voice WSGI app; providers are injectable for tests."""
     config.validate()
     provider = client or YarnConversationClient(config.yarngpt_api_key, config.timeout_seconds)
+    limiter = _RequestRateLimiter(config.rate_limit_requests,
+                                  config.rate_limit_window_seconds, clock=clock)
 
     def app(environ, start_response):
         if environ.get("REQUEST_METHOD") != "POST":
@@ -161,6 +207,13 @@ def create_app(config, client=None):
             return _response(start_response, 401, {"error": "unauthorized"},
                              [("WWW-Authenticate", "Bearer")])
         try:
+            allowed, retry_after = limiter.allow()
+        except Exception:
+            return _response(start_response, 503, {"error": "rate_limit_unavailable"})
+        if not allowed:
+            return _response(start_response, 429, {"error": "rate_limited"},
+                             [("Retry-After", str(retry_after))])
+        try:
             text, sample_rate, assistant_id, call_id, timestamp = _parse_message(environ)
         except OverflowError:
             return _response(start_response, 413, {"error": "request_too_large"})
@@ -177,16 +230,30 @@ def create_app(config, client=None):
             idempotency_key = hmac.new(
                 config.yarngpt_api_key.encode("utf-8"), key_material, hashlib.sha256
             ).hexdigest()
+        stream = None
+        stream_transferred = False
+        deadline_at = clock() + config.synthesis_deadline_seconds
         try:
             stream = provider.open_audio(text, voice_id, sample_rate,
-                                         idempotency_key=idempotency_key)
+                                         idempotency_key=idempotency_key,
+                                         deadline_at=deadline_at)
             first = next(stream, b"")
             if not first:
-                stream.close()
                 return _response(start_response, 502, {"error": "empty_provider_audio"})
+            stream_transferred = True
         except ProviderError as error:
             error_headers = [("Retry-After", error.retry_after)] if error.retry_after else None
             return _response(start_response, error.status, {"error": error.code}, error_headers)
+        except Exception:
+            return _response(start_response, 502, {"error": "synthesis_failed"})
+        finally:
+            # Once headers are returned, the response iterator owns cleanup.
+            # Before that point, every failure path must release the provider.
+            if stream is not None and not stream_transferred:
+                try:
+                    stream.close()
+                except Exception:
+                    pass
 
         start_response("200 OK", [
             ("Content-Type", "application/octet-stream"),

@@ -3,6 +3,8 @@
 import json
 import re
 import socket
+import threading
+import time
 from urllib.error import HTTPError, URLError
 from urllib.request import HTTPRedirectHandler, Request, build_opener
 
@@ -68,7 +70,8 @@ class YarnConversationClient:
         self.chunk_size = chunk_size
         self._opener = opener or build_opener(_NoRedirect())
 
-    def open_audio(self, text, voice_id, target_rate, idempotency_key=None):
+    def open_audio(self, text, voice_id, target_rate, idempotency_key=None,
+                   deadline_at=None):
         body = json.dumps({"text": text, "voice": voice_id, "output_format": "pcm"}).encode("utf-8")
         headers = {
             "Authorization": "Bearer " + self._api_key,
@@ -85,8 +88,14 @@ class YarnConversationClient:
             headers=headers,
             method="POST",
         )
+        timeout = self.timeout_seconds
+        if deadline_at is not None:
+            remaining = deadline_at - time.monotonic()
+            if remaining <= 0:
+                raise ProviderError("provider_timeout", status=504)
+            timeout = min(timeout, remaining)
         try:
-            response = self._opener.open(request, timeout=self.timeout_seconds)
+            response = self._opener.open(request, timeout=timeout)
         except HTTPError as error:
             status, response_headers = error.code, error.headers
             error.close()
@@ -109,30 +118,44 @@ class YarnConversationClient:
         except ProviderError:
             response.close()
             raise
-        return PcmAudioStream(response, source_rate, target_rate, self.chunk_size)
+        return PcmAudioStream(response, source_rate, target_rate, self.chunk_size,
+                              deadline_at=deadline_at)
 
 
 class PcmAudioStream:
     """Closeable stream. WSGI iterator close propagates client cancellation."""
 
-    def __init__(self, response, source_rate, target_rate, chunk_size=2048):
+    def __init__(self, response, source_rate, target_rate, chunk_size=2048,
+                 deadline_at=None, timer_factory=threading.Timer,
+                 monotonic=time.monotonic):
         self._response = response
         self._resampler = LinearPcmResampler(source_rate, target_rate)
         self._chunk_size = chunk_size
         self._closed = False
+        self._deadline_at = deadline_at
+        self._monotonic = monotonic
+        self._lock = threading.Lock()
+        self._deadline_expired = False
+        self._timer = None
+        if deadline_at is not None:
+            delay = max(0, deadline_at - monotonic())
+            self._timer = timer_factory(delay, self._expire)
+            self._timer.daemon = True
+            self._timer.start()
 
     def __iter__(self):
         return self
 
     def __next__(self):
+        self._ensure_live()
         if self._closed:
             raise StopIteration
         try:
             while True:
                 chunk = self._response.read(self._chunk_size)
+                self._ensure_live()
                 if not chunk:
-                    self._closed = True
-                    self._response.close()
+                    self.close()
                     tail = self._resampler.finish()
                     if tail:
                         return tail
@@ -142,6 +165,9 @@ class PcmAudioStream:
                     return converted
         except StopIteration:
             raise
+        except ProviderError:
+            self.close()
+            raise
         except (TimeoutError, socket.timeout):
             self.close()
             raise ProviderError("provider_timeout", status=504) from None
@@ -149,10 +175,44 @@ class PcmAudioStream:
             self.close()
             raise ProviderError("provider_audio_malformed", status=502) from None
         except Exception:
+            if self._is_expired():
+                self.close()
+                raise ProviderError("provider_timeout", status=504) from None
             self.close()
             raise ProviderError("provider_stream_interrupted", status=502) from None
 
-    def close(self):
-        if not self._closed:
-            self._closed = True
+    def _is_expired(self):
+        with self._lock:
+            return self._deadline_expired
+
+    def _ensure_live(self):
+        if self._deadline_at is not None and self._monotonic() >= self._deadline_at:
+            self._expire()
+        if self._is_expired():
+            raise ProviderError("provider_timeout", status=504)
+
+    def _expire(self):
+        with self._lock:
+            if self._closed:
+                return
+            self._deadline_expired = True
+        # Closing the response interrupts the provider stream where the
+        # transport permits it; the deadline flag prevents further PCM yield.
+        try:
             self._response.close()
+        except Exception:
+            pass
+
+    def close(self):
+        with self._lock:
+            if self._closed:
+                return
+            self._closed = True
+            timer = self._timer
+        if timer is not None:
+            timer.cancel()
+        try:
+            self._response.close()
+        except Exception:
+            # Do not expose transport close details or replace a safe outcome.
+            pass

@@ -35,3 +35,9 @@ services:
         value: remi
       - key: YARNGPT_TIMEOUT_SECONDS
         value: "20"
+      - key: ROOMAY_TTS_RATE_LIMIT_REQUESTS
+        value: "10"
+      - key: ROOMAY_TTS_RATE_LIMIT_WINDOW_SECONDS
+        value: "60"
+      - key: ROOMAY_TTS_SYNTHESIS_DEADLINE_SECONDS
+        value: "25"

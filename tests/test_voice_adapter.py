@@ -4,13 +4,14 @@ import io
 import json
 import socket
 import struct
+import time
 import unittest
 from urllib.error import HTTPError
 
 from voice_adapter.pcm import LinearPcmResampler, PcmFormatError
 from voice_adapter.wsgi import VoiceConfig, create_app
 from voice_adapter.yarngpt import (
-    ProviderError, YARN_CONVERSATION_URL, YarnConversationClient,
+    PcmAudioStream, ProviderError, YARN_CONVERSATION_URL, YarnConversationClient,
 )
 
 
@@ -170,6 +171,52 @@ class YarnClientTests(unittest.TestCase):
         self.assertEqual(caught.exception.code, "provider_timeout")
         self.assertEqual(caught.exception.status, 504)
 
+    def test_connection_timeout_is_capped_by_remaining_synthesis_deadline(self):
+        opener = FakeOpener(response=FakeResponse(pcm_sine_samples(100)))
+        client = YarnConversationClient(YARN_KEY, timeout_seconds=20, opener=opener)
+        client.open_audio("hello", "voice", 8000,
+                          deadline_at=time.monotonic() + 0.25).close()
+        self.assertGreater(opener.timeout, 0)
+        self.assertLessEqual(opener.timeout, 0.25)
+
+    def test_total_stream_deadline_expires_during_continuous_audio_and_closes_response(self):
+        class ContinuousResponse(FakeResponse):
+            def __init__(self):
+                super().__init__()
+
+            def read(self, size):
+                time.sleep(0.005)
+                if self.closed:
+                    return b""
+                return pcm_sine_samples(max(2, size // 2))
+
+        response = ContinuousResponse()
+        stream = PcmAudioStream(response, 48000, 24000,
+                                deadline_at=time.monotonic() + 0.05)
+        yielded = 0
+        with self.assertRaises(ProviderError) as caught:
+            while True:
+                next(stream)
+                yielded += 1
+        self.assertEqual(caught.exception.code, "provider_timeout")
+        self.assertGreater(yielded, 0)
+        self.assertTrue(response.closed)
+
+    def test_stream_deadline_closes_response_even_if_client_stops_consuming(self):
+        class BlockingResponse(FakeResponse):
+            def read(self, size):
+                time.sleep(0.04)
+                return super().read(size)
+
+        response = BlockingResponse(pcm_sine_samples(1000))
+        stream = PcmAudioStream(response, 48000, 24000,
+                                deadline_at=time.monotonic() + 0.01)
+        time.sleep(0.03)
+        self.assertTrue(response.closed)
+        with self.assertRaises(ProviderError) as caught:
+            next(stream)
+        self.assertEqual(caught.exception.code, "provider_timeout")
+
     def test_rejects_unexpected_provider_content_type(self):
         client = YarnConversationClient(YARN_KEY, opener=FakeOpener(
             response=FakeResponse(b"not pcm", content_type="audio/wav")))
@@ -225,7 +272,7 @@ class VapiWsgiAdapterTests(unittest.TestCase):
             def __init__(self):
                 self.args = None
 
-            def open_audio(self, text, voice_id, target_rate, idempotency_key=None):
+            def open_audio(self, text, voice_id, target_rate, idempotency_key=None, deadline_at=None):
                 self.args = (text, voice_id, target_rate, idempotency_key)
                 converter = LinearPcmResampler(48000, target_rate)
 
@@ -263,7 +310,7 @@ class VapiWsgiAdapterTests(unittest.TestCase):
             def __init__(self):
                 self.keys = []
 
-            def open_audio(self, text, voice_id, target_rate, idempotency_key=None):
+            def open_audio(self, text, voice_id, target_rate, idempotency_key=None, deadline_at=None):
                 self.keys.append(idempotency_key)
                 class EmptyStream:
                     def __iter__(self):
@@ -295,6 +342,86 @@ class VapiWsgiAdapterTests(unittest.TestCase):
                 response = wsgi_call(app, vapi_request(), token=supplied)
                 self.assertEqual(response["status"], 401)
                 self.assertEqual(json.loads(b"".join(response["body"])), {"error": "unauthorized"})
+
+    def test_authenticated_synthesis_requests_are_rate_limited_and_fail_closed(self):
+        now = [100.0]
+        calls = []
+
+        class EmptyClient:
+            def open_audio(self, *args, **kwargs):
+                calls.append(1)
+
+                class EmptyStream:
+                    def __iter__(self):
+                        return self
+
+                    def __next__(self):
+                        raise StopIteration
+
+                    def close(self):
+                        pass
+                return EmptyStream()
+
+        app = create_app(voice_config(rate_limit_requests=1,
+                                      rate_limit_window_seconds=30),
+                         client=EmptyClient(), clock=lambda: now[0])
+        unauthorized = wsgi_call(app, vapi_request(), token="incorrect")
+        self.assertEqual(unauthorized["status"], 401)
+        first = wsgi_call(app, vapi_request())
+        self.assertEqual(first["status"], 502)
+        limited = wsgi_call(app, vapi_request())
+        self.assertEqual(limited["status"], 429)
+        self.assertEqual(limited["headers"]["Retry-After"], "30")
+        self.assertEqual(json.loads(b"".join(limited["body"])), {"error": "rate_limited"})
+        self.assertEqual(len(calls), 1)
+        now[0] += 31
+        self.assertEqual(wsgi_call(app, vapi_request())["status"], 502)
+        self.assertEqual(len(calls), 2)
+
+    def test_limiter_storage_and_deadline_configuration_are_bounded(self):
+        for changes in ({"rate_limit_requests": 0}, {"rate_limit_requests": 1001},
+                        {"rate_limit_window_seconds": 0},
+                        {"synthesis_deadline_seconds": 121}):
+            with self.subTest(changes=changes), self.assertRaises(ValueError):
+                voice_config(**changes).validate()
+
+    def test_rate_limiter_internal_failure_fails_closed_without_provider_use(self):
+        class NeverClient:
+            def open_audio(self, *args, **kwargs):
+                self.fail("limiter failure must block provider use")
+
+        def broken_clock():
+            raise RuntimeError("internal-only detail")
+
+        response = wsgi_call(create_app(voice_config(), client=NeverClient(),
+                                        clock=broken_clock), vapi_request())
+        self.assertEqual(response["status"], 503)
+        self.assertEqual(json.loads(b"".join(response["body"])),
+                         {"error": "rate_limit_unavailable"})
+
+    def test_unexpected_first_stream_failure_closes_upstream_and_is_sanitized(self):
+        class BrokenStream:
+            closed = False
+
+            def __iter__(self):
+                return self
+
+            def __next__(self):
+                raise RuntimeError("sensitive provider detail")
+
+            def close(self):
+                self.closed = True
+
+        stream = BrokenStream()
+
+        class Client:
+            def open_audio(self, *args, **kwargs):
+                return stream
+
+        response = wsgi_call(create_app(voice_config(), client=Client()), vapi_request())
+        self.assertEqual(response["status"], 502)
+        self.assertEqual(json.loads(b"".join(response["body"])), {"error": "synthesis_failed"})
+        self.assertTrue(stream.closed)
 
     def test_empty_provider_audio_fails_before_success_headers(self):
         app = create_app(voice_config(), client=YarnConversationClient(

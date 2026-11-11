@@ -115,26 +115,32 @@ credentials in this repository. Configure these server environment values:
 | `ROOMAY_VAPI_BEARER_TOKEN` | Independently generated random value, at least 32 characters; host secret and Vapi Custom Credential |
 | `ROOMAY_TTS_DEFAULT_VOICE` | `remi` |
 | `YARNGPT_VOICE_REMI` | `remi` |
-| `YARNGPT_TIMEOUT_SECONDS` | `20` initially; adapter accepts 1–60 seconds |
+| `YARNGPT_TIMEOUT_SECONDS` | `20`; per-operation socket timeout, 1–60 seconds |
+| `ROOMAY_TTS_RATE_LIMIT_REQUESTS` | `10` authenticated synthesis requests |
+| `ROOMAY_TTS_RATE_LIMIT_WINDOW_SECONDS` | `60` seconds; bounded sliding window |
+| `ROOMAY_TTS_SYNTHESIS_DEADLINE_SECONDS` | `25` seconds total from provider request through streamed PCM; allowed 1–120 seconds |
 | `PYTHON_VERSION` | `3.13.5` |
 
-`YARNGPT_TIMEOUT_SECONDS` is the Python socket timeout used for provider
-connection/read operations. It bounds a stalled operation, not the total
-duration of a response that continues to deliver chunks. Gunicorn's worker
-timeout is a worker-liveness setting (and is not a reliable per-request hard
-deadline with `gthread`). Do not describe either as an end-to-end synthesis
-deadline; measure actual first-byte and stream duration on the host.
+The synthesis deadline starts before the YarnGPT request. It bounds connection
+setup, first audio, and the complete PCM stream. Expiry closes the provider
+response and prevents further PCM from being yielded. `YARNGPT_TIMEOUT_SECONDS`
+continues to bound an individual blocked socket operation; Gunicorn's worker
+timeout is only a worker-liveness setting. A partially streamed response cannot
+be converted to a clean HTTP error after headers have been sent.
 
 Do not place actual secrets in a shell command, `.env`, Blueprint, Vapi
 assistant text, build log, or PR. Do not set the YarnGPT API key in Vapi.
-The configured two Gunicorn threads bound concurrent application calls; they
-are not a request-rate limit. The adapter has no distributed or per-caller
-rate limiter, and Render's lower-cost plan does not provide a configurable
-source-IP allowlist. Before inviting guest traffic or a public launch, add an
-approved edge/application rate limit and provider spend alert. For the first
-internal test, use the high-entropy shared bearer credential, one instance,
-one test assistant, and owner monitoring; rotate the host and Vapi credential
-together if it is exposed.
+The adapter applies a bounded sliding-window limit after bearer authentication
+and before request parsing or provider use. Its state is process-local: it is
+shared by threads in one Gunicorn worker, but it is not distributed between
+workers, instances, or restarts. The prepared Render service uses one instance
+and one worker; increasing either means each process gets an independent quota.
+This is a cost/abuse safeguard, not a per-caller identity limit. Keep one worker
+and one instance for the controlled test, retain a high-entropy shared bearer
+credential, and monitor provider usage. A multi-worker/public deployment needs
+an approved shared rate-limit service or edge limit and a provider spend alert.
+Rate limiting is fail-closed: a full window returns HTTP 429 with a bounded
+`Retry-After`; limiter errors return 503 without calling YarnGPT.
 
 ### Owner-controlled Vapi setup after hosting approval
 
@@ -199,10 +205,12 @@ each hosted trial.
 
 `tests/test_voice_adapter.py` injects fake clients/responses and synthetic
 PCM. It makes no DNS request, live provider request, call, credit charge or
-Workpeg call. It covers all five accepted Vapi output rates, chunk boundaries, invalid
-credentials/configuration, malformed request shapes, empty audio, provider
-failure, rate limiting, invalid provider audio, timeout/disconnect cleanup,
-and upstream request shape.
+Workpeg call. It covers all five accepted Vapi output rates, chunk boundaries,
+invalid credentials/configuration, malformed request shapes, empty audio,
+provider failure, bounded authenticated request rate, total synthesis deadline
+during streaming, timeout/disconnect cleanup, response-resource closure, and
+upstream request shape. These deterministic tests do not replace hosted latency
+and disconnect verification.
 
 After a separately authorized deployment and provider trial, compare Mary,
 Remi and Umar with the same short, non-personal test phrases and the same call
