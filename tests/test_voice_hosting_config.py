@@ -21,6 +21,9 @@ class VoiceHostingConfigTests(unittest.TestCase):
         self.assertIn("--worker-connections 16", config)
         self.assertIn("--backlog 16", config)
         self.assertIn("--timeout 75", config)
+        self.assertIn('key: ROOMAY_TTS_RATE_LIMIT_REQUESTS\n        value: "10"', config)
+        self.assertIn('key: ROOMAY_TTS_RATE_LIMIT_WINDOW_SECONDS\n        value: "60"', config)
+        self.assertIn('key: ROOMAY_TTS_SYNTHESIS_DEADLINE_SECONDS\n        value: "25"', config)
 
     def test_required_provider_credentials_are_never_literal_blueprint_values(self):
         config = (ROOT / "render.yaml").read_text(encoding="utf-8")
