@@ -345,11 +345,11 @@ class VapiWsgiAdapterTests(unittest.TestCase):
         self.assertEqual(wsgi_call(app, vapi_request(), path="/unknown")["status"], 404)
         self.assertEqual(wsgi_call(app, body=b"x" * (64 * 1024 + 1))["status"], 413)
 
-    def test_configuration_requires_secrets_and_all_three_owner_validated_voice_ids(self):
+    def test_configuration_requires_secrets_and_default_voice_but_other_voices_are_optional(self):
         with self.assertRaises(ValueError):
             voice_config(vapi_bearer_token="short").validate()
         with self.assertRaises(ValueError):
-            voice_config(voice_ids={"mary": "id"}).validate()
+            voice_config(voice_ids={"mary": "id"}, default_voice="remi").validate()
         with self.assertRaises(ValueError):
             VoiceConfig.from_environment({})
 

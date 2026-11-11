@@ -4,8 +4,14 @@ This is a standalone, offline-tested WSGI endpoint for Vapi custom TTS. It is
 not a Workpeg route, Workpeg Function, deployed service, or live AI
 integration. The endpoint synthesizes text only; it does not receive guest
 requests, create hotel tickets, write Workpeg data, transcribe speech, or
-confirm bookings. Vapi remains the call orchestrator and Azure Speech `en-NG`
-remains the planned initial transcription provider.
+confirm bookings. Vapi remains the call orchestrator. The owner reports that
+the separate **ROOMAY GPT-4o STT Test** assistant uses provider **OpenAI** and
+model **`gpt-4o-transcribe`**, with a Nigerian Pidgin transcription prompt.
+English and Pidgin conversations were tested by the owner; recognition
+improved but remains imperfect. This is owner-reported test evidence, not an
+independent dashboard inspection or automated ASR result. The main published
+assistant remains separate and unchanged. This repository does not configure
+or validate the transcriber.
 
 ## Architecture
 
@@ -43,17 +49,17 @@ quality measurements are required before deployment.
 YarnGPT documents that voice IDs are exact, case-sensitive values from its
 authenticated `GET /api/v1/voices` catalogue, and that the catalogue changes.
 The current docs example uses `umar`, but that is not a stable guarantee. The
-docs do not publish stable Mary or Remi IDs. Since this task forbids live API
-calls, no current Mary/Remi/Umar ID was verified and none is hard-coded.
+The owner has approved the exact YarnGPT voice ID `remi` for Roomay's default.
+This change uses that value without making a live catalogue request. Mary and
+Umar remain optional aliases and are not required to configure the adapter.
 
-Before deployment, an authorized owner must use YarnGPT's authenticated voice
-catalogue to verify the exact current provider ID corresponding to each
-owner-approved Mary, Remi and Umar voice. Configure the exact values in the
-server's secret/configuration store as `YARNGPT_VOICE_MARY`,
-`YARNGPT_VOICE_REMI` and `YARNGPT_VOICE_UMAR`. The adapter accepts assistant
+Before deployment, an authorized owner may confirm the selected voices in
+YarnGPT's authenticated voice catalogue. Set `YARNGPT_VOICE_REMI=remi`;
+optionally configure `YARNGPT_VOICE_MARY` and `YARNGPT_VOICE_UMAR` if those
+voices should be available. The adapter accepts assistant
 IDs in `ROOMAY_VAPI_ASSISTANT_VOICE_MAP` as a JSON object mapping a saved Vapi
 assistant ID to one of the aliases `mary`, `remi` or `umar`; unmapped requests
-use `ROOMAY_TTS_DEFAULT_VOICE`. The assistant ID selects only among the
+use `ROOMAY_TTS_DEFAULT_VOICE`, which defaults to `remi`. The assistant ID selects only among the
 server-configured voice IDs and is not treated as authentication.
 
 ## Future deployment and Vapi setup
@@ -74,13 +80,16 @@ deployment authorization:
    each ID to the approved sound in the current YarnGPT catalogue. Set
    `ROOMAY_TTS_DEFAULT_VOICE`, the optional assistant-ID mapping, and an
    appropriate `YARNGPT_TIMEOUT_SECONDS` (1–60).
-4. Mount `voice_adapter.wsgi.create_app(VoiceConfig.from_environment())` at a
-   stable HTTPS path such as `/synthesize`. Restrict access to POST, keep
+4. Deploy the independent TTS WSGI application with entry point
+   `voice_adapter.tts_wsgi:application` at the stable HTTPS path `/synthesize`.
+   Restrict access to POST, keep
    request/response bodies out of access logs, and ensure disconnects close
    WSGI iterables. The implementation has no admin, diagnostics, health-data,
    or CRUD route.
-5. In Vapi, keep the existing assistant/call orchestration and Azure Speech
-   `en-NG` transcription settings. Set the voice provider to `custom-voice`,
+5. The YarnGPT Remi adapter is **not yet connected** to the Vapi test assistant.
+   The code's default alias is `remi`, but no deployed TTS URL, Vapi Custom
+   Credential or playback has been verified. When separately approved, use a
+   draft/test assistant and set the voice provider to `custom-voice`,
    the server URL to the HTTPS path, and attach a Vapi Custom Credential using
    a Bearer Token with the `Authorization` header and `Bearer` prefix enabled.
    Store only the Vapi-to-adapter bearer credential in Vapi; YarnGPT credentials
@@ -146,24 +155,36 @@ live low-latency hotel receptionist until the whole pipeline is tested.
 
 ## Current limitations and release gates
 
-- No YarnGPT request, Vapi call, voice catalogue query, key generation, public
-  deployment or credit use has occurred in this phase.
-- Current Mary/Remi/Umar provider IDs, account access, voice availability,
-  billing, real latency, reliability and pronunciation remain unverified.
-- Azure Speech `en-NG` remains the intended Vapi transcription choice; this
-  adapter does not configure or test transcription.
+- This implementation made no YarnGPT provider request, voice-catalogue query,
+  key generation, public deployment or credit use. The owner separately tested
+  English/Pidgin conversations with the ROOMAY GPT-4o STT Test assistant; that
+  assistant is not the main published assistant and is not connected to the
+  YarnGPT Remi TTS bridge.
+- The owner-approved `remi` ID is configured as default, but provider
+  availability, account access, billing, real latency, reliability and
+  pronunciation remain unverified because no live YarnGPT request was made.
+- The owner reports the separate test assistant uses OpenAI `gpt-4o-transcribe`
+  with a Nigerian Pidgin prompt. English/Pidgin conversation testing improved
+  recognition but it remains imperfect. This adapter neither configures nor
+  validates STT; transcript mistakes can still affect downstream intent
+  routing. The main published assistant is separate and unchanged.
+- YarnGPT Remi is not connected to the test or main published assistant yet.
+  The adapter default alone does not mean Vapi is using Remi; a separately
+  deployed HTTPS endpoint, Vapi credential attachment and playback test remain
+  required.
 - Voice conversion is offline-verified but has not been reviewed by a speech
   engineer or tested by listening over the intended telephony path.
 - WSGI server behavior for timeout enforcement, backpressure, concurrency,
   TLS, request logging and disconnect closure must be verified on the chosen
   host. A mid-stream failure can only terminate the stream; do not auto-retry
   or claim the caller heard the full response.
-- No hotel intent, authorization, guest identity, or Workpeg persistence is
-  handled. A future voice conversation flow must separately use
-  `domain/conversation_intake.py`, verify the active stay with a trusted
-  server-side adapter, request guest confirmation and hand off emergencies to
-  a monitored human process. This adapter itself never creates a service
-  request or claims it was submitted.
+- Hotel intent and caller routing are handled only by the separate
+  `voice_adapter.intent_tools` boundary described in
+  [the WOR-56 voice intake notes](wor-56-vapi-voice-intake.md). This TTS
+  adapter does not authenticate a guest or persist hotel operations. A future
+  voice request flow must verify an active stay through a trusted server-side
+  adapter, use the shared action gateway, persist request and audit state, and
+  hand off emergencies through a monitored human process.
 
 ## Official references
 
