@@ -9,6 +9,11 @@ let loadHandler;
 globalThis.addEventListener = (event, handler) => { if (event === 'load') loadHandler = handler; };
 globalThis.fetch = () => { throw new Error('NETWORK FORBIDDEN IN RECEPTION TEST'); };
 const output = process.argv[2];
+const releaseHtml = fs.readFileSync(path.join(output, 'index.html'), 'utf8');
+const compiledApp = fs.readFileSync(path.join(output, 'app.js'), 'utf8');
+assert.match(releaseHtml, /fonts\.googleapis\.com\/css2\?family=Plus\+Jakarta\+Sans/);
+assert.match(compiledApp, /--color-brand-primary/);
+assert.match(compiledApp, /--font-base/);
 vm.runInThisContext(fs.readFileSync(path.join(output, 'workpeg-runtime.js'), 'utf8'));
 let registeredRoutes;
 Workpeg.router = routes => { registeredRoutes = routes; };
@@ -65,12 +70,35 @@ const visit = (node, predicate, found = []) => {
   return found;
 };
 const tree = app.build();
-const detailButtons = visit(tree, node => node.type === 'button' && node.props.label === 'View details');
+const todayMarkup = JSON.stringify(tree);
+assert.match(todayMarkup, /Today at a glance/);
+for (const label of [
+  'In house', 'Arrivals', 'Scheduled departures today', 'Overdue active stays',
+  'Ready for check-in', 'Needs cleaning', 'Maintenance-blocked rooms',
+  'Open requests',
+]) assert.match(todayMarkup, new RegExp(label));
+assert.match(todayMarkup, /min-height/);
+assert.match(todayMarkup, /min-width/);
+const navButtons = visit(tree, node => node.type === 'button' &&
+  ['Today', 'Rooms & availability', 'Service requests'].includes(node.props.label));
+assert.equal(navButtons.length, 3);
+navButtons[1].props.handler();
+assert.equal(app.state.active_view, 'Rooms');
+app.state.active_view = 'Rooms';
+const roomsTree = app.build();
+assert.match(JSON.stringify(roomsTree), /Rooms & availability/);
+const detailButtons = visit(roomsTree, node => node.type === 'button' && node.props.label === 'View details');
 assert.equal(detailButtons.length, 3);
 for (const [index, roomNumber] of ['201', '202', '203'].entries()) {
   detailButtons[index].props.handler();
   assert.equal(app.state.selected_room, roomNumber);
 }
+app.state.active_view = 'Rooms';
+const filterButtons = visit(app.build(), node => node.type === 'button' && node.props.label === 'Needs cleaning');
+assert.equal(filterButtons.length, 1);
+filterButtons[0].props.handler();
+assert.equal(app.state.room_filter, 'Needs cleaning');
+app.set_filter('All rooms');
 
 const previousMetrics = JSON.stringify(app.state.metrics);
 app.set_operational_date('not-a-date');
@@ -101,10 +129,10 @@ assert.equal(overdue.state.overdue_departure_cards.length, 1);
 assert.equal(overdue.state.metrics.find(item => item.label === 'Overdue active stays').value, 1);
 
 const rendered = JSON.stringify(overdue.build());
-assert.match(rendered, /Reception workspace/);
+assert.match(rendered, /Today/);
 assert.match(rendered, /WORKPEG RECORDS/);
 assert.match(rendered, /OVERDUE/);
-assert.match(rendered, /No mutation controls are enabled/);
+assert.match(rendered, /This workspace is read only/);
 assert.match(rendered, /Authentication required/);
 assert.match(rendered, /Access denied/);
 assert.match(rendered, /Connection unavailable/);
@@ -147,10 +175,13 @@ assert.equal(sliceApp.state.request_cards[0].room, '205');
 assert.equal(sliceApp.state.request_cards[0].department, 'housekeeping');
 assert.equal(sliceApp.state.request_cards[0].status, 'received');
 assert.match(sliceApp.state.request_cards[0].audit_status, /delivery is not represented/);
+sliceApp.state.active_view = 'Rooms';
+const roomsSliceTree = JSON.stringify(sliceApp.build());
+assert.match(roomsSliceTree, /Roomay TEST Room Type/);
+assert.match(roomsSliceTree, /WOR-60 Fictional Guest \(Synthetic\)/);
+assert.match(roomsSliceTree, /Reservation: confirmed/);
+sliceApp.state.active_view = 'Requests';
 const sliceTree = JSON.stringify(sliceApp.build());
-assert.match(sliceTree, /Roomay TEST Room Type/);
-assert.match(sliceTree, /WOR-60 Fictional Guest \(Synthetic\)/);
-assert.match(sliceTree, /Reservation: confirmed - Physical stay: checked_in/);
 assert.match(sliceTree, /extra_towels - housekeeping/);
 assert.match(sliceTree, /received/);
 assert.match(sliceTree, /Audit 1: created - start/);
