@@ -111,8 +111,15 @@ class HotelData(App):
         return Button(label, on_click=lambda: self.set_view(view),
                       variant="ghost-gray", full_width=True, icon=icon,
                       icon_position="left",
-                      style={"color": "#d8e2dc", "justify-content": "flex-start",
-                             "text-align": "left", "border-radius": "10px"})
+                      style={"justify-content": "flex-start", "text-align": "left",
+                             "border-radius": "10px",
+                             ":rest": {"color": "#d8e2dc", "background-color": "transparent"},
+                             ":hover": {"color": "#14382c", "background-color": "#e8efe9"},
+                             ":focus-visible": {"color": "#14382c",
+                                                 "background-color": "#e8efe9",
+                                                 "outline": "2px solid #14382c",
+                                                 "outline-offset": "2px"},
+                             ":active": {"color": "#14382c", "background-color": "#d8e2dc"}})
 
     def _filter_button(self, label, value):
         if self.room_filter == value:

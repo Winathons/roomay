@@ -94,6 +94,17 @@ const navButtons = visit(tree, node => node.type === 'button' &&
 assert.equal(navButtons.length, 3);
 assert.deepEqual(navButtons.map(node => node.props.icon),
   ['layout-dashboard', 'bed', 'clipboard-list']);
+assert.equal(navButtons[0].props.variant, 'primary', 'current section retains the active contrast state');
+for (const inactive of navButtons.slice(1)) {
+  assert.equal(inactive.props.variant, 'ghost-gray');
+  assert.equal(inactive.props.style[':rest'].color, '#d8e2dc');
+  assert.equal(inactive.props.style[':hover'].color, '#14382c');
+  assert.equal(inactive.props.style[':hover']['background-color'], '#e8efe9');
+  assert.equal(inactive.props.style[':focus-visible'].color, '#14382c');
+  assert.equal(inactive.props.style[':focus-visible']['background-color'], '#e8efe9');
+  assert.equal(inactive.props.style[':focus-visible'].outline, '2px solid #14382c');
+  assert.equal(inactive.props.style[':active'].color, '#14382c');
+}
 assert.match(todayMarkup, /WORKPEG RECORDS/);
 assert.match(todayMarkup, /READ ONLY/);
 assert.doesNotMatch(todayMarkup, /WORKPEG RECORDS - READ ONLY/);
