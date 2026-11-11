@@ -151,6 +151,61 @@ an approved shared rate-limit service or edge limit and a provider spend alert.
 Rate limiting is fail-closed: a full window returns HTTP 429 with a bounded
 `Retry-After`; limiter errors return 503 without calling YarnGPT.
 
+### Railway Docker deployment (alternative to Render)
+
+`Dockerfile.voice` packages only the existing `voice_adapter` and
+`requirements-voice.txt` on `python:3.13.5-slim`. It starts the same WSGI
+application with Gunicorn `gthread`, one worker and two threads. The command
+binds `0.0.0.0:${PORT:-8080}`; Railway injects `PORT`, and the fallback is for
+local container verification. No provider credentials are Docker build args,
+image layers, or source literals. `.dockerignore` excludes local env files,
+keys, certificates, Git metadata, virtualenvs and unrelated app files.
+
+Railway's [Dockerfile guide](https://docs.railway.com/builds/dockerfiles)
+documents custom Dockerfile selection through a service variable. For the
+existing `Winathons/roomay` repository service, the owner should configure:
+
+```text
+Service source: GitHub repository Winathons/roomay
+Root directory: /
+Builder: Dockerfile (not Railpack)
+RAILWAY_DOCKERFILE_PATH=Dockerfile.voice
+```
+
+Set `RAILWAY_DOCKERFILE_PATH` in that Railway service's Variables/configuration
+before its first deployment. Railway then uses the custom path instead of
+Railpack's Python detection. Do not set an overriding Start Command; the image
+CMD runs Gunicorn and expands Railway's injected `PORT` through `/bin/sh`, as
+described in Railway's [start command documentation](https://docs.railway.com/builds/build-and-start-commands).
+Railway requires web services to bind `0.0.0.0` and its injected port
+([networking guidance](https://docs.railway.com/networking/troubleshooting/application-failed-to-respond)).
+
+Add these runtime service variables in Railway's Variables tab:
+
+| Variable | Value / handling |
+| --- | --- |
+| `ROOMAY_VAPI_BEARER_TOKEN` | Owner-generated high-entropy secret, at least 32 characters; never commit or expose it |
+| `YARNGPT_API_KEY` | YarnGPT key stored as a Railway secret; never placed in Vapi |
+| `ROOMAY_TTS_DEFAULT_VOICE` | `remi` |
+| `YARNGPT_VOICE_REMI` | `remi` |
+| `YARNGPT_TIMEOUT_SECONDS` | `20` |
+| `ROOMAY_TTS_RATE_LIMIT_REQUESTS` | `10` |
+| `ROOMAY_TTS_RATE_LIMIT_WINDOW_SECONDS` | `60` |
+| `ROOMAY_TTS_SYNTHESIS_DEADLINE_SECONDS` | `25` (stream-expiry target, not a hard request-completion limit; see limitation above) |
+
+Do not manually set `PORT` for a Railway public web service. After an
+owner-approved deploy, enable the Railway HTTPS domain in the service's
+Networking settings. This WSGI app has no health route; do not configure an
+HTTP health-check path that expects a 2xx response from `/` or `/synthesize`.
+For no-credit startup verification, `GET /synthesize` should return 405 with
+`Allow: POST`; an unauthenticated synthetic JSON POST should return 401. Neither
+request calls YarnGPT. Do not perform an authenticated synthesis smoke until
+the owner separately approves provider credit use.
+
+Render's existing `render.yaml` remains unchanged and supported as the
+alternative host definition. Railway and Render are separate services; do not
+create or deploy either service from this PR.
+
 ### Owner-controlled Vapi setup after hosting approval
 
 Keep this limited to the **ROOMAY GPT-4o STT Test** assistant. The owner
