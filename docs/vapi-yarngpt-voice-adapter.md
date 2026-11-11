@@ -4,8 +4,10 @@ This is a standalone, offline-tested WSGI endpoint for Vapi custom TTS. It is
 not a Workpeg route, Workpeg Function, deployed service, or live AI
 integration. The endpoint synthesizes text only; it does not receive guest
 requests, create hotel tickets, write Workpeg data, transcribe speech, or
-confirm bookings. Vapi remains the call orchestrator and Azure Speech `en-NG`
-remains the planned initial transcription provider.
+confirm bookings. Vapi remains the call orchestrator. The owner reports that
+the current assistant's transcriber is Soniox STT RT v5; that dashboard value
+was not independently inspected in this offline task. This repository does
+not configure or verify the transcriber.
 
 ## Architecture
 
@@ -74,13 +76,16 @@ deployment authorization:
    each ID to the approved sound in the current YarnGPT catalogue. Set
    `ROOMAY_TTS_DEFAULT_VOICE`, the optional assistant-ID mapping, and an
    appropriate `YARNGPT_TIMEOUT_SECONDS` (1–60).
-4. Mount `voice_adapter.wsgi.create_app(VoiceConfig.from_environment())` at a
-   stable HTTPS path such as `/synthesize`. Restrict access to POST, keep
+4. Deploy the independent TTS WSGI application with entry point
+   `voice_adapter.tts_wsgi:application` at the stable HTTPS path `/synthesize`.
+   Restrict access to POST, keep
    request/response bodies out of access logs, and ensure disconnects close
    WSGI iterables. The implementation has no admin, diagnostics, health-data,
    or CRUD route.
-5. In Vapi, keep the existing assistant/call orchestration and Azure Speech
-   `en-NG` transcription settings. Set the voice provider to `custom-voice`,
+5. In Vapi, keep the existing assistant/call orchestration and the current
+   owner-reported Soniox STT RT v5 transcription setting unless the owner
+   chooses otherwise. This adapter does not configure transcription. Set the
+   voice provider to `custom-voice`,
    the server URL to the HTTPS path, and attach a Vapi Custom Credential using
    a Bearer Token with the `Authorization` header and `Bearer` prefix enabled.
    Store only the Vapi-to-adapter bearer credential in Vapi; YarnGPT credentials
@@ -151,8 +156,9 @@ live low-latency hotel receptionist until the whole pipeline is tested.
 - The owner-approved `remi` ID is configured as default, but provider
   availability, account access, billing, real latency, reliability and
   pronunciation remain unverified because no live YarnGPT request was made.
-- Azure Speech `en-NG` remains the intended Vapi transcription choice; this
-  adapter does not configure or test transcription.
+- The owner reports Soniox STT RT v5 is selected in the current Vapi assistant;
+  this adapter does not configure or test transcription. Pidgin recognition
+  quality remains unverified in controlled calls.
 - Voice conversion is offline-verified but has not been reviewed by a speech
   engineer or tested by listening over the intended telephony path.
 - WSGI server behavior for timeout enforcement, backpressure, concurrency,

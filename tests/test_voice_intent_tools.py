@@ -58,15 +58,18 @@ class CallerRoutingTests(unittest.TestCase):
                 self.assertFalse(result["persisted"])
 
     def test_existing_guest_request_is_routed_but_requires_verified_stay(self):
-        for phrase, department in (
-            ("Please bring extra towels to room 205", "housekeeping"),
-            ("Abeg, my AC no dey cool for room 205", "maintenance"),
-            ("Water dey leak in room 205", "maintenance"),
+        for phrase, department, language in (
+            ("Please bring extra towels to room 205", "housekeeping", "english"),
+            ("Abeg, bring extra towels to room 205", "housekeeping", "nigerian_pidgin"),
+            ("My air conditioning is not cooling in room 205", "maintenance", "english"),
+            ("Abeg, my AC no dey cool for room 205", "maintenance", "nigerian_pidgin"),
+            ("Water dey leak in room 205", "maintenance", "nigerian_pidgin"),
         ):
             with self.subTest(phrase=phrase):
                 result = route_caller_intent(phrase)
                 self.assertEqual(result["state"], "guest_verification_required")
                 self.assertEqual(result["department"], department)
+                self.assertEqual(result["response_language"], language)
                 self.assertFalse(result["submitted"])
                 self.assertFalse(result["persisted"])
                 self.assertNotIn("205", json.dumps(result))
@@ -94,6 +97,105 @@ class CallerRoutingTests(unittest.TestCase):
         self.assertEqual(result["state"], "needs_clarification")
         self.assertIn("hotel information", result["message"])
 
+    def test_pidgin_room_availability_and_booking_are_distinct_and_truthful(self):
+        availability = route_caller_intent("Abeg, una get room for tonight?")
+        booking = route_caller_intent("Abeg, I wan book room for tomorrow")
+        price_question = route_caller_intent("How much una dey charge to lodge?")
+        self.assertEqual(availability["state"], "public_enquiry_unavailable")
+        self.assertEqual(booking["state"], "booking_enquiry")
+        self.assertEqual(price_question["state"], "booking_enquiry")
+        for result in (availability, booking, price_question):
+            self.assertEqual(result["response_language"], "nigerian_pidgin")
+            self.assertFalse(result["submitted"])
+            self.assertFalse(result["persisted"])
+        self.assertIn("no room don hold or book", availability["message"])
+        self.assertIn("no reservation don confirm", booking["message"])
+        self.assertIn("no reservation don confirm", price_question["message"])
+
+    def test_pidgin_housekeeping_and_maintenance_keep_guest_verification_gate(self):
+        housekeeping = route_caller_intent("Abeg bring extra towels to room 205")
+        maintenance = route_caller_intent("My AC no dey cool for room 205")
+        self.assertEqual(housekeeping["department"], "housekeeping")
+        self.assertEqual(maintenance["department"], "maintenance")
+        for result in (housekeeping, maintenance):
+            self.assertEqual(result["state"], "guest_verification_required")
+            self.assertEqual(result["response_language"], "nigerian_pidgin")
+            self.assertTrue(result["verification_required"])
+            self.assertFalse(result["submitted"])
+            self.assertFalse(result["persisted"])
+            self.assertNotIn("205", json.dumps(result))
+
+    def test_pidgin_human_and_emergency_requests_signal_handoff_without_claiming_transfer(self):
+        human = route_caller_intent("Abeg, make I talk to receptionist")
+        emergency = route_caller_intent("Fire don start, person dey bleed")
+        for result in (human, emergency):
+            self.assertEqual(result["state"], "human_handoff")
+            self.assertEqual(result["response_language"], "nigerian_pidgin")
+            self.assertTrue(result["handoff_required"])
+            self.assertFalse(result["submitted"])
+            self.assertFalse(result["persisted"])
+            self.assertIn("transfer", result["message"].lower())
+            self.assertTrue("no fit transfer" in result["message"].lower()
+                            or "never contact or transfer" in result["message"].lower())
+
+    def test_english_pidgin_and_code_switching_follow_current_utterance(self):
+        turns = (
+            ("Could you tell me about parking at the hotel?", "english"),
+            ("Please, abeg, una get room for tonight?", "nigerian_pidgin"),
+            ("Could you check room availability, please?", "english"),
+            ("Abeg, I wan ask about booking", "nigerian_pidgin"),
+        )
+        for utterance, language in turns:
+            with self.subTest(utterance=utterance):
+                result = route_caller_intent(utterance)
+                self.assertEqual(result["response_language"], language)
+                self.assertFalse(result["submitted"])
+                self.assertFalse(result["persisted"])
+
+    def test_representative_pidgin_enquiries_preserve_routing_and_safety(self):
+        examples = (
+            ("Abeg, una get room for tonight?", "public_enquiry_unavailable", "reception", False),
+            ("Wetin be room price if I wan lodge tomorrow?", "booking_enquiry", "reception", False),
+            ("Abeg bring extra towels to my room", "guest_verification_required", "housekeeping", False),
+            ("AC no dey cool for my room", "guest_verification_required", "maintenance", False),
+            ("Abeg, make I talk to receptionist", "human_handoff", None, True),
+            ("Fire don start, person dey bleed, abeg help", "human_handoff", None, True),
+        )
+        for utterance, state, department, handoff in examples:
+            with self.subTest(utterance=utterance):
+                result = route_caller_intent(utterance)
+                self.assertEqual(result["state"], state)
+                self.assertEqual(result["department"], department)
+                self.assertEqual(result["response_language"], "nigerian_pidgin")
+                self.assertEqual(result["handoff_required"], handoff)
+                self.assertFalse(result["submitted"])
+                self.assertFalse(result["persisted"])
+
+    def test_mixed_english_pidgin_turns_follow_each_latest_utterance(self):
+        turns = (
+            ("Could you please bring extra towels?", "english"),
+            ("Abeg, my AC no dey cool", "nigerian_pidgin"),
+            ("Please tell me if I need to verify my stay", "english"),
+        )
+        for utterance, expected_language in turns:
+            with self.subTest(utterance=utterance):
+                result = route_caller_intent(utterance)
+                self.assertEqual(result["response_language"], expected_language)
+                self.assertIn(result["state"], {
+                    "guest_verification_required", "public_enquiry_unavailable", "needs_clarification"
+                })
+                self.assertFalse(result["submitted"])
+                self.assertFalse(result["persisted"])
+
+    def test_pidgin_clarification_is_brief_and_preserves_the_four_intent_options(self):
+        result = route_caller_intent("Abeg, I need help")
+        self.assertEqual(result["state"], "needs_clarification")
+        self.assertEqual(result["response_language"], "nigerian_pidgin")
+        self.assertIn("hotel information", result["message"])
+        self.assertIn("new booking", result["message"])
+        self.assertIn("existing stay", result["message"])
+        self.assertIn("receptionist", result["message"])
+
 
 class VapiToolBoundaryTests(unittest.TestCase):
     def setUp(self):
@@ -107,7 +209,9 @@ class VapiToolBoundaryTests(unittest.TestCase):
         self.assertEqual(payload["results"][0]["toolCallId"], "tool-call-1")
         result = tool_result(response)
         self.assertEqual(result["state"], "guest_verification_required")
+        self.assertEqual(result["response_language"], "english")
         self.assertEqual(result["submitted"], False)
+        self.assertEqual(result["persisted"], False)
         self.assertEqual(response["headers"]["Cache-Control"], "no-store")
 
     def test_unauthenticated_provider_call_is_rejected_before_reading_body(self):
@@ -134,10 +238,10 @@ class VapiToolBoundaryTests(unittest.TestCase):
     def test_replay_returns_same_result_and_changed_replay_fails_closed(self):
         first = tool_result(invoke(self.app, document("Need towels")))
         same = tool_result(invoke(self.app, document("Need towels")))
-        changed = tool_result(invoke(self.app, document("Need a repair")))
+        changed = json.loads(invoke(self.app, document("Need a repair"))["body"])["results"][0]
         self.assertEqual(first, same)
-        self.assertEqual(changed["state"], "unavailable")
-        self.assertFalse(changed["persisted"])
+        self.assertIn("error", changed)
+        self.assertNotIn("result", changed)
 
     def test_tool_call_ids_are_scoped_to_the_vapi_call(self):
         initial = tool_result(invoke(self.app, document("Need towels")))
@@ -147,34 +251,56 @@ class VapiToolBoundaryTests(unittest.TestCase):
         self.assertEqual(other_call["department"], "maintenance")
 
     def test_malformed_or_forged_tool_arguments_are_rejected(self):
-        invalid = [
+        invalid_envelopes = [
             {}, {"message": {"type": "tool-calls", "toolCallList": []}},
-            document(arguments={"utterance": "", "room_number": "205"}),
             document(call_id="bad id"),
-            document(name=TOOL_NAME, arguments={"utterance": ["not text"]}),
             {"message": {"type": "tool-calls", "toolCallList": [
                 {"id": "same", "type": "function", "function": {"name": TOOL_NAME, "arguments": {"utterance": "a"}}},
                 {"id": "same", "type": "function", "function": {"name": TOOL_NAME, "arguments": {"utterance": "b"}}},
             ]}},
         ]
-        for payload in invalid:
+        for payload in invalid_envelopes:
             with self.subTest(payload=payload):
                 self.assertEqual(invoke(self.app, payload)["status"], 400)
+        for payload in (document(arguments={"utterance": "", "room_number": "205"}),
+                        document(name=TOOL_NAME, arguments={"utterance": ["not text"]})):
+            with self.subTest(payload=payload):
+                response = invoke(self.app, payload)
+                self.assertEqual(response["status"], 200)
+                self.assertIn("error", json.loads(response["body"])["results"][0])
         duplicate_keys = b'{"message":{"type":"tool-calls","type":"tool-calls","toolCallList":[]}}'
         self.assertEqual(invoke(self.app, duplicate_keys)["status"], 400)
 
     def test_unknown_tool_and_router_failure_return_safe_unavailable(self):
-        unknown = tool_result(invoke(self.app, document(name="delete_guest", arguments={"id": "x"})))
-        self.assertEqual(unknown["state"], "unavailable")
+        unknown_response = invoke(self.app, document(name="delete_guest", arguments={"id": "x"}))
+        self.assertEqual(unknown_response["status"], 200)
+        unknown = json.loads(unknown_response["body"])["results"][0]
+        self.assertEqual(set(unknown), {"toolCallId", "error"})
+        self.assertNotIn("result", unknown)
         failing = create_tool_app(ToolConfig(TOKEN), router=lambda _: (_ for _ in ()).throw(RuntimeError("private failure")))
-        outcome = tool_result(invoke(failing, document("Room availability")))
-        self.assertEqual(outcome["state"], "unavailable")
+        failure_response = invoke(failing, document("Abeg, una get room?"))
+        outcome = json.loads(failure_response["body"])["results"][0]
+        self.assertEqual(failure_response["status"], 200)
+        self.assertEqual(set(outcome), {"toolCallId", "error"})
+        self.assertIn("Abeg", outcome["error"])
         self.assertNotIn("private failure", json.dumps(outcome))
+
+    def test_malformed_per_tool_arguments_use_vapi_error_field_with_http_200(self):
+        response = invoke(self.app, document(arguments={"utterance": "Abeg", "role": "owner"}))
+        self.assertEqual(response["status"], 200)
+        item = json.loads(response["body"])["results"][0]
+        self.assertEqual(set(item), {"toolCallId", "error"})
+        self.assertIn("Abeg", item["error"])
+        self.assertNotIn("result", item)
 
     def test_rate_limit_and_request_size_are_enforced(self):
         limited = create_tool_app(ToolConfig(TOKEN, requests_per_minute=1))
         self.assertEqual(invoke(limited, document())["status"], 200)
-        self.assertEqual(invoke(limited, document())["status"], 429)
+        limited_response = invoke(limited, document())
+        self.assertEqual(limited_response["status"], 200)
+        limited_item = json.loads(limited_response["body"])["results"][0]
+        self.assertEqual(set(limited_item), {"toolCallId", "error"})
+        self.assertIn("busy", limited_item["error"])
         oversized = invoke(self.app, b"x" * (32 * 1024 + 1))
         self.assertEqual(oversized["status"], 413)
 
