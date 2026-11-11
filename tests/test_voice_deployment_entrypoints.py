@@ -34,6 +34,45 @@ class VoiceDeploymentEntrypointTests(unittest.TestCase):
         self.assertEqual(result.stdout, "")
         self.assertEqual(result.stderr, "")
 
+    def test_tts_entrypoint_starts_with_remi_and_rejects_unauthenticated_post(self):
+        env = {"PATH": os.environ.get("PATH", "")}
+        if "SYSTEMROOT" in os.environ:
+            env["SYSTEMROOT"] = os.environ["SYSTEMROOT"]
+        env.update({
+            "ROOMAY_VAPI_BEARER_TOKEN": "offline-tts-token-placeholder-0000000000000",
+            "YARNGPT_API_KEY": "offline-yarngpt-key-placeholder",
+            "ROOMAY_TTS_DEFAULT_VOICE": "remi",
+            "YARNGPT_VOICE_REMI": "remi",
+            "YARNGPT_TIMEOUT_SECONDS": "20",
+        })
+        script = """
+from io import BytesIO
+from voice_adapter.tts_wsgi import application
+response = {}
+def start(status, headers, exc_info=None):
+    response['status'] = int(status.split()[0])
+    response['headers'] = dict(headers)
+body = application({
+    'REQUEST_METHOD': 'POST', 'PATH_INFO': '/synthesize',
+    'CONTENT_TYPE': 'application/json', 'CONTENT_LENGTH': '2',
+    'HTTP_AUTHORIZATION': '', 'wsgi.input': BytesIO(b'{}'),
+}, start)
+assert response['status'] == 401
+assert response['headers']['Cache-Control'] == 'no-store'
+assert b''.join(body) == b'{"error":"unauthorized"}'
+"""
+        result = subprocess.run(
+            [sys.executable, "-c", script],
+            cwd=os.path.dirname(os.path.dirname(__file__)),
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        self.assertEqual(result.returncode, 0, msg="TTS startup/auth smoke failed")
+        self.assertEqual(result.stdout, "")
+        self.assertEqual(result.stderr, "")
+
 
 if __name__ == "__main__":
     unittest.main()

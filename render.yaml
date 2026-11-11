@@ -1,0 +1,37 @@
+services:
+  - type: web
+    name: roomay-remi-tts
+    runtime: python
+    plan: 0.5c-512mb
+    region: frankfurt
+    autoDeployTrigger: "off"
+    numInstances: 1
+    buildCommand: python -m pip install --no-cache-dir -r requirements-voice.txt
+    startCommand: >-
+      gunicorn voice_adapter.tts_wsgi:application
+      --bind 0.0.0.0:$PORT
+      --worker-class gthread
+      --workers 1
+      --threads 2
+      --worker-connections 16
+      --backlog 16
+      --limit-request-line 4094
+      --limit-request-fields 64
+      --limit-request-field_size 4096
+      --timeout 75
+      --graceful-timeout 25
+      --access-logfile -
+      --access-logformat '%(m)s %(U)s %(s)s %(L)s'
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.13.5
+      - key: ROOMAY_VAPI_BEARER_TOKEN
+        sync: false
+      - key: YARNGPT_API_KEY
+        sync: false
+      - key: ROOMAY_TTS_DEFAULT_VOICE
+        value: remi
+      - key: YARNGPT_VOICE_REMI
+        value: remi
+      - key: YARNGPT_TIMEOUT_SECONDS
+        value: "20"
