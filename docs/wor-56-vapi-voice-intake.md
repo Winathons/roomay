@@ -169,8 +169,9 @@ After review and separate hosting/assistant-change approval:
    provider `custom-voice`, server URL to the second service's HTTPS
    `/synthesize` endpoint, select that TTS credential, and choose a bounded
    timeout. This is a proposed owner step only; this PR does not modify or
-   publish the assistant. Keep Remi as the default voice. The TTS bridge returns
-   raw mono signed 16-bit little-endian PCM at Vapi's requested sample rate.
+   publish the assistant. The bridge's configured default is Remi; the Vapi
+   test assistant is not currently connected to it. When connected, the bridge
+   returns raw mono signed 16-bit little-endian PCM at Vapi's requested rate.
 6. Before any Talk call, verify both deployments and TLS using the selected
    host's own deployment status and edge checks (these apps do not add a health
    endpoint), confirm each Vapi credential is attached to the correct saved
@@ -182,12 +183,27 @@ After review and separate hosting/assistant-change approval:
    mismatch. The first Talk test requires deployed hosting and a paid YarnGPT
    streaming request; it is not ready to run from this PR alone.
 
-The owner reports that current Vapi transcription is **Soniox STT RT v5**.
-This is an owner-reported dashboard setting, not independently inspected here.
-Neither this intent tool nor this TTS adapter configures or validates STT.
-Preserve that current setting unless the owner deliberately changes it. Do not
-describe Azure Speech `en-NG` as active; Nigerian Pidgin transcription quality
-and Soniox behavior still need controlled call evaluation.
+## Owner-verified Vapi test configuration
+
+The owner reports the separately configured test assistant is **ROOMAY GPT-4o
+STT Test**, using provider **OpenAI** and model **`gpt-4o-transcribe`**, with a
+Nigerian Pidgin transcription prompt configured. The owner has tested English
+and Pidgin conversations: recognition improved, but remains imperfect. This
+is owner-verified test evidence, not an independent dashboard inspection or
+automated ASR result. The main published assistant remains separate and was
+not changed by this PR.
+
+The caller-intent tool receives text transcripts. It cannot recover words,
+negation, names, room numbers, dates, or corrections that STT misrecognized.
+Do not treat routing tests as speech-recognition acceptance, and do not infer
+guest identity, booking intent confirmation, or authorization from a transcript.
+Neither this tool nor the TTS adapter configures the transcriber.
+
+YarnGPT Remi is **not yet connected** to the Vapi test assistant. The adapter's
+offline default is configured as `remi`, but there is no deployed TTS endpoint,
+Vapi Custom Credential attachment, or verified playback. Do not describe Remi
+as active in the assistant until the separately approved integration is
+connected and tested.
 
 The two endpoints have separate credentials and protocols. The Function tool
 uses `ROOMAY_VAPI_TOOL_BEARER_TOKEN` and JSON results; the custom TTS endpoint

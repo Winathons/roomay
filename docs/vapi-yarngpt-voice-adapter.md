@@ -5,9 +5,13 @@ not a Workpeg route, Workpeg Function, deployed service, or live AI
 integration. The endpoint synthesizes text only; it does not receive guest
 requests, create hotel tickets, write Workpeg data, transcribe speech, or
 confirm bookings. Vapi remains the call orchestrator. The owner reports that
-the current assistant's transcriber is Soniox STT RT v5; that dashboard value
-was not independently inspected in this offline task. This repository does
-not configure or verify the transcriber.
+the separate **ROOMAY GPT-4o STT Test** assistant uses provider **OpenAI** and
+model **`gpt-4o-transcribe`**, with a Nigerian Pidgin transcription prompt.
+English and Pidgin conversations were tested by the owner; recognition
+improved but remains imperfect. This is owner-reported test evidence, not an
+independent dashboard inspection or automated ASR result. The main published
+assistant remains separate and unchanged. This repository does not configure
+or validate the transcriber.
 
 ## Architecture
 
@@ -82,10 +86,10 @@ deployment authorization:
    request/response bodies out of access logs, and ensure disconnects close
    WSGI iterables. The implementation has no admin, diagnostics, health-data,
    or CRUD route.
-5. In Vapi, keep the existing assistant/call orchestration and the current
-   owner-reported Soniox STT RT v5 transcription setting unless the owner
-   chooses otherwise. This adapter does not configure transcription. Set the
-   voice provider to `custom-voice`,
+5. The YarnGPT Remi adapter is **not yet connected** to the Vapi test assistant.
+   The code's default alias is `remi`, but no deployed TTS URL, Vapi Custom
+   Credential or playback has been verified. When separately approved, use a
+   draft/test assistant and set the voice provider to `custom-voice`,
    the server URL to the HTTPS path, and attach a Vapi Custom Credential using
    a Bearer Token with the `Authorization` header and `Bearer` prefix enabled.
    Store only the Vapi-to-adapter bearer credential in Vapi; YarnGPT credentials
@@ -151,14 +155,23 @@ live low-latency hotel receptionist until the whole pipeline is tested.
 
 ## Current limitations and release gates
 
-- No YarnGPT request, Vapi call, voice catalogue query, key generation, public
-  deployment or credit use has occurred in this phase.
+- This implementation made no YarnGPT provider request, voice-catalogue query,
+  key generation, public deployment or credit use. The owner separately tested
+  English/Pidgin conversations with the ROOMAY GPT-4o STT Test assistant; that
+  assistant is not the main published assistant and is not connected to the
+  YarnGPT Remi TTS bridge.
 - The owner-approved `remi` ID is configured as default, but provider
   availability, account access, billing, real latency, reliability and
   pronunciation remain unverified because no live YarnGPT request was made.
-- The owner reports Soniox STT RT v5 is selected in the current Vapi assistant;
-  this adapter does not configure or test transcription. Pidgin recognition
-  quality remains unverified in controlled calls.
+- The owner reports the separate test assistant uses OpenAI `gpt-4o-transcribe`
+  with a Nigerian Pidgin prompt. English/Pidgin conversation testing improved
+  recognition but it remains imperfect. This adapter neither configures nor
+  validates STT; transcript mistakes can still affect downstream intent
+  routing. The main published assistant is separate and unchanged.
+- YarnGPT Remi is not connected to the test or main published assistant yet.
+  The adapter default alone does not mean Vapi is using Remi; a separately
+  deployed HTTPS endpoint, Vapi credential attachment and playback test remain
+  required.
 - Voice conversion is offline-verified but has not been reviewed by a speech
   engineer or tested by listening over the intended telephony path.
 - WSGI server behavior for timeout enforcement, backpressure, concurrency,
