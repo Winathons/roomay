@@ -62,42 +62,134 @@ assistant ID to one of the aliases `mary`, `remi` or `umar`; unmapped requests
 use `ROOMAY_TTS_DEFAULT_VOICE`, which defaults to `remi`. The assistant ID selects only among the
 server-configured voice IDs and is not treated as authentication.
 
-## Future deployment and Vapi setup
+## Hosting preparation and Vapi setup
 
-No endpoint or key is created by this change. After review and a separate
-deployment authorization:
+The existing application is prepared for a separate Render Python web service;
+this repository does not deploy or create that service. Render is a practical
+low-cost fit because its Python web services support WSGI/Gunicorn, managed
+HTTPS, secret environment variables and long-lived HTTP streaming. Render's
+docs describe streaming HTTP/SSE responses, but the end-to-end behavior of the
+deployed load balancer and this PCM body has not been measured. A chunk-arrival
+test remains a deployment gate; do not infer streaming from a successful HTTP
+status alone.
 
-1. Select a private managed Python WSGI service with HTTPS, request-size
-   limits, bounded concurrency, health monitoring and secret-manager support.
-   The repository currently adds no WSGI server/runtime dependency; choose and
-   review one for the target host instead of deploying this module directly
-   from the Workpeg UI or Peg Function runtime.
-2. Configure `ROOMAY_VAPI_BEARER_TOKEN` with a randomly generated secret of at
-   least 32 characters and `YARNGPT_API_KEY` with the YarnGPT server key. Put
-   both only in the host's secret manager. Never put the YarnGPT key in Vapi,
-   browser code, this repository, Workpeg, call logs or assistant metadata.
-3. Configure the three `YARNGPT_VOICE_*` IDs only after the owner has matched
-   each ID to the approved sound in the current YarnGPT catalogue. Set
-   `ROOMAY_TTS_DEFAULT_VOICE`, the optional assistant-ID mapping, and an
-   appropriate `YARNGPT_TIMEOUT_SECONDS` (1–60).
-4. Deploy the independent TTS WSGI application with entry point
-   `voice_adapter.tts_wsgi:application` at the stable HTTPS path `/synthesize`.
-   Restrict access to POST, keep
-   request/response bodies out of access logs, and ensure disconnects close
-   WSGI iterables. The implementation has no admin, diagnostics, health-data,
-   or CRUD route.
-5. The YarnGPT Remi adapter is **not yet connected** to the Vapi test assistant.
-   The code's default alias is `remi`, but no deployed TTS URL, Vapi Custom
-   Credential or playback has been verified. When separately approved, use a
-   draft/test assistant and set the voice provider to `custom-voice`,
-   the server URL to the HTTPS path, and attach a Vapi Custom Credential using
-   a Bearer Token with the `Authorization` header and `Bearer` prefix enabled.
-   Store only the Vapi-to-adapter bearer credential in Vapi; YarnGPT credentials
-   stay on the adapter host. Use the saved assistant configuration so Vapi's
-   configured credential is attached.
-6. Start with a controlled internal test call and short, non-sensitive text.
-   Do not connect guest calls or enable hotel actions until the separate
-   operational and privacy review passes.
+`render.yaml` is the prepared service definition. It uses the existing
+`voice_adapter.tts_wsgi:application`, Python 3.13.5, the paid `0.5c-512mb`
+compute plan, one instance, one Gunicorn `gthread` worker with two request
+threads, bounded listener/header settings, and automatic deployment disabled.
+Frankfurt is selected as the closest currently documented Render region to
+Nigeria; check YarnGPT and Vapi network latency before creating the service,
+because Render does not allow changing a service's region after creation. The
+current estimated compute cost is about **US$7/month**, before bandwidth,
+taxes, future price changes, YarnGPT usage, or any other provider costs. The
+free plan is not recommended for the first real call because cold starts and
+limited resources make voice latency and stream reliability unsuitable for
+acceptance.
+
+The isolated `requirements-voice.txt` installs only the pinned Gunicorn WSGI
+server; the adapter itself uses Python's standard library. The repository's
+Workpeg development pin is unchanged. For a manually configured Render service,
+use:
+
+```text
+Root Directory: .
+Runtime: Python
+Region: Frankfurt
+Instance: 0.5c-512mb (one instance)
+Build command: python -m pip install --no-cache-dir -r requirements-voice.txt
+Start command: gunicorn voice_adapter.tts_wsgi:application --bind 0.0.0.0:$PORT --worker-class gthread --workers 1 --threads 2 --worker-connections 16 --backlog 16 --limit-request-line 4094 --limit-request-fields 64 --limit-request-field_size 4096 --timeout 75 --graceful-timeout 25 --access-logfile - --access-logformat '%(m)s %(U)s %(s)s %(L)s'
+Automatic deploys: Off
+Health check: Render TCP port check (no extra app route is added)
+```
+
+The access-log format contains only method, URL path (no query), status and
+elapsed time. It omits caller IP, request line, query, headers, referrer, user
+agent, body and response body. Do not add proxy/body logging or debug tracing.
+Render's `sync: false` secret declarations intentionally prompt an owner for
+the two secret values during initial Blueprint setup; they contain no
+credentials in this repository. Configure these server environment values:
+
+| Variable | Value / handling |
+| --- | --- |
+| `YARNGPT_API_KEY` | YarnGPT API key; host secret only, never put in Vapi |
+| `ROOMAY_VAPI_BEARER_TOKEN` | Independently generated random value, at least 32 characters; host secret and Vapi Custom Credential |
+| `ROOMAY_TTS_DEFAULT_VOICE` | `remi` |
+| `YARNGPT_VOICE_REMI` | `remi` |
+| `YARNGPT_TIMEOUT_SECONDS` | `20` initially; adapter accepts 1–60 seconds |
+| `PYTHON_VERSION` | `3.13.5` |
+
+`YARNGPT_TIMEOUT_SECONDS` is the Python socket timeout used for provider
+connection/read operations. It bounds a stalled operation, not the total
+duration of a response that continues to deliver chunks. Gunicorn's worker
+timeout is a worker-liveness setting (and is not a reliable per-request hard
+deadline with `gthread`). Do not describe either as an end-to-end synthesis
+deadline; measure actual first-byte and stream duration on the host.
+
+Do not place actual secrets in a shell command, `.env`, Blueprint, Vapi
+assistant text, build log, or PR. Do not set the YarnGPT API key in Vapi.
+The configured two Gunicorn threads bound concurrent application calls; they
+are not a request-rate limit. The adapter has no distributed or per-caller
+rate limiter, and Render's lower-cost plan does not provide a configurable
+source-IP allowlist. Before inviting guest traffic or a public launch, add an
+approved edge/application rate limit and provider spend alert. For the first
+internal test, use the high-entropy shared bearer credential, one instance,
+one test assistant, and owner monitoring; rotate the host and Vapi credential
+together if it is exposed.
+
+### Owner-controlled Vapi setup after hosting approval
+
+Keep this limited to the **ROOMAY GPT-4o STT Test** assistant. The owner
+reports that it currently uses OpenAI `gpt-4o-transcribe` with the Pidgin
+transcription prompt; leave those transcription settings unchanged. The
+published/main assistant is separate and must not be edited as part of this
+trial.
+
+1. In Vapi Dashboard → Integrations → Server Configuration, add a Custom
+   Credential of type **Bearer Token**. Give it a descriptive name, enter the
+   same `ROOMAY_VAPI_BEARER_TOKEN` that was entered into the hosting secret
+   store, use header `Authorization`, and enable **Include Bearer Prefix**.
+   Save it; do not paste the YarnGPT key here.
+2. Open **ROOMAY GPT-4o STT Test** only. In its Voice settings, select provider
+   `custom-voice`, set the server URL to `https://<approved-service-host>/synthesize`,
+   select the credential just created, and set `timeoutSeconds` to 30.
+3. Save the test assistant configuration, verify the credential is attached to
+   this saved assistant configuration, and leave the main published assistant
+   unchanged. Vapi documents that custom credentials are attached to saved
+   assistant/server configuration, not arbitrary URLs supplied at request
+   time.
+4. Do not run a test call until the owner separately approves YarnGPT credit
+   use. The first audio call uses a real provider request and is billable.
+
+### Deployment checks without secrets, PII, or YarnGPT credits
+
+After an owner-authorized service creation, these checks do not invoke YarnGPT:
+
+1. Open the HTTPS service URL in a browser or request `GET /synthesize`. Expect
+   HTTP 405 with `Allow: POST`; confirm plain HTTP redirects to HTTPS. This
+   verifies routing/TLS and the app entry point, not audio generation.
+2. Send a small unauthenticated POST with JSON content type and a synthetic
+   body. Expect HTTP 401 and `{"error":"unauthorized"}`. Authentication is
+   checked before the body is parsed or the provider is called. Inspect only
+   status and safe response headers; do not enable request-body capture.
+3. Confirm host environment-variable names/configured presence in the owner
+   dashboard without opening, copying or screenshotting secret values. Check
+   service logs for the minimal method/path/status/duration format only.
+
+An authenticated PCM smoke test is intentionally **not** credit-free. Once the
+owner approves the YarnGPT spend and Vapi test-assistant edit, send one short,
+fictional, non-sensitive phrase. Record only HTTP status, content type, byte
+count, time-to-first-byte, total time and whether chunks arrived incrementally.
+Do not print the bearer value, output audio, request body or response body to
+console. Stop on timeout, non-200 status, empty/truncated PCM, or if all bytes
+arrive only after provider completion. Never automatically retry a timed-out
+or interrupted call.
+
+Render terminates incoming HTTPS at its load balancer and forwards HTTP to the
+service process inside its hosting network. TLS-at-edge is verified by Render
+documentation; this task does not evaluate Render's contractual/security fit
+for production guest personal data. Before using real guest conversations,
+complete vendor/privacy review, retention and data-processing review, regional
+latency measurement, abuse/rate-limit review, and incident-response planning.
 
 Vapi and YarnGPT docs may evolve. Re-check the current endpoint payload,
 credential attachment rules, limits, PCM header and voice catalogue before
@@ -174,10 +266,15 @@ live low-latency hotel receptionist until the whole pipeline is tested.
   required.
 - Voice conversion is offline-verified but has not been reviewed by a speech
   engineer or tested by listening over the intended telephony path.
-- WSGI server behavior for timeout enforcement, backpressure, concurrency,
-  TLS, request logging and disconnect closure must be verified on the chosen
-  host. A mid-stream failure can only terminate the stream; do not auto-retry
-  or claim the caller heard the full response.
+- WSGI server behavior for incremental chunk delivery, backpressure, concurrency,
+  proxy buffering, TLS, logging and disconnect closure remains unverified on a
+  live Render service. The local adapter tests verify WSGI iterator streaming
+  and upstream closure, not the host proxy. A mid-stream failure can only
+  terminate the stream; do not auto-retry or claim the caller heard the full
+  response.
+- The prepared service bounds the request body/text and concurrent worker
+  threads, but this adapter has no rate limiter. Add a reviewed request-rate
+  control and spend alert before broader exposure.
 - Hotel intent and caller routing are handled only by the separate
   `voice_adapter.intent_tools` boundary described in
   [the WOR-56 voice intake notes](wor-56-vapi-voice-intake.md). This TTS
@@ -191,3 +288,10 @@ live low-latency hotel receptionist until the whole pipeline is tested.
 - [Vapi custom TTS](https://docs.vapi.ai/customization/custom-voices/custom-tts)
 - [Vapi server authentication](https://docs.vapi.ai/server-url/server-authentication)
 - [YarnGPT API](https://yarngpt.ai/api-docs)
+- [Render web services](https://render.com/docs/web-services)
+- [Render TLS](https://render.com/docs/tls)
+- [Render Blueprint reference](https://render.com/docs/blueprint-spec)
+- [Render Python version](https://render.com/docs/python-version)
+- [Render pricing](https://render.com/pricing)
+- [Gunicorn installation](https://gunicorn.org/install/)
+- [Gunicorn logging](https://docs.gunicorn.org/en/stable/settings.html#access-log-format)
