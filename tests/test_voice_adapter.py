@@ -4,6 +4,7 @@ import io
 import json
 import socket
 import struct
+import threading
 import time
 import unittest
 from urllib.error import HTTPError
@@ -216,6 +217,50 @@ class YarnClientTests(unittest.TestCase):
         with self.assertRaises(ProviderError) as caught:
             next(stream)
         self.assertEqual(caught.exception.code, "provider_timeout")
+
+    def test_deadline_does_not_guarantee_completion_of_an_already_blocked_read(self):
+        class NonInterruptibleResponse:
+            def __init__(self):
+                self.closed = False
+                self.read_started = threading.Event()
+                self.close_called = threading.Event()
+                self.release_read = threading.Event()
+
+            def read(self, size):
+                self.read_started.set()
+                self.release_read.wait()
+                return pcm_sine_samples(32)
+
+            def close(self):
+                # Models a transport whose close notification does not cancel
+                # an already-running blocking read.
+                self.closed = True
+                self.close_called.set()
+
+        response = NonInterruptibleResponse()
+        stream = PcmAudioStream(response, 48000, 24000,
+                                deadline_at=time.monotonic() + 0.05)
+        outcomes = []
+
+        def consume_one_chunk():
+            try:
+                next(stream)
+                outcomes.append("pcm")
+            except ProviderError as error:
+                outcomes.append(error.code)
+
+        reader = threading.Thread(target=consume_one_chunk, daemon=True)
+        reader.start()
+        self.assertTrue(response.read_started.wait(1))
+        self.assertTrue(response.close_called.wait(1), "deadline should attempt stream cleanup")
+        # The timer expires, but the active read still owns control. This is
+        # why the current urllib transport cannot promise a hard wall-clock cap.
+        self.assertTrue(reader.is_alive())
+        response.release_read.set()
+        reader.join(1)
+        self.assertFalse(reader.is_alive())
+        self.assertEqual(outcomes, ["provider_timeout"])
+        self.assertTrue(response.closed)
 
     def test_rejects_unexpected_provider_content_type(self):
         client = YarnConversationClient(YARN_KEY, opener=FakeOpener(

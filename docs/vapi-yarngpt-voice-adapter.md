@@ -118,15 +118,24 @@ credentials in this repository. Configure these server environment values:
 | `YARNGPT_TIMEOUT_SECONDS` | `20`; per-operation socket timeout, 1–60 seconds |
 | `ROOMAY_TTS_RATE_LIMIT_REQUESTS` | `10` authenticated synthesis requests |
 | `ROOMAY_TTS_RATE_LIMIT_WINDOW_SECONDS` | `60` seconds; bounded sliding window |
-| `ROOMAY_TTS_SYNTHESIS_DEADLINE_SECONDS` | `25` seconds total from provider request through streamed PCM; allowed 1–120 seconds |
+| `ROOMAY_TTS_SYNTHESIS_DEADLINE_SECONDS` | `25` second stream-expiry target; allowed 1–120 seconds |
 | `PYTHON_VERSION` | `3.13.5` |
 
-The synthesis deadline starts before the YarnGPT request. It bounds connection
-setup, first audio, and the complete PCM stream. Expiry closes the provider
-response and prevents further PCM from being yielded. `YARNGPT_TIMEOUT_SECONDS`
-continues to bound an individual blocked socket operation; Gunicorn's worker
-timeout is only a worker-liveness setting. A partially streamed response cannot
-be converted to a clean HTTP error after headers have been sent.
+The absolute deadline is computed before the YarnGPT request and passed through
+the adapter. `urllib` receives the lesser of the configured socket timeout and
+remaining deadline once, but that timeout is an inactivity timeout, not an
+absolute limit for connection setup or response-header parsing. After response
+headers arrive, a timer marks an expired PCM stream and attempts to close the
+provider response; once a blocked body read returns, the adapter refuses to
+yield more PCM. This is **not a hard 25-second request-completion guarantee**:
+the current transport has no verified cancellation contract for response close
+from another thread during a blocked `read()`, and the socket timeout is not
+recomputed against the remaining deadline for each operation. A slow connection,
+header read, or in-flight body read can therefore outlast the target. A hard
+cutoff needs a transport with verified cancellation or per-operation absolute
+deadlines, plus a blocked-I/O integration test. Gunicorn's worker timeout is
+only a worker-liveness setting. A partially streamed response cannot be
+converted to a clean HTTP error after headers have been sent.
 
 Do not place actual secrets in a shell command, `.env`, Blueprint, Vapi
 assistant text, build log, or PR. Do not set the YarnGPT API key in Vapi.
@@ -207,10 +216,12 @@ each hosted trial.
 PCM. It makes no DNS request, live provider request, call, credit charge or
 Workpeg call. It covers all five accepted Vapi output rates, chunk boundaries,
 invalid credentials/configuration, malformed request shapes, empty audio,
-provider failure, bounded authenticated request rate, total synthesis deadline
-during streaming, timeout/disconnect cleanup, response-resource closure, and
-upstream request shape. These deterministic tests do not replace hosted latency
-and disconnect verification.
+provider failure, bounded authenticated request rate, stream-expiry behavior
+during ongoing audio, blocked-read cleanup limitations, timeout/disconnect
+handling, and upstream request shape. The blocked-read regression demonstrates
+that expiry is not a hard request-completion cutoff with the current transport.
+These deterministic tests do not replace hosted latency and disconnect
+verification.
 
 After a separately authorized deployment and provider trial, compare Mary,
 Remi and Umar with the same short, non-personal test phrases and the same call
