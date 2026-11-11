@@ -44,5 +44,8 @@ jobs:
       - name: Offline hotel rules and compiled smoke UI
         run: python -m unittest discover -s tests -v
 
+      - name: Build and start Railway voice container (offline provider smoke)
+        run: ROOMAY_RUN_DOCKER_TESTS=1 python -m unittest tests.test_voice_docker_runtime -v
+
       - name: Compile Workpeg UI
         run: workpeg ui build ui/
