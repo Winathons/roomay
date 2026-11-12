@@ -13,15 +13,15 @@ from uuid import NAMESPACE_URL, uuid5
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from .hotel import parse_day, parse_instant, validate_snapshot
-_CANCELLATION_REASONS = {
-    "guest_requested", "booking_error", "hotel_unavailable",
-    "duplicate_request", "other_reviewed",
-}
-
 from .reservation_commands import (
     ReservationRejected, WriteContext, _idempotency_key, _uuid, _write_gate,
     prepare_authorized_room_confirmation, prepare_cancellation,
 )
+
+_CANCELLATION_REASONS = {
+    "guest_requested", "booking_error", "hotel_unavailable",
+    "duplicate_request", "other_reviewed",
+}
 
 
 @dataclass(frozen=True)
@@ -64,12 +64,6 @@ def _authoritative_instant(context):
         return parse_instant(context.authoritative_now)
     except (TypeError, ValueError, OverflowError):
         raise ReservationRejected("authoritative_clock_unavailable") from None
-
-
-def _text(value, reason, *, limit=500):
-    if not isinstance(value, str) or not 3 <= len(value.strip()) <= limit:
-        raise ReservationRejected(reason)
-    return value.strip()
 
 
 def _snapshot(snapshot):
