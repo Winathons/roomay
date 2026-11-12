@@ -321,10 +321,21 @@
       if (workspace !== "guest") setFeedback("Status updated for this example session.");
       return true;
     } catch (error) {
-      const message = error.status === 401 ? "Your session has expired. Reload this page to begin again."
-        : error.status === 403 ? "This workspace is not available for the current session."
-          : error.status === 409 ? "The request changed state. Review the latest status before continuing."
-            : "We couldn’t update this request. Please try again.";
+      let message;
+      if (path === "/api/message") {
+        message = error.status === 401 ? "Your chat session has expired. Reload this page to continue."
+          : error.status === 403 ? "Chat is not available for this session. Your message is still here."
+            : error.status === 413 ? "That message is too long. Shorten it and try again."
+              : error.status === 409 ? "Your conversation changed. Refresh the page and try again."
+                : typeof error.status !== "number"
+                  ? "We couldn’t send your message. Check your connection and try again. Your text is still here."
+                  : "We couldn’t send your message. Please try again. Your text is still here.";
+      } else {
+        message = error.status === 401 ? "Your session has expired. Reload this page to begin again."
+          : error.status === 403 ? "This workspace is not available for the current session."
+            : error.status === 409 ? "The request changed state. Review the latest status before continuing."
+              : "We couldn’t update this request. Please try again.";
+      }
       setFeedback(message);
       return false;
     } finally {

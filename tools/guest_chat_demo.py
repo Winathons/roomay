@@ -59,12 +59,17 @@ _SOCIAL_GREETING = frozenset((
     "what's good remi", "whats good remi", "what's good", "whats good",
     "how you dey", "how body", "how far",
 ))
+_CASUAL_GREETING_SEQUENCE = re.compile(
+    r"^(?:hey|hi|hello)(?:\s+(?:hey|hi|hello)){0,2}(?:\s+(?:there|remi))?$"
+)
+_PIDGIN_HOW_FAR = re.compile(r"^how\s+far(?:\s+remi)?$")
 _SOCIAL_THANKS = frozenset(("thanks", "thank you", "thank you very much"))
 
 
 def _social_kind(text):
     normalized = re.sub(r"\s+", " ", re.sub(r"[,.!?]", "", text.lower()).strip())
-    if normalized in _SOCIAL_GREETING:
+    if (normalized in _SOCIAL_GREETING or _CASUAL_GREETING_SEQUENCE.fullmatch(normalized)
+            or _PIDGIN_HOW_FAR.fullmatch(normalized)):
         return "greeting"
     if normalized in _SOCIAL_THANKS:
         return "thanks"

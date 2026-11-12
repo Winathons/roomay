@@ -1,10 +1,12 @@
 """Offline guest chat demo tests; every guest context and request is synthetic."""
 
 from dataclasses import replace
+import http.client
 import io
 import json
 import subprocess
 import sys
+import threading
 import unittest
 from pathlib import Path
 
@@ -27,7 +29,8 @@ class GuestChatDemoFlowTests(unittest.TestCase):
         return self.demo.send_message(self.session_id, text, **kwargs)
 
     def test_greeting_is_not_a_hotel_request(self):
-        for greeting in ("Hi", "Hi are you here", "Hello!", "Good evening", "Thanks"):
+        for greeting in ("Hi", "Hi are you here", "Hello!", "Good evening", "Thanks",
+                         "Hey Hi", "Hey hey", "Hi Remi", "How far Remi?"):
             with self.subTest(greeting=greeting):
                 result = self.send(greeting)
                 self.assertEqual(result["state"], "ready")
@@ -35,7 +38,22 @@ class GuestChatDemoFlowTests(unittest.TestCase):
                 self.assertFalse(result["submitted"])
                 self.assertFalse(result["persisted"])
                 self.assertNotIn("Which room", result["messages"][-1]["text"])
+                self.assertNotIn("describe what is happening", result["messages"][-1]["text"])
+                self.assertTrue(any(value in result["messages"][-1]["text"]
+                                    for value in ("Hello!", "You're welcome", "I’m here")))
         self.assertEqual(self.demo._sessions[self.session_id].scope.existing_requests, [])
+
+    def test_greeting_prefix_does_not_mask_real_service_problems(self):
+        for text, department in (("Hi, my AC isn't cooling", "Maintenance"),
+                                 ("Abeg bring towels", "Housekeeping")):
+            with self.subTest(text=text):
+                demo = GuestChatDemo()
+                session_id, _ = demo.create_session()
+                result = demo.send_message(session_id, text)
+                self.assertEqual(result["state"], "awaiting_confirmation")
+                self.assertEqual(result["pending"]["summary"]["department"], department)
+                self.assertFalse(result["submitted"])
+                self.assertFalse(result["persisted"])
 
     def test_unclassified_conversation_is_not_converted_to_a_request_by_length(self):
         for text in ("Tell me something interesting about the day.",
@@ -427,6 +445,81 @@ class GuestChatDemoHttpTests(unittest.TestCase):
 
     def tearDown(self):
         self.server.server_close()
+
+    def test_real_http_greeting_returns_conversation_without_creating_request(self):
+        server = make_server(port=0, enable_local_qa=True)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        connection = http.client.HTTPConnection(LOOPBACK, server.server_port, timeout=3)
+        origin = f"http://{LOOPBACK}:{server.server_port}"
+        try:
+            connection.request("POST", "/api/session", body=b"{}", headers={
+                "Content-Type": "application/json", "Origin": origin,
+            })
+            initial = connection.getresponse()
+            self.assertEqual(initial.status, 200)
+            cookie = initial.getheader("Set-Cookie").split(";", 1)[0]
+            initial.read()
+
+            connection.request("POST", "/api/message", body=b'{"text":"Hey Hi"}', headers={
+                "Content-Type": "application/json", "Origin": origin, "Cookie": cookie,
+            })
+            response = connection.getresponse()
+            payload = json.loads(response.read())
+            self.assertEqual(response.status, 200)
+            self.assertEqual(payload["workspace"], "guest")
+            self.assertEqual([item["role"] for item in payload["chat"]["messages"][-2:]],
+                             ["guest", "assistant"])
+            self.assertEqual(payload["chat"]["messages"][-2]["text"], "Hey Hi")
+            self.assertIn("Hello!", payload["chat"]["messages"][-1]["text"])
+            self.assertNotIn("describe what is happening", payload["chat"]["messages"][-1]["text"])
+            self.assertIsNone(payload["chat"]["pending"])
+            self.assertEqual(payload["requests"], [])
+            self.assertFalse(payload["chat"]["submitted"])
+            self.assertFalse(payload["chat"]["persisted"])
+        finally:
+            connection.close()
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=2)
+
+    def test_real_http_greeting_prefix_still_creates_guarded_ac_proposal(self):
+        server = make_server(port=0, enable_local_qa=True)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        connection = http.client.HTTPConnection(LOOPBACK, server.server_port, timeout=3)
+        origin = f"http://{LOOPBACK}:{server.server_port}"
+        try:
+            connection.request("POST", "/api/session", body=b"{}", headers={
+                "Content-Type": "application/json", "Origin": origin,
+            })
+            initial = connection.getresponse()
+            self.assertEqual(initial.status, 200)
+            cookie = initial.getheader("Set-Cookie").split(";", 1)[0]
+            initial.read()
+            connection.request("POST", "/api/message", body=b'{"text":"Hi, my AC isn\'t cooling"}', headers={
+                "Content-Type": "application/json", "Origin": origin, "Cookie": cookie,
+            })
+            response = connection.getresponse()
+            payload = json.loads(response.read())
+            self.assertEqual(response.status, 200)
+            self.assertEqual(payload["chat"]["pending"]["summary"]["department"], "Maintenance")
+            self.assertFalse(payload["chat"]["submitted"])
+            self.assertFalse(payload["chat"]["persisted"])
+            self.assertEqual(payload["requests"], [])
+        finally:
+            connection.close()
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=2)
+
+    def test_browser_chat_submit_and_error_feedback_preserve_input(self):
+        result = subprocess.run(
+            ["node", str(ROOT / "tests" / "guest_chat_app.cjs")],
+            cwd=ROOT, capture_output=True, text=True, timeout=20, check=False,
+        )
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("passed", result.stdout)
 
     def test_text_ai_consent_is_session_bound_server_side_and_guest_only(self):
         class MockChatProvider:
