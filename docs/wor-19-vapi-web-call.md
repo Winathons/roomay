@@ -35,7 +35,11 @@ hotel writer, or production endpoint. The synthetic stay remains isolated in
   conversation intake; the guest must still review and confirm. Resulting
   actions remain in-memory example state and are not sent to hotel staff.
 - Existing on-device/consented browser dictation and typed chat remain
-  available. Call audio is not recorded or stored by Roomay.
+  available. The normal composer presents one microphone icon; if local en-NG
+  recognition cannot run, its click opens a just-in-time consent dialog before
+  starting the browser's speech service. Declining leaves typed chat available.
+  The provider disclosure does not replace the browser's microphone permission
+  prompt. Call audio is not recorded or stored by Roomay.
 
 ## Local build and launch
 
