@@ -45,7 +45,8 @@
       available = localAvailable || (remoteApproved() && remoteAvailable);
       // The mic remains a discoverable action even without a local language
       // pack. A remote-only browser gets an explicit consent dialog on click.
-      button.disabled = busy || remoteChecking;
+      button.disabled = busy || remoteChecking || !recognition
+        || typeof recognition.start !== "function" || typeof recognition.stop !== "function";
       if (cancelButton) cancelButton.disabled = busy || listening;
     };
     const controller = (supported, ready = Promise.resolve()) => ({
