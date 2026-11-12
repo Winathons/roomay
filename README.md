@@ -87,6 +87,17 @@ The synthetic QA workspace runs separately on a loopback-only HTTP port:
 Open `http://127.0.0.1:8765/__qa/`. Stop either process with Ctrl+C. The QA
 journey is not production authentication or Workpeg persistence.
 
+For an automated, sanitized rehearsal of guest confirmation → Reception assignment →
+Housekeeping resolution → Guest readback, run:
+
+```bash
+python -m tools.wor23_rehearsal
+```
+
+The JSON report is **synthetic-only**, shows what is not verified, and does
+not execute live Workpeg writes. Follow the browser script and acceptance
+matrix in [WOR-23 demo rehearsal](docs/wor-23-rehearsal.md).
+
 ## Offline verification
 
 ```powershell
