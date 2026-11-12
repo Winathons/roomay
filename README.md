@@ -172,7 +172,7 @@ For a full guide, read [CONTRIBUTING.md](CONTRIBUTING.md), [AGENTS.md](AGENTS.md
 
 - **Local UI and tests:** No Workpeg developer token required.
 - **Workpeg business-backed engineering:** Must use the confirmed **Roomay AI development business**, an authorized staff session and **fictional test** hotel records. Contact the project lead for legitimate access. Do **not** create another Peg or a real-hotel business independently.
-- **Developer API/publishing token (`WORKPEG_PK`):** The Roomay Peg has been approved, so an authorized owner can generate a token when needed for approved publishing or server-side operations. **Never put it in source files, the frontend, GitHub, Linear comments, screenshots or Discord.**
+- **Developer/publishing token (`WORKPEG_PK`):** It is not configured or used by the standalone guest backend. OIDC is for staff identity only; it does not grant that backend hotel-table access. Do not generate or reuse a token for backend setup. Any separately approved publication workflow must keep its token out of source, browser code, Git, CI logs and shared reports.
 - **`--fake-cloud` is NOT an offline sandbox.** The SDK warns it sends your Workpeg session and writes to the actual service; it also modifies local host/TLS configuration and can expose the server to your network. **Do not run it as part of basic setup.** Get explicit approval and verify the isolated business first.
 - **Guest privacy:** Do not enter real hotel guests, government IDs, card information or customer messages into synthetic tests.
 - **Capabilities are staged:** Peg approval does not mean publication, installation or that booking/AI/WhatsApp/telephony flows already work.
