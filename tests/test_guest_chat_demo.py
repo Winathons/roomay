@@ -310,6 +310,7 @@ class GuestChatDemoHttpTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("--port", result.stdout)
         self.assertIn("--enable-local-qa", result.stdout)
+        self.assertIn("--enable-vapi-web-call", result.stdout)
 
     def setUp(self):
         self.server = make_server(port=0, enable_local_qa=True)
@@ -393,7 +394,19 @@ class GuestChatDemoHttpTests(unittest.TestCase):
         self.assertIn("aria-live=\"polite\"", text)
         self.assertIn("id=\"voice-button\"", text)
         self.assertIn("id=\"voice-remote-consent\"", text)
-        self.assertIn("Provider privacy terms apply", text)
+        self.assertIn('id="call-remi"', text)
+        self.assertIn('aria-haspopup="dialog"', text)
+        self.assertIn('id="remi-call-overlay" class="remi-dialog-overlay" hidden', text)
+        self.assertIn('role="dialog" aria-modal="true"', text)
+        self.assertIn('id="remi-call-duration"', text)
+        self.assertIn('id="close-remi"', text)
+        self.assertIn('state="idle" paused', text)
+        self.assertIn('id="end-remi"', text)
+        self.assertIn('id="mute-remi"', text)
+        self.assertIn('id="remi-orb"', text)
+        self.assertIn('src="/roomay-orb.js"', text)
+        self.assertIn("Vapi may process or retain call metadata", text)
+        self.assertIn("provider's privacy terms apply", text)
         status, headers, app_js = self.dispatch("/app.js")
         self.assertEqual(status, 200)
         self.assertIn("text/javascript", headers["Content-Type"])
@@ -402,9 +415,116 @@ class GuestChatDemoHttpTests(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertIn("text/javascript", headers["Content-Type"])
         voice_source = voice_js.decode("utf-8")
-        self.assertIn('const mode = localAvailable', voice_source)
+        self.assertIn('beginRecognition("on-device")', voice_source)
+        self.assertIn('beginRecognition("browser-managed")', voice_source)
+        self.assertIn('showConsent()', voice_source)
+        self.assertIn('id="voice-remote-dialog" class="voice-consent-overlay" hidden', text)
+        self.assertIn('aria-label="Dictate a message"', text)
+        self.assertNotIn('id="voice-help"', text)
+        self.assertNotIn('Use my browser’s speech service if needed', text)
         self.assertIn('selectedMode = mode', voice_source)
         self.assertIn('recognition.processLocally = mode === "on-device"', voice_source)
+        status, headers, orb = self.dispatch("/roomay-orb.js")
+        self.assertEqual(status, 200)
+        self.assertIn("text/javascript", headers["Content-Type"])
+        self.assertIn("customElements.define('roomay-orb'", orb.decode("utf-8"))
+        self.assertIn("prefers-reduced-motion", orb.decode("utf-8"))
+        self.assertNotIn("getUserMedia", orb.decode("utf-8"))
+        self.assertNotIn("preview/", html.decode("utf-8"))
+
+    def test_voice_calls_are_off_by_default_and_sdk_is_not_loaded(self):
+        status, _, html = self.dispatch("/stay")
+        self.assertEqual(status, 200)
+        self.assertNotIn('<script src="/vapi_sdk.js"', html.decode("utf-8"))
+        status, _, _ = self.dispatch("/api/voice/config", method="POST", body=b"{}")
+        self.assertEqual(status, 404)
+        status, _, _ = self.dispatch("/vapi_sdk.js")
+        self.assertEqual(status, 404)
+
+    def test_opt_in_voice_config_is_session_scoped_public_only_and_bounded(self):
+        env = {
+            "ROOMAY_VAPI_PUBLIC_KEY": "pk_local_example_public_key_123",
+            "ROOMAY_VAPI_TEST_ASSISTANT_ID": "assistant-test-201",
+            "ROOMAY_VAPI_TEST_ASSISTANT_VOICE": "remi",
+            "ROOMAY_VAPI_TEST_LLM_PROVIDER": "openai",
+            "ROOMAY_VAPI_TEST_LLM_MODEL": "gpt-4o",
+            "VAPI_PRIVATE_API_KEY": "must-not-be-read-or-returned",
+        }
+        server = make_server(port=0, enable_local_qa=True,
+                             enable_vapi_web_call=True, vapi_environment=env)
+        try:
+            status, _, html = self.dispatch("/stay", server=server)
+            self.assertEqual(status, 200)
+            self.assertIn('<script src="/vapi_sdk.js" defer></script>', html.decode("utf-8"))
+            status, _, _ = self.dispatch("/api/voice/config", method="POST",
+                                         body=b"{}", server=server)
+            self.assertEqual(status, 401)
+            status, session_headers, _ = self.dispatch("/api/session", method="POST",
+                                                       body=b"{}", server=server)
+            cookie = session_headers["Set-Cookie"].split(";", 1)[0]
+            status, _, body = self.dispatch("/api/voice/config", method="POST",
+                                            body=b"{}", cookie=cookie, server=server)
+            self.assertEqual(status, 200)
+            config = json.loads(body)
+            self.assertEqual(config["assistantId"], "assistant-test-201")
+            self.assertEqual(config["assistantLabel"], "Remi")
+            self.assertEqual(config["modelProvider"], "openai")
+            self.assertEqual(config["modelName"], "gpt-4o")
+            self.assertEqual(config["maxDurationSeconds"], 180)
+            self.assertEqual(config["publicKey"], env["ROOMAY_VAPI_PUBLIC_KEY"])
+            self.assertNotIn("must-not-be-read-or-returned", body.decode("utf-8"))
+            status, _, claim = self.dispatch("/api/voice/claim", method="POST",
+                                             body=b"{}", cookie=cookie, server=server)
+            self.assertEqual(status, 200)
+            self.assertEqual(json.loads(claim)["calls_remaining"], 2)
+            self.assertEqual(self.dispatch("/api/voice/claim", method="POST",
+                                           body=b"{}", cookie=cookie, server=server)[0], 409)
+            self.dispatch("/api/voice/release", method="POST", body=b"{}",
+                          cookie=cookie, server=server)
+            for _ in range(2):
+                self.assertEqual(self.dispatch("/api/voice/claim", method="POST",
+                                               body=b"{}", cookie=cookie, server=server)[0], 200)
+                self.dispatch("/api/voice/release", method="POST", body=b"{}",
+                              cookie=cookie, server=server)
+            self.assertEqual(self.dispatch("/api/voice/claim", method="POST",
+                                           body=b"{}", cookie=cookie, server=server)[0], 429)
+            self.dispatch("/api/qa/select", method="POST",
+                          body=b'{"role":"housekeeping"}', cookie=cookie, server=server)
+            self.assertEqual(self.dispatch("/api/voice/config", method="POST",
+                                           body=b"{}", cookie=cookie, server=server)[0], 403)
+            self.assertEqual(self.dispatch("/api/voice/config", method="POST",
+                                           body=b"{}", cookie=cookie,
+                                           origin="http://attacker.invalid", server=server)[0], 403)
+        finally:
+            server.server_close()
+
+    def test_voice_web_call_requires_qa_and_valid_assistant_settings(self):
+        with self.assertRaisesRegex(ValueError, "requires_local_qa"):
+            make_server(port=0, enable_vapi_web_call=True, vapi_environment={})
+        bad_envs = [
+            {"ROOMAY_VAPI_PUBLIC_KEY": "short", "ROOMAY_VAPI_TEST_ASSISTANT_ID": "assistant",
+             "ROOMAY_VAPI_TEST_ASSISTANT_VOICE": "remi",
+             "ROOMAY_VAPI_TEST_LLM_PROVIDER": "openai", "ROOMAY_VAPI_TEST_LLM_MODEL": "gpt-4o"},
+            {"ROOMAY_VAPI_PUBLIC_KEY": "pk_example_0123456789", "ROOMAY_VAPI_TEST_ASSISTANT_ID": "assistant",
+             "ROOMAY_VAPI_TEST_ASSISTANT_VOICE": "mary",
+             "ROOMAY_VAPI_TEST_LLM_PROVIDER": "openai", "ROOMAY_VAPI_TEST_LLM_MODEL": "gpt-4o"},
+            {"ROOMAY_VAPI_PUBLIC_KEY": "pk_example_0123456789", "ROOMAY_VAPI_TEST_ASSISTANT_ID": "assistant",
+             "ROOMAY_VAPI_TEST_ASSISTANT_VOICE": "remi"},
+        ]
+        for env in bad_envs:
+            with self.subTest(env=env):
+                server = make_server(port=0, enable_local_qa=True,
+                                     enable_vapi_web_call=True, vapi_environment=env)
+                try:
+                    self.assertFalse(server.enable_vapi_web_call)
+                    self.assertEqual(self.dispatch("/api/voice/config", method="POST",
+                                                    body=b"{}", server=server)[0], 404)
+                finally:
+                    server.server_close()
+        status, headers, call_js = self.dispatch("/vapi_call.js")
+        self.assertEqual(status, 200)
+        self.assertIn("text/javascript", headers["Content-Type"])
+        self.assertIn("api/voice/config", call_js.decode("utf-8"))
 
     def test_staff_routes_require_matching_server_session_and_show_separate_pages(self):
         status, _, _ = self.dispatch("/staff/reception")

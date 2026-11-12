@@ -6,7 +6,10 @@
   <meta name="color-scheme" content="light">
   <title>My Stay | ROOMAY</title>
   <link rel="stylesheet" href="/app.css">
+  <script src="/roomay-orb.js" defer></script>
+  <!-- optional-vapi-sdk -->
   <script src="/voice_intake.js" defer></script>
+  <script src="/vapi_call.js" defer></script>
   <script src="/app.js" defer></script>
 </head>
 <body data-workspace="guest">
@@ -41,7 +44,10 @@
         <section class="chat-panel guest-chat" aria-labelledby="request-heading">
           <div class="chat-heading">
             <div class="assistant-avatar" aria-hidden="true">R</div>
-            <div><h2 id="request-heading">How can we help you?</h2><p>Describe what you need during your stay.</p></div>
+            <div class="chat-heading-copy"><h2 id="request-heading">How can we help you?</h2><p>Describe what you need during your stay.</p></div>
+            <button id="call-remi" class="call-remi-button call-remi-trigger" type="button" aria-label="Call Remi AI receptionist" aria-haspopup="dialog" aria-controls="remi-call">
+              <span aria-hidden="true" class="call-remi-icon">☎</span><span id="call-remi-label">Call Remi</span>
+            </button>
           </div>
           <div id="messages" class="messages" role="log" aria-live="polite" aria-relevant="additions text">
             <div class="loading-state">Loading your stay…</div>
@@ -50,19 +56,30 @@
           <form id="chat-form" class="composer">
             <label class="sr-only" for="guest-message">Your request or reviewed voice transcript</label>
             <textarea id="guest-message" name="message" rows="2" maxlength="1000" placeholder="What would make your stay more comfortable?" autocomplete="off" required></textarea>
-            <div class="voice-tools" aria-label="Optional voice input">
-              <div class="voice-controls">
-                <button id="voice-button" class="voice-button" type="button" disabled aria-pressed="false" aria-describedby="voice-help voice-status">Use voice</button>
-                <button id="voice-cancel" class="voice-cancel" type="button" hidden>Discard voice text</button>
-              </div>
-              <div class="voice-copy"><p id="voice-help">On-device dictation is used when available. Audio is not recorded or stored by ROOMAY.</p>
-                <label class="voice-remote-choice"><input id="voice-remote-consent" type="checkbox" aria-describedby="voice-remote-help"> Use my browser’s speech service if needed</label>
-                <p id="voice-remote-help">Only enable this if you agree: your browser may send audio to its speech provider. Provider privacy terms apply. ROOMAY does not receive or store the audio.</p>
-                <p id="voice-status" class="voice-status" role="status" aria-live="polite">Checking on-device dictation…</p></div>
+            <div class="voice-tools voice-tools-compact" aria-label="Voice dictation">
+              <button id="voice-button" class="voice-button voice-icon-button" type="button" disabled aria-label="Dictate a message" title="Dictate a message" aria-pressed="false" aria-describedby="voice-status">
+                <svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">
+                  <rect x="9" y="2" width="6" height="12" rx="3"></rect>
+                  <path d="M5 10v2a7 7 0 0 0 14 0v-2M12 19v3m-4 0h8"></path>
+                </svg>
+              </button>
+              <button id="voice-cancel" class="voice-cancel" type="button" hidden>Discard dictated text</button>
+              <span id="voice-status" class="sr-only" role="status" aria-live="polite">Checking voice availability…</span>
+              <input id="voice-remote-consent" type="checkbox" hidden aria-hidden="true" tabindex="-1">
             </div>
             <div class="composer-footer"><span id="send-help">Review your message before sending · Shift + Enter for a new line</span>
               <button id="send-button" class="send-button" type="submit"><span>Send</span><span aria-hidden="true">↗</span></button></div>
           </form>
+          <div id="voice-remote-dialog" class="voice-consent-overlay" hidden>
+            <section class="voice-consent-card" role="dialog" aria-modal="true" aria-labelledby="voice-consent-title" aria-describedby="voice-consent-description">
+              <h3 id="voice-consent-title">Use your microphone</h3>
+              <p id="voice-consent-description">On-device speech recognition isn't available here. Your browser may send your audio to its speech provider to turn it into text. The provider's privacy terms apply. ROOMAY doesn't store raw microphone audio, and you can edit your words before sending.</p>
+              <div class="voice-consent-actions">
+                <button id="voice-remote-cancel" type="button" class="voice-consent-cancel">Not now</button>
+                <button id="voice-remote-allow" type="button" class="voice-consent-allow">Continue with browser speech</button>
+              </div>
+            </section>
+          </div>
           <p id="feedback" class="feedback" role="status" aria-live="polite"></p>
         </section>
 
@@ -80,6 +97,29 @@
             <span aria-hidden="true">!</span><p><strong>Need urgent help?</strong> Contact local emergency services and Reception using the hotel's official contact information.</p>
           </section>
         </aside>
+      </div>
+
+      <div id="remi-call-overlay" class="remi-dialog-overlay" hidden>
+        <section id="remi-call" class="remi-call remi-dialog" role="dialog" aria-modal="true" aria-labelledby="remi-call-heading" aria-describedby="remi-call-status remi-call-disclosure" tabindex="-1">
+          <div class="remi-call-top">
+            <div><p class="section-kicker">ROOMAY AI RECEPTIONIST</p><h3 id="remi-call-heading">Talking with Remi</h3></div>
+            <button id="close-remi" class="remi-close-button" type="button" aria-label="Close voice conversation">×</button>
+          </div>
+          <div class="remi-orb-stage" aria-hidden="true">
+            <span class="remi-orb-fallback"></span>
+            <roomay-orb id="remi-orb" state="idle" paused aria-hidden="true"></roomay-orb>
+            <span class="remi-orb-connecting"></span>
+          </div>
+          <p id="remi-call-duration" class="remi-call-duration" role="timer" aria-label="Elapsed call time">00:00</p>
+          <p id="remi-call-status" class="remi-call-status" role="status" aria-live="polite">Voice calls are unavailable until this local test is explicitly configured.</p>
+          <div class="remi-call-actions">
+            <button id="mute-remi" class="voice-call-secondary" type="button" hidden aria-pressed="false">Mute microphone</button>
+            <button id="end-remi" class="voice-call-end" type="button" hidden>End call</button>
+          </div>
+          <div id="remi-call-captions" class="remi-call-captions" role="log" aria-live="polite" aria-relevant="additions text" hidden></div>
+          <button id="use-call-transcript" class="use-transcript-button" type="button" hidden>Use my latest transcript in the request chat</button>
+          <p id="remi-call-disclosure" class="remi-call-disclosure">When enabled, live audio is sent to Vapi to run this conversation. ROOMAY does not record or store audio. Vapi may process or retain call metadata, speech transcripts and artifacts according to the selected assistant settings. Use test phrases only. A call does not submit a hotel request.</p>
+        </section>
       </div>
 
       <p class="session-note" role="note">Example property · Request updates are limited to this example session and are not sent to hotel staff.</p>

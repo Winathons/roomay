@@ -16,6 +16,8 @@
   let voiceDraft = false;
   let voiceListening = false;
   let voice = null;
+  let vapiCallBusy = false;
+  let vapiCall = null;
 
   async function post(path, body = {}) {
     const response = await fetch(path, {
@@ -241,12 +243,18 @@
     input.disabled = busy || voiceListening;
     sendButton.querySelector("span").textContent = busy ? "One moment" : voiceDraft ? "Send reviewed transcript" : "Send request";
     sendButton.setAttribute("aria-label", busy ? "Sending request" : voiceDraft ? "Send reviewed transcript" : "Send request");
+    if (voiceButton && voice) voice.setBusy(vapiCallBusy);
+    const callButton = document.getElementById("call-remi");
+    if (callButton && !callButton.hidden && !vapiCallBusy) callButton.disabled = busy || voiceListening;
   }
 
   if (workspace === "guest" && globalThis.RoomayVoiceIntake && voiceButton && voiceStatus) {
     voice = globalThis.RoomayVoiceIntake.attachVoiceIntake({
       windowRef: globalThis, button: voiceButton, cancelButton: voiceCancelButton, input, status: voiceStatus,
       remoteConsent: voiceRemoteConsent,
+      consentDialog: document.getElementById("voice-remote-dialog"),
+      consentAllow: document.getElementById("voice-remote-allow"),
+      consentCancel: document.getElementById("voice-remote-cancel"),
       onDraft(value) { voiceDraft = value; if (voiceCancelButton) voiceCancelButton.hidden = !value; updateComposerControls(); },
       onListening(value) { voiceListening = value; updateComposerControls(); },
     });
@@ -254,6 +262,27 @@
     voiceButton.disabled = true;
     if (voiceCancelButton) voiceCancelButton.disabled = true;
     voiceStatus.textContent = "Voice input is unavailable. Type your request instead.";
+  }
+
+  if (workspace === "guest" && globalThis.RoomayVapiCall) {
+    vapiCall = globalThis.RoomayVapiCall.attach({
+      windowRef: globalThis, documentRef: document,
+      onState(next) {
+        vapiCallBusy = ["connecting", "listening", "speaking", "muted"].includes(next);
+        const orb = document.getElementById("remi-orb");
+        if (orb) orb.state = globalThis.RoomayVapiCall.orbStateForCallState(next);
+        updateComposerControls();
+      },
+      onTranscript(text) {
+        if (typeof text !== "string" || !text.trim()) return;
+        input.value = text.trim().slice(0, 1000);
+        input.dispatchEvent(new Event("input", { bubbles: true }));
+        setFeedback("Transcript added to the editable request field. Review it, then send to Roomay’s validated intake. No request has been submitted yet.");
+        // Do not move keyboard focus behind the open modal; the guest can
+        // close/end the call before editing the imported transcript.
+        if (document.getElementById("remi-call-overlay")?.hidden) input.focus();
+      },
+    });
   }
 
   if (voiceCancelButton && input) {

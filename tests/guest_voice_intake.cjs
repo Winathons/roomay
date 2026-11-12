@@ -36,11 +36,18 @@ function voiceHarness(Recognition = class {}) {
   cancelButton.hidden = true;
   const remoteConsent = new Element('voice-remote-consent');
   remoteConsent.checked = false;
+  const consentDialog = new Element('voice-remote-dialog');
+  consentDialog.hidden = true;
+  const consentAllow = new Element('voice-remote-allow');
+  const consentCancel = new Element('voice-remote-cancel');
   const windowRef = Recognition ? { SpeechRecognition: Recognition } : {};
   const api = {};
   vm.runInNewContext(voiceSource, { globalThis: api });
-  const voice = api.RoomayVoiceIntake.attachVoiceIntake({ windowRef, button, cancelButton, input, status, remoteConsent });
-  return { button, cancelButton, input, status, remoteConsent, voice };
+  const voice = api.RoomayVoiceIntake.attachVoiceIntake({
+    windowRef, button, cancelButton, input, status, remoteConsent,
+    consentDialog, consentAllow, consentCancel,
+  });
+  return { button, cancelButton, input, status, remoteConsent, consentDialog, consentAllow, consentCancel, voice };
 }
 
 class MockRecognition {
@@ -71,16 +78,19 @@ test('browser speech service stays off until the guest opts in', async () => {
   const h = voiceHarness(RemoteOnly);
   await h.voice.ready;
   assert.equal(h.voice.supported, false);
-  assert.equal(h.button.disabled, true);
+  assert.equal(h.button.disabled, false, 'microphone remains discoverable');
   assert.equal(RemoteOnly.latest?.startCalls || 0, 0);
-  assert.match(h.status.textContent, /opt in to your browser’s speech service/i);
-  h.remoteConsent.checked = true;
-  h.remoteConsent.emit('change');
-  await new Promise(resolve => setImmediate(resolve));
-  assert.equal(h.button.disabled, false);
   h.button.emit('click');
+  assert.equal(h.consentDialog.hidden, false);
+  assert.equal(RemoteOnly.latest.startCalls, 0, 'no capture before provider consent');
+  h.consentCancel.emit('click');
+  assert.equal(h.consentDialog.hidden, true);
+  assert.equal(RemoteOnly.latest.startCalls, 0);
+  h.button.emit('click');
+  h.consentAllow.emit('click');
+  assert.equal(h.consentDialog.hidden, true);
   assert.equal(RemoteOnly.latest.startCalls, 1);
-  assert.match(h.status.textContent, /browser’s speech service/i);
+  assert.match(h.status.textContent, /browser['’]s speech service/i);
 });
 
 test('microphone start waits for verified local en-NG dictation and a direct button gesture', async () => {
@@ -125,14 +135,14 @@ test('legacy remote-only browser with opt-in reports browser-managed processing'
   }
   const h = voiceHarness(LegacyRemoteRecognition);
   await h.voice.ready;
-  assert.equal(h.button.disabled, true);
+  assert.equal(h.button.disabled, false);
   h.input.value = 'Please bring towels';
   h.remoteConsent.checked = true;
   h.remoteConsent.emit('change');
   await new Promise(resolve => setImmediate(resolve));
   h.button.emit('click');
   assert.equal(LegacyRemoteRecognition.latest.startCalls, 1);
-  assert.match(h.status.textContent, /browser’s speech service/i);
+  assert.match(h.status.textContent, /browser['’]s speech service/i);
   assert.doesNotMatch(h.status.textContent, /Listening on this device/i);
   assert.equal(h.input.value, 'Please bring towels');
 });
@@ -156,8 +166,10 @@ test('remote consent unchecked or revoked never enables remote-only recognition'
   h.remoteConsent.emit('change');
   h.button.emit('click');
   assert.equal(RemoteOnlyRecognition.latest.startCalls, 0);
+  assert.equal(h.consentDialog.hidden, false);
+  h.consentCancel.emit('click');
   assert.equal(h.input.value, 'Keep my typed request');
-  assert.match(h.status.textContent, /browser speech service is off/i);
+  assert.match(h.status.textContent, /cancelled/i);
 });
 
 test('microphone capture failure preserves the typed message', async () => {
@@ -200,10 +212,12 @@ test('browser provider unavailable after opt-in keeps typed input and does not s
   h.remoteConsent.checked = true;
   h.remoteConsent.emit('change');
   await new Promise(resolve => setImmediate(resolve));
-  assert.equal(h.button.disabled, true);
+  assert.equal(h.button.disabled, false);
   assert.match(h.status.textContent, /browser speech service is unavailable/i);
   h.button.emit('click');
   assert.equal(MockRecognition.latest.startCalls, 0);
+  assert.equal(h.consentDialog.hidden, false);
+  h.consentCancel.emit('click');
   MockRecognition.availabilityResult = oldAvailable;
 });
 
@@ -256,10 +270,12 @@ test('downloadable, downloading and unavailable packs stay typed-only without in
     MockRecognition.availabilityResult = result;
     const h = voiceHarness(MockRecognition);
     await h.voice.ready;
-    assert.equal(h.button.disabled, true);
+    assert.equal(h.button.disabled, false);
     assert.match(h.status.textContent, expected);
     h.button.emit('click');
+    assert.equal(h.consentDialog.hidden, false);
     assert.equal(MockRecognition.latest.startCalls, 0);
+    h.consentCancel.emit('click');
     assert.equal(typeof MockRecognition.latest.install, 'undefined');
   }
   MockRecognition.availabilityResult = 'available';
@@ -270,14 +286,14 @@ test('missing or failed availability API fails closed to typed input', async () 
   NoAvailability.available = undefined;
   const missing = voiceHarness(NoAvailability);
   await missing.voice.ready;
-  assert.equal(missing.button.disabled, true);
-  assert.match(missing.status.textContent, /cannot be verified.*opt in to your browser/i);
+  assert.equal(missing.button.disabled, false);
+  assert.match(missing.status.textContent, /Press the microphone/i);
 
   MockRecognition.availabilityError = true;
   const failed = voiceHarness(MockRecognition);
   await failed.voice.ready;
-  assert.equal(failed.button.disabled, true);
-  assert.match(failed.status.textContent, /could not be verified.*Typed input is always available/i);
+  assert.equal(failed.button.disabled, false);
+  assert.match(failed.status.textContent, /could not be verified.*Press the microphone/i);
   MockRecognition.availabilityError = false;
 });
 
@@ -288,7 +304,7 @@ test('unexpected language-pack loss after availability still refuses cloud fallb
   const recognition = MockRecognition.latest;
   recognition.onerror({ error: 'language-not-supported' });
   recognition.onend();
-  assert.equal(h.button.disabled, true);
+  assert.equal(h.button.disabled, false);
   assert.match(h.status.textContent, /did not download one/);
   assert.equal(typeof recognition.install, 'undefined');
 });
@@ -352,9 +368,11 @@ test('overlong transcript is shown for editing rather than silently truncated', 
 
 function makeAppHarness({ Recognition = MockRecognition } = {}) {
   const ids = ['messages', 'chat-form', 'guest-message', 'send-button', 'voice-button', 'voice-cancel',
-    'voice-status', 'voice-remote-consent', 'confirmation', 'feedback'];
+    'voice-status', 'voice-remote-consent', 'voice-remote-dialog', 'voice-remote-allow', 'voice-remote-cancel',
+    'confirmation', 'feedback'];
   const elements = Object.fromEntries(ids.map(id => [id, new Element(id)]));
   elements['voice-cancel'].hidden = true;
+  elements['voice-remote-dialog'].hidden = true;
   const calls = [];
   let releaseMessage;
   const payload = (value) => ({ ok: true, status: 200, json: async () => value });
