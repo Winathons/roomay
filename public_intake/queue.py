@@ -202,7 +202,7 @@ def lease(db, *, business_id: str, hotel_id: str, subject: str, now: int, limit:
                     or_(QueuedInquiry.leased_until.is_(None),
                         QueuedInquiry.leased_until <= now))
              .order_by(QueuedInquiry.created_at, QueuedInquiry.inquiry_id)
-             .limit(limit).with_for_update(skip_locked=True))
+             .limit(limit).with_for_update(of=QueuedInquiry, skip_locked=True))
     out = []
     for item in db.scalars(query).all():
         lease_token = secrets.token_urlsafe(32)
