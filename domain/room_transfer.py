@@ -5,6 +5,7 @@ adapter must hold the authoritative guard through all writes and readback.
 """
 from copy import deepcopy
 from dataclasses import dataclass
+from zoneinfo import ZoneInfo
 
 from .checkout_commands import (
     OperationRejected, _authoritative_instant, _context_gate, _operation_identity,
@@ -142,8 +143,7 @@ def prepare_room_transfer(
     # A maintenance block with status=active remains unsafe past its planned
     # end. A currently active block must block even on an overdue checkout.
     effective_end = max(parse_day(reservation["departure"]),
-                        event.date() if event.utcoffset() is None else
-                        event.astimezone(__import__("zoneinfo").ZoneInfo(hotel_timezone)).date())
+                        event.astimezone(ZoneInfo(hotel_timezone)).date())
     if any(block["room_id"] == to_room_id and block["status"] == "active"
            and parse_day(block["start"]) <= effective_end
            for block in snapshot["room_blocks"]):
