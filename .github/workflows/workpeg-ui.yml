@@ -2,9 +2,9 @@ name: Roomay UI Check
 
 on:
   pull_request:
-    branches: [staging, main]
+    branches: [main]
   push:
-    branches: [staging, main]
+    branches: [main]
 
 permissions:
   contents: read
@@ -53,7 +53,7 @@ jobs:
       - name: Compile Workpeg UI
         run: workpeg ui build ui/
 
-      # Explicit release gate for pull requests into staging AND main.
+      # Explicit release gate for pull requests into protected main.
       # Rebuild a fresh artifact; do not trust a previously generated ui/dist.
       - name: Block dev routes, privileged CRUD and secrets in release bundle (WOR-33)
         run: python -m unittest discover -s tests -p 'test_release_candidate.py' -v

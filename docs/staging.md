@@ -70,7 +70,11 @@ browser session. Follow the safe, owner-operated instructions in
 Every PR should link its Linear issue, summarize implementation and limitations,
 list exact test commands/results, include screenshots for UI changes, and request
 review. Passing CI is not hosted product acceptance. Merge only after the
-repository's required review/checks pass.
+repository's required review/checks pass. **Do not assume CI is mandatory just
+because it runs:** the `protect main` ruleset had an empty required-check list
+when inspected on 12 November 2026. The repository owner must configure and
+verify the exact `Workpeg UI build` check as described in
+[WOR-68 CI enforcement](wor-68-ci-enforcement.md).
 
 The Workpeg SDK can compile UI, serve a local dev install, upload public CDN
 assets, and build/submit a Function. The installed CLI does not provide
