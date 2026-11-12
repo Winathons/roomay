@@ -15,6 +15,9 @@ RUN python -m pip install --no-cache-dir --disable-pip-version-check \
 COPY domain/ /app/domain/
 COPY voice_adapter/ /app/voice_adapter/
 
+# The webhook needs only read access to its code and writes no local state.
+USER 10001:10001
+
 EXPOSE 8080
 
 # One process keeps the in-memory replay/rate limit state consistent per instance.

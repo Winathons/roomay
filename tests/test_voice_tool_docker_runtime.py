@@ -28,6 +28,7 @@ class ToolImageContractTests(unittest.TestCase):
         self.assertIn("voice_adapter.tool_wsgi:application", image)
         self.assertIn("COPY domain/", image)
         self.assertIn("COPY voice_adapter/", image)
+        self.assertIn("USER 10001:10001", image)
         self.assertIn("0.0.0.0:${PORT:-8080}", image)
         self.assertIn("--workers 1", image)
         self.assertIn("--threads 2", image)
@@ -77,11 +78,11 @@ class ToolDockerRuntimeSmokeTests(unittest.TestCase):
                 self.assertEqual(port_result.returncode, 0, port_result.stdout + port_result.stderr)
                 host_port = int(port_result.stdout.strip().rsplit(":", 1)[1])
 
-                def request(method, body=None, *, auth=False):
+                def request(method, body=None, *, bearer=None):
                     payload = (json.dumps(body).encode("utf-8") if body is not None else b"")
                     headers = {"Content-Type": "application/json"}
-                    if auth:
-                        headers["Authorization"] = "Bearer " + TOKEN
+                    if bearer is not None:
+                        headers["Authorization"] = "Bearer " + bearer
                     conn = http.client.HTTPConnection("127.0.0.1", host_port, timeout=3)
                     try:
                         conn.request(method, "/tool-calls", body=payload, headers=headers)
@@ -101,11 +102,11 @@ class ToolDockerRuntimeSmokeTests(unittest.TestCase):
                             self.fail("tool container did not start")
                         time.sleep(0.2)
 
-                status, raw = request("POST", {}, auth=False)
+                status, raw = request("POST", {}, bearer="invalid-placeholder-token")
                 self.assertEqual(status, 401)
                 self.assertIn(b"unauthorized", raw)
 
-                status, raw = request("POST", {}, auth=True)
+                status, raw = request("POST", {}, bearer=TOKEN)
                 self.assertEqual(status, 400)
                 self.assertIn(b"invalid", raw)
 
@@ -116,7 +117,7 @@ class ToolDockerRuntimeSmokeTests(unittest.TestCase):
                                            "arguments": {"utterance": "Please bring extra towels to room 205"},
                                        }}
                                    ]}}
-                status, raw = request("POST", body, auth=True)
+                status, raw = request("POST", body, bearer=TOKEN)
                 self.assertEqual(status, 200)
                 result = json.loads(raw)["results"][0]
                 self.assertEqual(result["toolCallId"], "tool-1")
