@@ -2,10 +2,11 @@
 
 ## Product boundary
 
-This branch introduces a **dormant, standalone FastAPI/PostgreSQL prototype**
-of guest service requests and a department inbox. PostgreSQL is the
-**transactional writer for records created inside this prototype only**; it
-has **NOT** been approved as the hotel's operational single source of truth.
+The owner has **approved Workpeg Tables as ROOMAY's canonical service-request
+and audit store (Option A)**. This branch only introduces a **dormant,
+standalone FastAPI/PostgreSQL engineering prototype** of guest requests and
+a department inbox. PostgreSQL is the transactional writer *inside isolated
+prototype tests only*; it is **not** the hotel's approved operational writer.
 
 The current Workpeg Reception UI instead reads Workpeg request and audit tables.
 There is **no automatic copy, write-through, synchronization, or shared staff
@@ -14,9 +15,9 @@ Workpeg supplies a supported and authorized invocation/read path.
 Hotel-dependent routes deliberately respond with sanitized 503 errors. Do not
 describe a PostgreSQL request as delivered to staff in Workpeg, enable
 guest-facing operations, migrate existing history, or deploy this backend
-until the owner formally approves one authoritative request/audit path and
-the corresponding secure staff projection. See
-[WOR-62 request authority options](wor-62-pr37-source-of-truth.md).
+until Workpeg supports and authorizes the selected **single Workpeg writer**
+with verified staff/guest readback. See
+[the approved WOR-62 architecture decision](wor-62-pr37-source-of-truth.md).
 
 The existing Workpeg tables and Room 205 records are not changed. The previous
 standalone Tables reader and its owner-run verification command have been
@@ -238,13 +239,12 @@ Before an owner-authorized real development test:
 6. Confirm an unauthorized staff account is denied and that neither guest nor
    staff projections expose protected identity or audit fields.
 
-Existing owner-only Workpeg request/audit tables remain untouched and are
-the **current Reception projection**, but the team has **not yet approved**
-the hotel's definitive future authoritative store. Review the two safe
-integration choices in
-[WOR-62 request authority options](wor-62-pr37-source-of-truth.md);
-do not deprecate or bypass Workpeg tables, create competing writers, or
-broaden permissions (`700`) to make the prototype operate.
+Existing owner-only Workpeg request/audit tables remain untouched.
+The owner **selected Workpeg Tables as the canonical operational source of
+truth** in [WOR-62](wor-62-pr37-source-of-truth.md), but the vendor-backed
+external guest ingestion path is still **unverified**. Do not deprecate or
+bypass Workpeg tables, create competing writers, or broaden permissions
+(`700`) to make the prototype operate.
 
 ### Current GitHub verification (12 November 2026)
 
@@ -264,3 +264,15 @@ registered Workpeg OIDC client, real staff role authorizations, a hotel-data
 bridge, Workpeg writes, guest-to-staff delivery, or public release readiness.**
 The PR remains draft until these integration contracts are approved and
 hosted acceptance is obtained.
+
+### Standalone backend startup is explicitly disabled
+
+The merged source code is **infrastructure only**. Importing `backend.main`
+or running `uvicorn backend.main:app` fails with
+`standalone_guest_backend_disabled_pending_workpeg_integration` unless a
+developer explicitly sets `ROOMAY_ENABLE_STANDALONE_PROTOTYPE=local-only`.
+That value is meant solely for an isolated development experiment; it is
+**not** a Workpeg credential, a deploy flag, production authorization, or
+proof that guests reach staff. Even with that flag, the default Workpeg
+hotel-data adapter is unavailable and guest/staff hotel routes return 503.
+No public ingress, Workpeg rights or deployment is approved by merging PR #37.
