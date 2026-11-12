@@ -16,24 +16,19 @@ The owner-recorded direct Workpeg support reply in [WOR-61](https://linear.app/w
 
 No wider access or external Function trigger has been confirmed. This ADR does **not** authorize deploying, publishing Functions, changing table permissions, or making hosted writes.
 
-## Presently broken path and safe correction
+## Implemented safe correction and current blocker
 
-Draft [PR #37](https://github.com/Winathons/roomay/pull/37) currently has:
-- `backend/config.py`: a mandatory `WORKPEG_PK`.
-- `backend/main.py`: constructs `WorkpegHotelReader(..., workpeg_pk=settings.workpeg_pk)`.
-- `backend/workpeg_reader.py`: sends that developer token as a bearer token to Workpeg Tables API.
-- `.env.example` and `docs/guest-service-backend.md`: instructions that mistakenly present `WORKPEG_PK` as supported external server read access.
-- `GET /auth/workpeg/start` and `GET /auth/workpeg/callback`: draft OIDC endpoints with offline mock tests, **not** a real registered client/callback.
+The previously proposed `WORKPEG_PK` external Tables reader was **removed** in [WOR-61 PR #50](https://github.com/Winathons/roomay/pull/50), squash-merged into the **feature branch** of draft [PR #37](https://github.com/Winathons/roomay/pull/37) on 12 November 2026 (commit `846a5ee2d393491e349e2602c0ea34d14d599410`). This is **not** a merge of PR #37 into `main`.
 
-**Required follow-up change (separate owner-coordinated PR or explicitly authorized edit of PR #37):**
-- Delete the unsupported developer-token Tables reader from the active backend startup path; remove `WORKPEG_PK` as a runtime prerequisite. Update example configuration, verifier/CLI assumptions, documentation and affected tests together.
-- Keep a narrow **hotel snapshot port** for the application, but return a stable **unavailable/unsupported** state until an official authenticated delivery mechanism is approved and integrated. Never fall back to fixtures or cached cross-hotel data, and never report a request as persisted merely because an upstream read failed.
-- Do not substitute the OIDC access/ID token for a Tables credential.
-- Do not import a Workpeg Function's context token into the persistent guest API, retain it after the invocation, allow callers to construct or override trusted context, or infer authorization from the public request body.
-- Continue to deny all unsupported guest operations, and retain the existing owner-only `700` table policy.
-- Keep PostgreSQL versus Workpeg request/audit ownership undecided until **WOR-62** receives explicit approval; no dual writer or implicit sync.
+- `backend/config.py` no longer requires a developer `WORKPEG_PK` or Peg UUID for standalone hotel reads. The unsupported external Tables reader and verifier were retired from the active backend.
+- Hotel-dependent endpoints use an explicit unavailable snapshot adapter, returning sanitized `503 hotel_records_unavailable`. They do not fall back to fictional/stale hotel data or imply success.
+- Existing OIDC start/callback and session handling remain unverified against a **vendor-registered real client**; identity alone cannot authorize a Tables read.
+- PostgreSQL request/audit writes in draft PR #37 remain a **separate ledger** from the Workpeg receptionist request/audit tables. [WOR-62](https://linear.app/workpeg/issue/WOR-62) must approve one authoritative path and secure staff visibility before PR #37 can be merged as an integrated product.
+- PR #50's author reported 347 local tests, including 24 PostgreSQL 16 integration tests. This is author-reported local evidence, **not GitHub CI on PR #50 and not proof of hosted Workpeg integration**.
 
-No runtime code changes to draft PR #37 are made by this document-only branch.
+No Workpeg external Function endpoint, registered OIDC callback, or supported guest-to-hotel bridge has been confirmed. Do not replace `WORKPEG_PK` with an OIDC ID token, Function invocation token, arbitrary browser context, relaxed owner-only `700` permission or a guessed public `/invoke` endpoint.
+
+**This documentation-only branch changes no PR #37 runtime code or Workpeg hosted state.**
 
 ## Supported/trusted access matrix
 
@@ -81,14 +76,14 @@ No vendor response is on record yet; treat this as **blocked**, not as permissio
 | Real authorized hotel snapshot through official path | Read after independent session/reload with verified owner-only table scope | **Not demonstrated** |
 | Secret handling | No credentials in git, logs, screenshots, Linear, PR or browser | Required review |
 
-The code in PR #37 has SQLite-backed tests and a mock Workpeg identity provider; that is *not* proof of an OIDC registration, authentic Workpeg Function invocation or server hotel-record reads.
+PR #37 contains author-reported PostgreSQL 16 integration testing and mocked identity tests. Neither proves a real registered OIDC callback, an authenticated externally invoked Workpeg Function, or an authorized server hotel-record read.
 
 ## Ownership, gates and delivery
 
 1. **Owner:** Confirm backend hosting origin(s), allowed vendor registration details, and send the exact Function invocation question; approve any production-bound Workpeg identity/role/table operation.
-2. **Aliameen (WOR-61):** Implement the fail-closed removal of the unsupported standalone Tables path only in a separately reviewed, owner-coordinated backend branch; test wrong-business/role, spoofed/expired context, logout/session expiry and server loss.
+2. **Aliameen (WOR-61):** **Completed offline portion:** PR #50 removed unsupported developer-PK hotel reads and introduced fail-closed unavailability in PR #37's feature branch. **Remaining:** independently validate the authorized hosted Function boundary (if provided), negative context/role cases, and real OIDC session behavior before enabling any real hotel read.
 3. **Owner and Aliameen:** Verify actual OIDC callback using a vendor-registered client and an authorized synthetic staff identity; record sanitized success/denial evidence.
 4. **WOR-62:** Decide authoritative request/audit writer, consistency bridge, retries and reconciliation in a separate architecture approval. Do not merge PR #37 until these gates pass.
-5. **Review and release:** PR to `staging`; no hosted writes, publication, role relaxation, deployments, secret changes or automatic merge.
+5. **Review and release:** Documentation PR targets protected `main` under the new main-only workflow. The integration backend remains an independent **draft** PR; no hosted writes, publication, role relaxation, deployment, or secret changes are approved by merging these notes.
 
 **Current decision:** Direct standalone Workpeg Tables access using `WORKPEG_PK` is **rejected**. Workpeg Function access from an external backend and live OIDC are **not verified**. Guest-to-staff workflow remains blocked until supported authority and persistence are demonstrated.
