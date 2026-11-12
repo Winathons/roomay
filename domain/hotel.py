@@ -189,8 +189,11 @@ def room_eligibility(data, reservation_id, room_id, *, check_in=False,
                booking["arrival"], booking["departure"], r["arrival"], r["departure"])
            for r in data["reservations"]):
         reasons.append("reservation_overlap")
-    if any(b["room_id"] == room_id and b["status"] == "active" and overlaps(
-            booking["arrival"], booking["departure"], b["start"], b["end"])
+    # An active maintenance block has a *planned* end, not automatic repair
+    # approval. Once started, it keeps the room unsafe until explicitly
+    # released; a booking ending before the block begins remains unaffected.
+    if any(b["room_id"] == room_id and b["status"] == "active"
+           and parse_day(b["start"]) < parse_day(booking["departure"])
            for b in data["room_blocks"]):
         reasons.append("maintenance_block")
     if check_in:
