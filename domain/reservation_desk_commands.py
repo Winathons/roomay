@@ -13,6 +13,11 @@ from uuid import NAMESPACE_URL, uuid5
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from .hotel import parse_day, parse_instant, validate_snapshot
+_CANCELLATION_REASONS = {
+    "guest_requested", "booking_error", "hotel_unavailable",
+    "duplicate_request", "other_reviewed",
+}
+
 from .reservation_commands import (
     ReservationRejected, WriteContext, _idempotency_key, _uuid, _write_gate,
     prepare_authorized_room_confirmation, prepare_cancellation,
@@ -183,7 +188,8 @@ def prepare_staff_cancellation(
     booking = index["reservations"].get(reservation_id)
     if booking is None:
         raise ReservationRejected("unknown_reservation")
-    reason = _text(reason, "cancellation_reason_required")
+    if not isinstance(reason, str) or reason not in _CANCELLATION_REASONS:
+        raise ReservationRejected("approved_cancellation_reason_required")
     plan = prepare_cancellation(
         snapshot, reservation_id=reservation_id, staff_authorized=True,
     )
