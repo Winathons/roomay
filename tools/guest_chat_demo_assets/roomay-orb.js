@@ -281,7 +281,8 @@
           '<style>:host{display:inline-block;width:200px;aspect-ratio:1;contain:content}' +
           'canvas{display:block;width:100%;height:100%}</style><canvas></canvas>';
         this._canvas = this.shadowRoot.querySelector('canvas');
-        this._ctx = this._canvas.getContext('2d');
+        try { this._ctx = this._canvas && this._canvas.getContext('2d'); }
+        catch (_) { this._ctx = null; }
       }
 
       get state() { var s = this.getAttribute('state'); return STATES[s] ? s : 'idle'; }
@@ -296,6 +297,7 @@
       connectedCallback() {
         var self = this;
         if (!this.hasAttribute('role')) this.setAttribute('role', 'img');
+        if (!this._ctx) this.setAttribute('data-canvas-unavailable', '');
         this._applyState(true);
         this.refreshColors();
         if (root.ResizeObserver) { this._ro = new ResizeObserver(function () { self._resize(); }); this._ro.observe(this); }
@@ -329,7 +331,13 @@
 
       attributeChangedCallback(name) {
         if (name === 'state') this._applyState(false);
-        if (name === 'paused' && this.isConnected) this._sync();
+        if (name === 'paused' && this.isConnected) {
+          // A dialog can be revealed and unpaused in one click task. Its
+          // IntersectionObserver callback may still contain the hidden-at-load
+          // result, so consult layout immediately instead of waiting for it.
+          if (!this.hasAttribute('paused')) this._refreshVisibility();
+          this._sync();
+        }
         if (name === 'compact' && this.isConnected && !this._raf) this._paint();
       }
 
@@ -344,15 +352,18 @@
          OS colour scheme flips; call it yourself after changing the CSS
          variables at runtime (for example an in-app theme toggle). */
       refreshColors() {
-        var cs = getComputedStyle(this), C = {}, probe = document.createElement('canvas').getContext('2d');
+        var cs = getComputedStyle(this), C = {}, probe = null;
+        try { probe = document.createElement('canvas').getContext('2d'); } catch (_) { probe = null; }
         Object.keys(PALETTE).forEach(function (key) {
           var val = cs.getPropertyValue(CSS_VARS[key]).trim(), rgb = hexToRgb(PALETTE[key]);
-          if (val) {                      // let the browser parse any CSS colour syntax
-            probe.clearRect(0, 0, 1, 1);
-            probe.fillStyle = 'rgba(0,0,0,0)'; probe.fillStyle = val;
-            probe.fillRect(0, 0, 1, 1);
-            var px = probe.getImageData(0, 0, 1, 1).data;
-            if (px[3] > 0) rgb = [px[0], px[1], px[2]];
+          if (val && probe) {             // let the browser parse any CSS colour syntax
+            try {
+              probe.clearRect(0, 0, 1, 1);
+              probe.fillStyle = 'rgba(0,0,0,0)'; probe.fillStyle = val;
+              probe.fillRect(0, 0, 1, 1);
+              var px = probe.getImageData(0, 0, 1, 1).data;
+              if (px[3] > 0) rgb = [px[0], px[1], px[2]];
+            } catch (_) { /* Keep the built-in palette when color probing is unavailable. */ }
           }
           C[key] = rgb;
         });
@@ -361,6 +372,7 @@
       }
 
       _resize() {
+        if (!this._canvas) return;
         var box = this.getBoundingClientRect();
         var dpr = Math.min(root.devicePixelRatio || 1, 3);
         var px = Math.max(1, Math.round(Math.min(box.width, box.height) * dpr));
@@ -368,9 +380,20 @@
         this._paint();
       }
 
+      _refreshVisibility() {
+        var box = this.getBoundingClientRect();
+        var width = box.width || (box.right - box.left), height = box.height || (box.bottom - box.top);
+        var inViewport = width > 0 && height > 0;
+        if (inViewport && root.innerWidth > 0 && root.innerHeight > 0) {
+          inViewport = box.bottom > 0 && box.right > 0 && box.top < root.innerHeight && box.left < root.innerWidth;
+        }
+        this._visible = inViewport;
+        return inViewport;
+      }
+
       /* Run only while it can be seen: on screen, tab visible, not paused. */
       _sync() {
-        var run = this.isConnected && this._visible && !document.hidden && !this.hasAttribute('paused');
+        var run = this.isConnected && !!this._ctx && this._visible && !document.hidden && !this.hasAttribute('paused');
         if (run && !this._raf) { this._last = 0; this._raf = requestAnimationFrame(this._tick); }
         if (!run && this._raf) { cancelAnimationFrame(this._raf); this._raf = 0; }
       }
@@ -404,17 +427,29 @@
       }
 
       _paint(F) {
-        var ctx = this._ctx, px = this._canvas.width;
-        if (!this._C) return;
+        var ctx = this._ctx, px = this._canvas ? this._canvas.width : 0;
+        if (!ctx || !this._C || !px) return false;
         if (!F) {
           var P = this._shown(this._P);
           F = this._level != null ? frame(P, this._t, this._lv, this._lv2) : frame(P, this._t);
         }
-        var unit = this.hasAttribute('compact') ? COMPACT_UNIT : UNIT;
-        ctx.setTransform(1, 0, 0, 1, 0, 0);
-        ctx.clearRect(0, 0, px, px);
-        ctx.setTransform(px / unit, 0, 0, px / unit, px / 2, px / 2);
-        draw(ctx, F, this._C);
+        try {
+          var unit = this.hasAttribute('compact') ? COMPACT_UNIT : UNIT;
+          ctx.setTransform(1, 0, 0, 1, 0, 0);
+          ctx.clearRect(0, 0, px, px);
+          ctx.setTransform(px / unit, 0, 0, px / unit, px / 2, px / 2);
+          draw(ctx, F, this._C);
+          this.removeAttribute('data-canvas-unavailable');
+          return true;
+        } catch (_) {
+          // The CSS fallback beside this canvas remains visible if a browser
+          // lacks a usable 2D context or one of its drawing primitives.
+          this.setAttribute('data-canvas-unavailable', '');
+          this._ctx = null;
+          if (this._canvas) this._canvas.style.display = 'none';
+          this._sync();
+          return false;
+        }
       }
 
       /* Draw one exact frame of a state's loop (time in seconds). Handy for
