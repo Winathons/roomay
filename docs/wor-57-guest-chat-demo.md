@@ -37,6 +37,10 @@ its role-selection endpoint are unavailable.
 4. Choose **Housekeeping** and acknowledge, start and complete the assigned
    task.
 5. Return to **My Stay** and confirm the request status reflects the changes.
+   If a workspace is opened while another test role is selected, use the
+   internal workspace selector link on the access message, then choose the
+   intended role. This changes the role in the same local test session; it is
+   not authentication and does not reset the example request history.
 
 Guest API responses contain only the example guest's stay and own request
 projection. Reception receives the example hotel overview. Housekeeping
