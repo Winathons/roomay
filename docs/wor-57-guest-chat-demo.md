@@ -1,70 +1,79 @@
-# ROOMAY Local Hotel Journey
+# Local hotel journey — internal QA instructions
 
-This local browser journey shows how the existing guest, Reception and
-Housekeeping contracts fit together. Guest classification, clarification,
-routing, stay checks and explicit confirmation reuse WOR-18. Request creation,
-Reception assignment, Housekeeping acknowledgement, start and resolution use
-the canonical service-request domain functions. A small process-memory store
-holds the explicitly synthetic request and audit history; it is not an
-operational or Workpeg writer.
+This loopback-only browser harness uses Roomay's existing conversation-intake,
+hotel projection and service-request transition contracts. It is not a customer
+portal and is not registered in the Workpeg Peg UI. `The Linden House` and its
+named guests are invented example records.
 
-## Run locally
+## Start the local journey
 
-From the repository root in PowerShell:
+From the repository root in PowerShell, using the pinned environment:
 
 ```powershell
-..\.venv\Scripts\python.exe -m tools.guest_chat_demo
+..\.venv\Scripts\python.exe -m tools.guest_chat_demo --port 8765 --enable-local-qa
 ```
 
-Open `http://127.0.0.1:8765/`. Stop the server with `Ctrl+C`. The server binds
-only to IPv4 loopback. It makes no outbound requests. If port 8765 is busy, run
-with `--port 8766` and open the matching URL.
+The three workspaces are separate routes:
 
-The interface displays **SYNTHETIC DEMO — NO LIVE HOTEL REQUEST SUBMITTED**.
-Start at My Stay, submit and confirm “Please bring extra towels to room 205,”
-open Reception and assign the request, then use the Housekeeping tab to
-acknowledge, start and resolve it. Return to My Stay to see the same final
-status. Reception also shows the Room 205 active stay, rooms board, metrics and
-the demo-only request history.
+- `http://127.0.0.1:8765/stay`
+- `http://127.0.0.1:8765/staff/reception`
+- `http://127.0.0.1:8765/staff/housekeeping`
 
-The Guest, Reception and Housekeeping tabs are selectable demo roles. They are
-not authenticated identities or proof of real permissions. Each demo session
-uses fictional records and one synthetic active stay. Request/status updates
-are kept in the server process memory, so they survive normal page reloads for
-the same HttpOnly session cookie (up to 20 minutes inactivity). Restarting the
-server discards them. No data is seeded to Workpeg or PostgreSQL, and no real
-staff are notified.
+To select a test role, visit `http://127.0.0.1:8765/__qa/`. This internal
+loopback-only page requires the explicit `--enable-local-qa` flag. It creates a
+test session and chooses an example role; it does not authenticate a user,
+verify Workpeg membership, or prove hotel permissions. The customer/staff pages
+have no role switcher or links to another role's workspace. Server-side session
+role checks guard each staff route and action. Without the flag, `/__qa/` and
+its role-selection endpoint are unavailable.
 
-The optional “Start voice input” control requires browser support for on-device
-Web Speech recognition and an already-installed `en-NG` language pack. It does
-not enable cloud recognition or download language packs. Type a message if
-private on-device recognition is unavailable. See
-[WOR-19 browser voice intake](wor-19-browser-voice-intake.md).
+## Example journey
 
-Try `Please bring extra towels to room 205.` or `Abeg, my AC no dey cool for
-room 205.`. Emergency messages ask the guest to contact Reception; nobody is
-contacted by the demo.
+1. Choose **My Stay** in the internal QA page.
+2. Submit `Please bring extra towels to room 205.` and confirm the reviewed
+   Housekeeping request.
+3. Choose **Reception**, review today's example metrics and room overview, and
+   assign the request to Housekeeping.
+4. Choose **Housekeeping** and acknowledge, start and complete the assigned
+   task.
+5. Return to **My Stay** and confirm the request status reflects the changes.
+
+Guest API responses contain only the example guest's stay and own request
+projection. Reception receives the example hotel overview. Housekeeping
+receives only work assigned to its department; guest identities and hotel-wide
+metrics are omitted. Data in each response is built from synthetic in-process
+records and canonical domain rules. It is not Workpeg or PostgreSQL data.
+
+## State, contact and safety limits
+
+The local process holds request and example audit state in memory. It survives
+refresh for the same HttpOnly session cookie (up to 20 minutes idle), but it is
+lost when the server stops. UI notices describe this as an example property and
+state that updates are not sent to hotel systems. The assistant never claims a
+hotel team was contacted. No real Reception phone or emergency number is
+configured; the guest page points to the hotel's official contact information
+and local emergency services without inventing a number.
+
+The optional voice control uses only on-device Web Speech recognition when
+the browser confirms an already-installed en-NG pack. It does not enable cloud
+recognition, download a language pack, or store raw audio. Typed input remains
+available. Text classification is the existing deterministic WOR-18 intake
+contract, not a live AI service.
+
+No Workpeg API, PostgreSQL, Vapi or YarnGPT connection is made by this harness.
+No booking, check-in, check-out or guest service request is persisted to a
+hotel system. Do not expose this server beyond loopback.
 
 ## Validation
 
 ```powershell
-..\.venv\Scripts\python.exe -m unittest tests.test_guest_chat_demo -v
+..\.venv\Scripts\python.exe -m unittest tests.test_guest_chat_demo tests.test_guest_voice_intake -v
 ```
 
-The endpoint tests exercise the browser HTTP routes and confirm status changes
-survive reloading through the same session. Manual browser review verifies
-visible navigation, request controls and responsive screens. None of these
-checks prove hosted Workpeg access, staff login, guest verification or live
-request persistence. The offline text classifier is not an AI model, and
-Pidgin examples do not measure speech-recognition accuracy.
-
-## Production work still required
-
-The production receptionist route remains an authenticated, read-only Workpeg
-reader. Before real guest use, Roomay needs the owner-approved trusted guest
-verification and active-stay lookup, a server-backed role/department identity
-boundary, an approved single source of truth and request/audit writer, verified
-department permissions, concurrency control and read-back reconciliation. This
-journey calls none of Workpeg, Vapi, YarnGPT or PostgreSQL and does not replace
-WOR-61/WOR-62 or Yusuf's WOR-17 guest portal. Never expose its synthetic role
-switch or session mechanism as a public endpoint.
+The tests exercise browser HTTP routes, role-scoped response shapes, route and
+action denial, confirmation, all request transitions, replay behavior, reload
+within a session, privacy filtering, and local voice-control behavior. Manual
+browser testing is still required for rendered layout at desktop and mobile
+sizes. The real guest identity/session path, Workpeg read/write authorization,
+durable request/audit writer and staff permissions remain blocked on WOR-17,
+WOR-61 and WOR-62.

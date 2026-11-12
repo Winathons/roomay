@@ -4,147 +4,81 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="color-scheme" content="light">
-  <title>Roomay | Local Hotel Journey</title>
+  <title>My Stay | ROOMAY</title>
   <link rel="stylesheet" href="/app.css">
   <script src="/voice_intake.js" defer></script>
   <script src="/app.js" defer></script>
 </head>
-<body>
-  <div class="page-shell">
+<body data-workspace="guest">
+  <div class="app-shell guest-shell">
     <header class="topbar">
-      <a class="brand" href="/" aria-label="Roomay home">
+      <a class="brand" href="/stay" aria-label="ROOMAY My Stay">
         <span class="brand-mark" aria-hidden="true">R</span>
         <span class="brand-name">roomay<span class="brand-period">.</span></span>
       </a>
-      <div class="demo-status"><span class="status-dot"></span> Synthetic journey</div>
+      <div class="property-lockup"><span class="property-name">The Linden House</span><span class="property-kind">Example property</span></div>
     </header>
 
-    <main>
-      <section class="notice" role="note" aria-label="Demo status">
-        <span class="notice-icon" aria-hidden="true">i</span>
-        <strong>SYNTHETIC DEMO — NO LIVE HOTEL REQUEST SUBMITTED</strong>
+    <main class="guest-main">
+      <section class="guest-welcome">
+        <div><p class="eyebrow">YOUR STAY</p><h1>Welcome, <span id="guest-name">Amara</span></h1>
+          <p class="intro-copy">We’re here to make your stay comfortable.</p></div>
+        <a class="text-link" href="#request-status">View request status <span aria-hidden="true">↓</span></a>
       </section>
 
-      <nav class="journey-nav" aria-label="Choose a synthetic demo view">
-        <span class="nav-label">DEMO VIEW</span>
-        <button type="button" class="role-tab" data-role="guest" aria-pressed="true">My Stay</button>
-        <button type="button" class="role-tab" data-role="reception" aria-pressed="false">Reception</button>
-        <button type="button" class="role-tab" data-role="housekeeping" aria-pressed="false">Housekeeping</button>
-      </nav>
-      <p id="journey-feedback" class="journey-feedback" role="status" aria-live="polite"></p>
-
-      <section id="guest-panel" class="role-panel" aria-label="Synthetic guest stay">
-      <section class="intro">
-        <p class="eyebrow">ROOMAY GUEST CARE</p>
-        <h1>How can we help?</h1>
-        <p class="intro-copy">Tell us what you need. Roomay can clarify the request and show which hotel team would handle it.</p>
+      <section class="stay-summary" aria-labelledby="stay-heading">
+        <div class="stay-summary-heading"><div><p class="section-kicker">MY STAY</p><h2 id="stay-heading">Room <span id="guest-room">205</span></h2></div>
+          <span id="guest-stay-status" class="status-pill status-active">In house</span></div>
+        <div class="stay-facts">
+          <div><span class="fact-label">Room type</span><strong id="guest-room-type">Classic Queen</strong></div>
+          <div><span class="fact-label">Check-in</span><strong id="guest-check-in">—</strong></div>
+          <div><span class="fact-label">Check-out</span><strong id="guest-check-out">—</strong></div>
+          <div><span class="fact-label">Reservation</span><strong id="guest-reservation-status">Confirmed</strong></div>
+        </div>
       </section>
 
-      <section id="my-stay-card" class="stay-card" aria-label="My synthetic stay">
-        <div><p class="side-kicker">MY STAY · SYNTHETIC</p><h2 id="guest-stay-title">Loading fictional stay…</h2></div>
-        <p id="guest-stay-meta" class="stay-meta"></p>
-        <div id="guest-request-status" class="request-status-list"></div>
-      </section>
-
-      <div class="workspace">
-        <section class="chat-panel" aria-label="Offline guest chat">
+      <div class="guest-grid">
+        <section class="chat-panel guest-chat" aria-labelledby="request-heading">
           <div class="chat-heading">
             <div class="assistant-avatar" aria-hidden="true">R</div>
-            <div>
-              <h2>Roomay assistant</h2>
-              <p><span class="online-dot"></span> Offline rules demo</p>
-            </div>
-            <span class="synthetic-pill">FICTIONAL SESSION</span>
+            <div><h2 id="request-heading">How can we help you?</h2><p>Describe what you need during your stay.</p></div>
           </div>
-
           <div id="messages" class="messages" role="log" aria-live="polite" aria-relevant="additions text">
-            <div class="loading-state">Starting the offline demo…</div>
+            <div class="loading-state">Loading your stay…</div>
           </div>
-
           <div id="confirmation" class="confirmation-slot"></div>
-
           <form id="chat-form" class="composer">
-            <label class="sr-only" for="guest-message">Your message or reviewed voice transcript</label>
-            <textarea id="guest-message" name="message" rows="2" maxlength="1000"
-              placeholder="Type what you need…" autocomplete="off" required></textarea>
+            <label class="sr-only" for="guest-message">Your request or reviewed voice transcript</label>
+            <textarea id="guest-message" name="message" rows="2" maxlength="1000" placeholder="What would make your stay more comfortable?" autocomplete="off" required></textarea>
             <div class="voice-tools" aria-label="Optional voice input">
-              <button id="voice-button" class="voice-button" type="button" disabled
-                aria-pressed="false" aria-describedby="voice-help voice-status">
-                Start voice input
-              </button>
-              <div class="voice-copy">
-                <p id="voice-help">Voice uses on-device en-NG speech recognition only. Roomay does not record or store audio. Your browser must already support dictation and have its language pack installed; Roomay will not download one. New speech appends to existing text.</p>
-                <p id="voice-status" class="voice-status" role="status" aria-live="polite">Checking whether an on-device en-NG dictation pack is installed…</p>
-              </div>
+              <button id="voice-button" class="voice-button" type="button" disabled aria-pressed="false" aria-describedby="voice-help voice-status">Use voice</button>
+              <div class="voice-copy"><p id="voice-help">Voice input is processed on this device when supported. Audio is not recorded or stored.</p>
+                <p id="voice-status" class="voice-status" role="status" aria-live="polite">Checking on-device dictation…</p></div>
             </div>
-            <div class="composer-footer">
-              <span id="send-help">Review any transcript, then send · Shift + Enter for a new line</span>
-              <button id="send-button" class="send-button" type="submit" aria-label="Send message">
-                <span>Send</span><span aria-hidden="true">↗</span>
-              </button>
-            </div>
+            <div class="composer-footer"><span id="send-help">Review your message before sending · Shift + Enter for a new line</span>
+              <button id="send-button" class="send-button" type="submit"><span>Send</span><span aria-hidden="true">↗</span></button></div>
           </form>
           <p id="feedback" class="feedback" role="status" aria-live="polite"></p>
         </section>
 
-        <aside class="side-panel" aria-label="Demo information">
-          <section class="side-card examples-card">
-            <p class="side-kicker">TRY A MESSAGE</p>
-            <h2>Start with a need</h2>
-            <div class="suggestions">
-              <button type="button" class="suggestion" data-example="Abeg, my AC no dey cool for room 205.">
-                <span class="suggestion-icon maintenance" aria-hidden="true">✳</span>
-                <span><strong>Maintenance</strong><small>“Abeg, my AC no dey cool…”</small></span>
-                <span class="chevron" aria-hidden="true">›</span>
-              </button>
-              <button type="button" class="suggestion" data-example="Please bring extra towels to room 205.">
-                <span class="suggestion-icon housekeeping" aria-hidden="true">✦</span>
-                <span><strong>Housekeeping</strong><small>“Please bring extra towels…”</small></span>
-                <span class="chevron" aria-hidden="true">›</span>
-              </button>
-              <button type="button" class="suggestion" data-example="Can I ask about room availability?">
-                <span class="suggestion-icon reception" aria-hidden="true">↗</span>
-                <span><strong>Room enquiry</strong><small>Routes to Reception</small></span>
-                <span class="chevron" aria-hidden="true">›</span>
-              </button>
-            </div>
+        <aside class="guest-side">
+          <section class="side-card request-card-list" id="request-status" aria-labelledby="status-heading">
+            <p class="section-kicker">YOUR REQUESTS</p><h2 id="status-heading">Request status</h2>
+            <div id="guest-requests"><p class="empty-state">Your requests will appear here.</p></div>
           </section>
-
-          <section class="side-card how-card">
-            <p class="side-kicker">WHAT HAPPENS</p>
-            <ol class="steps">
-              <li><span>1</span><div><strong>Describe it</strong><small>Use your own words or Nigerian Pidgin.</small></div></li>
-              <li><span>2</span><div><strong>Review the route</strong><small>Roomay checks the request and asks if details are missing.</small></div></li>
-              <li><span>3</span><div><strong>Confirm the request</strong><small>It appears in the synthetic workflow only; no live hotel system is changed.</small></div></li>
-            </ol>
+          <section class="side-card contact-card" aria-labelledby="contact-heading">
+            <p class="section-kicker">HERE TO HELP</p><h2 id="contact-heading">Contact Reception</h2>
+            <p id="reception-contact">For assistance, use the contact details provided by the hotel.</p>
+            <a id="reception-contact-link" class="contact-link" href="#contact-heading" hidden>Call Reception</a>
           </section>
-
-          <section class="safety-note">
-            <span aria-hidden="true">!</span>
-            <p><strong>Need urgent help?</strong> Contact Reception directly. This demo does not notify hotel staff or emergency services.</p>
+          <section class="safety-note" aria-label="Emergency help">
+            <span aria-hidden="true">!</span><p><strong>Need urgent help?</strong> Contact local emergency services and Reception using the hotel's official contact information.</p>
           </section>
         </aside>
       </div>
-      </section>
 
-      <section id="reception-panel" class="role-panel" aria-label="Synthetic Reception workspace" hidden>
-        <section class="intro"><p class="eyebrow">FRONT DESK · SYNTHETIC WORKSPACE</p><h1>Reception Today</h1><p class="intro-copy">A fictional hotel snapshot for this local journey. It is separate from authenticated Workpeg records.</p></section>
-        <div id="reception-metrics" class="metric-grid" aria-live="polite"></div>
-        <section class="staff-card"><div class="staff-card-heading"><div><p class="side-kicker">ACTIVE STAY</p><h2>Room 205</h2></div><span class="status-pill">IN HOUSE</span></div><div id="active-stay-details" class="stay-details"></div></section>
-        <section class="staff-card"><div class="staff-card-heading"><div><p class="side-kicker">ROOMS</p><h2>Room board</h2></div></div><div id="room-board" class="room-board"></div></section>
-        <section class="staff-card"><div class="staff-card-heading"><div><p class="side-kicker">SERVICE REQUESTS</p><h2>Request activity</h2></div><button id="assign-housekeeping" class="action-button" type="button">Assign to Housekeeping</button></div><div id="reception-requests" class="request-list"></div></section>
-      </section>
-
-      <section id="housekeeping-panel" class="role-panel" aria-label="Synthetic Housekeeping inbox" hidden>
-        <section class="intro"><p class="eyebrow">HOUSEKEEPING · SYNTHETIC INBOX</p><h1>Department requests</h1><p class="intro-copy">Only fictional housekeeping requests appear in this demo inbox.</p></section>
-        <section class="staff-card"><div class="staff-card-heading"><div><p class="side-kicker">HOUSEKEEPING QUEUE</p><h2>Assigned work</h2></div></div><div id="housekeeping-requests" class="request-list"></div><p id="housekeeping-empty" class="empty-state" hidden>No housekeeping requests yet. Submit a guest request, then assign it from Reception.</p></section>
-        <p class="workflow-note">Acknowledge → Start work → Resolve. Every transition runs through Roomay's canonical offline service-request rules and updates this local synthetic journey only.</p>
-      </section>
-
-      <footer class="page-footer">
-        <span>Roomay · Guest care, made clear</span>
-        <span>Fictional context · server-process memory · no Workpeg writes</span>
-      </footer>
+      <p class="session-note" role="note">Example property · Request updates are limited to this example session and are not sent to hotel staff.</p>
+      <footer class="page-footer"><span>ROOMAY · Thoughtful hotel care</span><span>The Linden House · Example property</span></footer>
     </main>
   </div>
 </body>

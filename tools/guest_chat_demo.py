@@ -1,7 +1,7 @@
-"""Loopback-only synthetic hotel journey backed by Roomay domain contracts.
+"""Loopback-only sample hotel journey backed by Roomay domain contracts.
 
-Run from the repository root with ``python -m tools.guest_chat_demo``. This server never contacts
-Workpeg, Vapi, YarnGPT, PostgreSQL, or any other remote service.
+This internal browser harness never contacts Workpeg, Vapi, YarnGPT, PostgreSQL,
+or any other remote service. It is not registered in the released Peg UI.
 """
 
 from dataclasses import dataclass, field, replace
@@ -31,13 +31,14 @@ from domain.service_requests import (
 
 LOOPBACK = "127.0.0.1"
 PORT_DEFAULT = 8765
-SESSION_COOKIE = "roomay_offline_demo"
+SESSION_COOKIE = "roomay_local_session"
 SESSION_TTL_SECONDS = 20 * 60
 MAX_SESSIONS = 32
 MAX_BODY_BYTES = 4096
 MAX_GUEST_TEXT_CHARS = 1000
 # Synthetic hotel calendar uses Nigeria's current fixed UTC+01:00 offset.
 DEMO_TIMEZONE = timezone(timedelta(hours=1), name="Africa/Lagos")
+SAMPLE_PROPERTY_NAME = "The Linden House"
 _ROOM_TOKEN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9-]{0,19}$")
 _ROOM_RESPONSE = re.compile(r"^(?:room\s+|rm\s+)?([A-Za-z0-9][A-Za-z0-9-]{0,19})$", re.I)
 
@@ -100,16 +101,34 @@ def _new_synthetic_scope():
     by_id[uid("in-house")].update(
         arrival=today.isoformat(), departure=(today + timedelta(days=1)).isoformat())
     by_id[uid("future")].update(
-        arrival=(today + timedelta(days=1)).isoformat(),
-        departure=(today + timedelta(days=3)).isoformat())
+        arrival=today.isoformat(),
+        departure=(today + timedelta(days=2)).isoformat())
     by_id[uid("walk-in")].update(
-        arrival=today.isoformat(), departure=(today + timedelta(days=2)).isoformat())
+        arrival=(today - timedelta(days=1)).isoformat(),
+        departure=today.isoformat())
+    names = {uid("Guest A"): "Tola Ibrahim", uid("Guest B"): "Chidi Nwosu",
+             uid("Guest C"): "Amara Okafor"}
+    for guest in hotel["guests"]:
+        guest["display_name"] = names[guest["entity_id"]]
+    room_type_names = {uid("standard"): "Classic Queen", uid("suite"): "Garden Suite"}
+    for room_type in hotel["room_types"]:
+        room_type["name"] = room_type_names[room_type["entity_id"]]
     checkin_at = now.isoformat()
     hotel["stays"][0]["checked_in_at"] = checkin_at
     hotel["stay_guests"][0]["joined_at"] = checkin_at
     hotel["room_blocks"][0].update(
         start=(today - timedelta(days=1)).isoformat(),
         end=(today + timedelta(days=1)).isoformat())
+    hotel["room_blocks"][0]["room_id"] = uid("203")
+    second_checkin = (now - timedelta(days=1)).isoformat()
+    hotel["stays"].append({
+        "entity_id": uid("stay-walk-in"), "reservation_id": uid("walk-in"),
+        "room_id": uid("202"), "status": "checked_in", "checked_in_at": second_checkin,
+    })
+    hotel["stay_guests"].append({
+        "entity_id": uid("occupant-walk-in"), "stay_id": uid("stay-walk-in"),
+        "guest_id": uid("Guest B"), "joined_at": second_checkin,
+    })
     staff_directory = [
         {"actor_id": uid("offline-demo-reception"), "hotel_id": hotel_id,
          "department": "reception", "roles": [], "active": True},
@@ -180,16 +199,15 @@ class GuestChatDemo:
             session = DemoSession(context, scope, str(uuid4()))
             session.messages.append({
                 "role": "assistant",
-                "text": ("Welcome to Roomay. Tell me what you need and I’ll help route it. "
-                         "This page uses a fictional guest context; no real stay is verified "
-                         "and no real hotel staff can see this demo."),
+                "text": ("Welcome to Roomay. Tell us what you need and we’ll help route it. "
+                         "This example stay is at The Linden House."),
             })
             self._sessions[session_id] = session
-            return session_id, self.journey_view(session_id)
+            return session_id, self.role_view(session_id)
 
     def resume_session(self, session_id):
         """Return the same process-memory journey after a browser reload."""
-        return self.journey_view(session_id)
+        return self.role_view(session_id)
 
     def _get_session(self, session_id):
         if not isinstance(session_id, str) or not session_id:
@@ -275,70 +293,107 @@ class GuestChatDemo:
                      if row["entity_id"] == request["room_id"]), "—")
         events = sorted((event for event in request.get("_demo_events", [])),
                         key=lambda event: event.get("sequence", 0))
-        return {"description": request["description"], "category": request["category"],
+        return {"request_id": request["request_id"],
+                "description": request["description"], "category": request["category"],
                 "department": request["department"], "urgency": request["urgency"],
                 "status": request["status"], "room": room,
                 "guest": guest if role == "reception" else None,
-                "demo_version": request["version"],
-                "demo_history": [event["to_status"] for event in events]}
+                "history": [event["to_status"] for event in events]}
 
-    def journey_view(self, session_id):
+    @staticmethod
+    def _safe_history(session, request_id):
+        return [
+            event["to_status"] for event in sorted(
+                (row for row in session.demo_audit if row["request_id"] == request_id),
+                key=lambda row: row["sequence"],
+            )
+        ]
+
+    def role_view(self, session_id):
+        """Return only the active workspace projection, never all roles at once."""
         session = self._get_session(session_id)
         with session.lock:
             hotel = session.scope.snapshot
             today = datetime.now(DEMO_TIMEZONE).date().isoformat()
-            projection = build_reception_snapshot(
-                hotel, session.demo_requests, today, session.demo_audit)
-            room = next(item for item in projection["rooms"] if item["number"] == "205")
             stay = next(item for item in hotel["stays"]
                         if item["entity_id"] == session.scope.stay_id)
             booking = next(item for item in hotel["reservations"]
                            if item["entity_id"] == stay["reservation_id"])
             guest = next(item for item in hotel["guests"]
                          if item["entity_id"] == session.context.guest_id)
-            guest_requests = []
-            department_requests = []
-            for request in session.demo_requests:
-                guest_projection = request_view(
-                    request,
-                    {"actor_id": session.context.actor_id, "hotel_id": session.context.hotel_id,
-                     "kind": "guest", "guest_id": session.context.guest_id},
-                    session.scope.staff_directory, snapshot=hotel,
-                )
-                if request["guest_id"] == session.context.guest_id:
-                    guest_requests.append(guest_projection)
-                if request["department"] == "housekeeping":
-                    staff_projection = request_view(
-                        request, self._staff_actor(session, "housekeeping"),
-                        session.scope.staff_directory,
-                    )
-                    department_requests.append(self._safe_request(
-                        staff_projection, hotel, "housekeeping"))
-            request_history = {request["request_id"]: [
-                deepcopy(event) for event in session.demo_audit
-                if event["request_id"] == request["request_id"]
-            ] for request in session.demo_requests}
-            safe_reception_requests = []
-            for item in session.demo_requests:
-                enriched = deepcopy(item)
-                enriched["_demo_events"] = request_history.get(item["request_id"], [])
-                safe_reception_requests.append(
-                    self._safe_request(enriched, hotel, "reception"))
-            return {
-                "demo": True, "notice": "SYNTHETIC DEMO — NO LIVE HOTEL REQUEST SUBMITTED",
-                "storage": "This journey is held in this local server process memory; it survives page reload, not a server restart.",
-                "role": session.active_role, "date": today,
-                "chat": self._view(session),
-                "guest": {"name": guest["display_name"], "room": "205",
-                          "stay_status": stay["status"], "reservation_status": booking["status"],
-                          "departure": booking["departure"],
-                          "requests": guest_requests},
-                "reception": {"metrics": projection["metrics"],
-                              "room": room,
-                              "rooms": projection["rooms"],
-                              "requests": safe_reception_requests},
-                "housekeeping": {"requests": department_requests},
-            }
+            room = next(item for item in hotel["rooms"]
+                        if item["entity_id"] == stay["room_id"])
+            room_type = next(item for item in hotel["room_types"]
+                             if item["entity_id"] == room["room_type_id"])
+            base = {"workspace": session.active_role, "property_name": SAMPLE_PROPERTY_NAME,
+                    "example_property": True}
+
+            if session.active_role == "guest":
+                actor = {"actor_id": session.context.actor_id,
+                         "hotel_id": session.context.hotel_id, "kind": "guest",
+                         "guest_id": session.context.guest_id}
+                requests = []
+                for request in session.demo_requests:
+                    if request["guest_id"] != session.context.guest_id:
+                        continue
+                    visible = request_view(request, actor, session.scope.staff_directory,
+                                           snapshot=hotel)
+                    requests.append({
+                        "description": visible["description"],
+                        "category": _category_label(visible["category"]),
+                        "department": _department_label(request["department"]),
+                        "urgency": visible["urgency"], "status": visible["status"],
+                        "created_at": visible["created_at"],
+                    })
+                return {**base, "guest": {
+                    "name": guest["display_name"], "room": room["number"],
+                    "room_type": room_type["name"], "check_in": booking["arrival"],
+                    "check_out": booking["departure"], "stay_status": stay["status"],
+                    "reservation_status": booking["status"],
+                }, "requests": requests, "chat": self._view(session),
+                    "reception_contact": {"available": False,
+                        "message": "Reception contact details have not been configured for this example property."}}
+
+            if session.active_role == "reception":
+                projection = build_reception_snapshot(
+                    hotel, session.demo_requests, today, session.demo_audit)
+                requests = []
+                actor = self._staff_actor(session, "reception")
+                for request in session.demo_requests:
+                    visible = request_view(request, actor, session.scope.staff_directory)
+                    enriched = deepcopy(request)
+                    enriched["_demo_events"] = [
+                        row for row in session.demo_audit
+                        if row["request_id"] == request["request_id"]
+                    ]
+                    requests.append(self._safe_request(
+                        {**enriched, **visible}, hotel, "reception"))
+                return {**base, "date": today, "metrics": projection["metrics"],
+                    "arrivals": projection["arrivals"], "departures": projection["departures"],
+                    "overdue_departures": projection["overdue_departures"],
+                    "in_house": projection["in_house"], "rooms": projection["rooms"],
+                    "requests": requests}
+
+            if session.active_role == "housekeeping":
+                actor = self._staff_actor(session, "housekeeping")
+                requests = []
+                for request in session.demo_requests:
+                    if (request["department"] != "housekeeping"
+                            or request["assigned_staff_id"] != actor["actor_id"]):
+                        continue
+                    visible = request_view(request, actor, session.scope.staff_directory)
+                    requests.append({
+                        "request_id": visible["request_id"],
+                        "description": visible["description"],
+                        "category": _category_label(visible["category"]),
+                        "urgency": visible["urgency"], "status": visible["status"],
+                        "room": next((row["number"] for row in hotel["rooms"]
+                                      if row["entity_id"] == visible["room_id"]), "—"),
+                        "activity": self._safe_history(session, request["request_id"]),
+                    })
+                return {**base, "requests": requests}
+
+            raise DemoError("workspace_unavailable", 403)
 
     def switch_role(self, session_id, role):
         if role not in {"guest", "reception", "housekeeping"}:
@@ -346,16 +401,23 @@ class GuestChatDemo:
         session = self._get_session(session_id)
         with session.lock:
             session.active_role = role
-        return self.journey_view(session_id)
+        return self.role_view(session_id)
 
-    def assign_latest_to_housekeeping(self, session_id):
+    def session_role(self, session_id):
+        return self._get_session(session_id).active_role
+
+    def assign_latest_to_housekeeping(self, session_id, request_id=None):
         session = self._get_session(session_id)
         with session.lock:
             if session.active_role != "reception":
                 raise DemoError("demo_reception_role_required", 403)
             if not session.demo_requests:
                 raise DemoError("no_demo_request", 409)
-            request = session.demo_requests[-1]
+            request = next((row for row in session.demo_requests
+                            if request_id is not None and row["request_id"] == request_id),
+                           session.demo_requests[-1] if request_id is None else None)
+            if request is None:
+                raise DemoError("request_unavailable", 404)
             if request["department"] != "housekeeping":
                 raise DemoError("demo_assignment_unavailable", 409)
             actor = self._staff_actor(session, "reception")
@@ -371,9 +433,9 @@ class GuestChatDemo:
                     self._advance_demo_transaction(session, result["plan"])
             except (AuthorizationError, ConflictError, RequestError, StopIteration):
                 raise DemoError("demo_assignment_unavailable", 409) from None
-            return self.journey_view(session_id)
+            return self.role_view(session_id)
 
-    def department_action(self, session_id, action):
+    def department_action(self, session_id, action, request_id=None):
         targets = {"acknowledge": "acknowledged", "start": "in_progress",
                    "resolve": "resolved"}
         if action not in targets:
@@ -384,7 +446,11 @@ class GuestChatDemo:
                 raise DemoError("demo_housekeeping_role_required", 403)
             if not session.demo_requests:
                 raise DemoError("no_demo_request", 409)
-            request = session.demo_requests[-1]
+            request = next((row for row in session.demo_requests
+                            if request_id is not None and row["request_id"] == request_id),
+                           session.demo_requests[-1] if request_id is None else None)
+            if request is None:
+                raise DemoError("request_unavailable", 404)
             if request["department"] != "housekeeping":
                 raise DemoError("demo_department_action_unavailable", 409)
             actor = self._staff_actor(session, "housekeeping")
@@ -397,7 +463,7 @@ class GuestChatDemo:
                     self._advance_demo_transaction(session, result["plan"])
             except (AuthorizationError, ConflictError, RequestError):
                 raise DemoError("demo_department_action_unavailable", 409) from None
-            return self.journey_view(session_id)
+            return self.role_view(session_id)
 
     @staticmethod
     def _append(session, role, text):
@@ -539,8 +605,8 @@ class GuestChatDemo:
                 if isinstance(request, dict) and isinstance(plan, dict):
                     self._advance_demo_transaction(session, plan)
                 department = _department_label(intent.get("department"))
-                reply = (f"The request now appears in the synthetic {department} demo workflow. "
-                         "It has not been sent to hotel staff or saved to Workpeg. No live hotel request was submitted, no ticket was created, and no real staff were notified.")
+                reply = (f"Your request is ready for {department} in this example session. "
+                         "It has not been sent to hotel staff.")
                 session.completed_revision = revision
                 session.completed_reply = reply
             else:
@@ -582,13 +648,13 @@ def _decode_cookie(value):
     return morsel.value if morsel else None
 
 
-def make_server(demo=None, port=PORT_DEFAULT):
+def make_server(demo=None, port=PORT_DEFAULT, *, enable_local_qa=False):
     demo = demo or GuestChatDemo()
     assets = Path(__file__).with_name("guest_chat_demo_assets")
     allowed_hosts = {"127.0.0.1", "localhost"}
 
     class Handler(BaseHTTPRequestHandler):
-        server_version = "RoomayOfflineDemo/1"
+        server_version = "RoomayLocalJourney/1"
         sys_version = ""
 
         def log_message(self, format, *args):
@@ -626,7 +692,7 @@ def make_server(demo=None, port=PORT_DEFAULT):
             self.send_header("X-Frame-Options", "DENY")
             for name, value in extra:
                 self.send_header(name, value)
-            if self.path == "/":
+            if content_type.startswith("text/html"):
                 self.send_header(
                     "Content-Security-Policy",
                     "default-src 'self'; script-src 'self'; style-src 'self'; "
@@ -639,12 +705,50 @@ def make_server(demo=None, port=PORT_DEFAULT):
         def do_GET(self):
             if not self._local_host():
                 return self._send(403, {"error": "loopback_only"})
+            if self.path == "/":
+                self.send_response(302)
+                self.send_header("Location", "/stay")
+                self.send_header("Cache-Control", "no-store")
+                self.end_headers()
+                return
+            pages = {
+                "/stay": ("index.html", "guest"),
+                "/staff/reception": ("reception.html", "reception"),
+                "/staff/housekeeping": ("housekeeping.html", "housekeeping"),
+            }
+            if self.path == "/__qa/":
+                if not enable_local_qa:
+                    return self._send(404, {"error": "not_found"})
+                pages[self.path] = ("qa.html", "qa")
+            page = pages.get(self.path)
+            if page is not None:
+                name, expected_role = page
+                session_id = _decode_cookie(self.headers.get("Cookie", ""))
+                if expected_role in {"reception", "housekeeping"}:
+                    try:
+                        if demo.session_role(session_id) != expected_role:
+                            return self._workspace_denied(403)
+                    except DemoError:
+                        return self._workspace_denied(401)
+                elif expected_role == "guest" and session_id:
+                    try:
+                        if demo.session_role(session_id) != "guest":
+                            return self._workspace_denied(403)
+                    except DemoError:
+                        # A stale guest cookie can safely start a fresh example session.
+                        pass
+                try:
+                    content = (assets / name).read_text(encoding="utf-8")
+                except OSError:
+                    return self._send(500, {"error": "workspace_unavailable"})
+                return self._send(200, content, content_type="text/html; charset=utf-8")
             paths = {
-                "/": ("index.html", "text/html; charset=utf-8"),
                 "/app.css": ("app.css", "text/css; charset=utf-8"),
                 "/voice_intake.js": ("voice_intake.js", "text/javascript; charset=utf-8"),
                 "/app.js": ("app.js", "text/javascript; charset=utf-8"),
             }
+            if enable_local_qa:
+                paths["/qa.js"] = ("qa.js", "text/javascript; charset=utf-8")
             asset = paths.get(self.path)
             if asset is None:
                 return self._send(404, {"error": "not_found"})
@@ -654,6 +758,20 @@ def make_server(demo=None, port=PORT_DEFAULT):
             except OSError:
                 return self._send(500, {"error": "demo_asset_unavailable"})
             self._send(200, content, content_type=content_type)
+
+        def _workspace_denied(self, status):
+            message = ("This workspace is not available for this session. "
+                       "Use the correct signed-in hotel workspace.")
+            content = ("<!doctype html><html lang=\"en\"><meta charset=\"utf-8\">"
+                       "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">"
+                       "<title>Workspace unavailable | ROOMAY</title>"
+                       "<link rel=\"stylesheet\" href=\"/app.css\"><body><main class=\"page-shell\">"
+                       "<header class=\"topbar\"><a class=\"brand\" href=\"/stay\">"
+                       "<span class=\"brand-mark\" aria-hidden=\"true\">R</span>"
+                       "<span class=\"brand-name\">roomay<span class=\"brand-period\">.</span></span>"
+                       "</a></header><section class=\"empty-panel\" role=\"alert\"><h1>Workspace unavailable</h1>"
+                       f"<p>{message}</p></section></main></body></html>")
+            self._send(status, content, content_type="text/html; charset=utf-8")
 
         def _json_body(self):
             if self.headers.get("Content-Type", "").split(";", 1)[0].strip().lower() != "application/json":
@@ -678,8 +796,11 @@ def make_server(demo=None, port=PORT_DEFAULT):
         def do_POST(self):
             if not self._local_host() or not self._same_origin():
                 return self._send(403, {"error": "same_origin_required"})
-            if self.path not in ("/api/session", "/api/message", "/api/confirm", "/api/cancel",
-                                 "/api/role", "/api/assign", "/api/staff-action"):
+            allowed_api = {"/api/session", "/api/message", "/api/confirm", "/api/cancel",
+                           "/api/assign", "/api/staff-action"}
+            if enable_local_qa:
+                allowed_api.add("/api/qa/select")
+            if self.path not in allowed_api:
                 return self._send(404, {"error": "not_found"})
             try:
                 body = self._json_body()
@@ -693,10 +814,25 @@ def make_server(demo=None, port=PORT_DEFAULT):
                         view = None
                     if view is None:
                         session_id, view = demo.create_session()
-                        cookie = (f"{SESSION_COOKIE}={session_id}; Path=/; Max-Age={SESSION_TTL_SECONDS}; "
-                                  "HttpOnly; SameSite=Strict")
+                        cookie = self._session_cookie(session_id)
                         return self._send(200, view, extra=(("Set-Cookie", cookie),))
                     return self._send(200, view)
+
+                if self.path == "/api/qa/select":
+                    if set(body) != {"role"} or body["role"] not in {"guest", "reception", "housekeeping"}:
+                        raise DemoError("invalid_workspace")
+                    session_id = _decode_cookie(self.headers.get("Cookie", ""))
+                    set_cookie = None
+                    try:
+                        demo.session_role(session_id)
+                    except DemoError:
+                        session_id, _ = demo.create_session()
+                        set_cookie = self._session_cookie(session_id)
+                    demo.switch_role(session_id, body["role"])
+                    target = {"guest": "/stay", "reception": "/staff/reception",
+                              "housekeeping": "/staff/housekeeping"}[body["role"]]
+                    extra = (("Set-Cookie", set_cookie),) if set_cookie else ()
+                    return self._send(200, {"path": target}, extra=extra)
 
                 session_id = _decode_cookie(self.headers.get("Cookie", ""))
                 if session_id is None:
@@ -705,29 +841,26 @@ def make_server(demo=None, port=PORT_DEFAULT):
                     if set(body) != {"text"}:
                         raise DemoError("invalid_request")
                     demo.send_message(session_id, body["text"])
-                    view = demo.journey_view(session_id)
+                    view = demo.role_view(session_id)
                 elif self.path == "/api/confirm":
                     if set(body) != {"revision"}:
                         raise DemoError("invalid_request")
                     demo.confirm(session_id, body["revision"])
-                    view = demo.journey_view(session_id)
+                    view = demo.role_view(session_id)
                 elif self.path == "/api/cancel":
                     if set(body) != {"revision"}:
                         raise DemoError("invalid_request")
                     demo.cancel(session_id, body["revision"])
-                    view = demo.journey_view(session_id)
-                elif self.path == "/api/role":
-                    if set(body) != {"role"}:
-                        raise DemoError("invalid_request")
-                    view = demo.switch_role(session_id, body["role"])
+                    view = demo.role_view(session_id)
                 elif self.path == "/api/assign":
-                    if body:
+                    if set(body) != {"request_id"} or not isinstance(body["request_id"], str):
                         raise DemoError("invalid_request")
-                    view = demo.assign_latest_to_housekeeping(session_id)
+                    view = demo.assign_latest_to_housekeeping(session_id, body["request_id"])
                 else:
-                    if set(body) != {"action"}:
+                    if (set(body) != {"action", "request_id"}
+                            or not isinstance(body["request_id"], str)):
                         raise DemoError("invalid_request")
-                    view = demo.department_action(session_id, body["action"])
+                    view = demo.department_action(session_id, body["action"], body["request_id"])
                 self._send(200, view)
             except DemoError as error:
                 self._send(error.status, {"error": error.code})
@@ -735,18 +868,28 @@ def make_server(demo=None, port=PORT_DEFAULT):
                 # Do not return exception text; it could contain private state.
                 self._send(500, {"error": "demo_temporarily_unavailable"})
 
+        @staticmethod
+        def _session_cookie(session_id):
+            return (f"{SESSION_COOKIE}={session_id}; Path=/; Max-Age={SESSION_TTL_SECONDS}; "
+                    "HttpOnly; SameSite=Strict")
+
     server = ThreadingHTTPServer((LOOPBACK, port), Handler)
     server.daemon_threads = True
+    server.enable_local_qa = enable_local_qa
     return server
 
 
 def main(argv=None):
-    parser = argparse.ArgumentParser(description="Run the synthetic Roomay hotel journey on loopback.")
+    parser = argparse.ArgumentParser(description="Run the local Roomay example journey on loopback.")
     parser.add_argument("--port", type=int, default=PORT_DEFAULT)
+    parser.add_argument("--enable-local-qa", action="store_true",
+                        help="Enable the loopback-only role selection page for internal acceptance testing.")
     args = parser.parse_args(argv)
-    server = make_server(port=args.port)
-    print(f"Roomay offline guest chat listening at http://{LOOPBACK}:{server.server_port}/")
-    print("Synthetic data only; actions stay in server memory and never reach a real hotel system. Press Ctrl+C to stop.")
+    server = make_server(port=args.port, enable_local_qa=args.enable_local_qa)
+    print(f"Roomay local example journey listening at http://{LOOPBACK}:{server.server_port}/stay")
+    if args.enable_local_qa:
+        print(f"Internal test role selection: http://{LOOPBACK}:{server.server_port}/__qa/")
+    print("Example records and request states are process-local; no hotel systems are contacted. Press Ctrl+C to stop.")
     try:
         server.serve_forever()
     except KeyboardInterrupt:
