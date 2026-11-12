@@ -1,33 +1,50 @@
-# WOR-62 — PR #37 request/audit source-of-truth decision
+# WOR-62 — Approved request/audit source of truth (Option A)
 
-**Status: decision proposed, NOT approved.** Owner approval and Workpeg authorization evidence are required before enabling a public guest flow or merging PR #37 as a functioning integration. This document records the two possible **mutually exclusive** writer strategies; it does not claim one is implemented end to end.
+**Architecture decision: APPROVED by the project owner on 12 November 2026.**
+**Implementation feasibility: BLOCKED pending Workpeg's supported external invocation/access contract.**
+**PR #37 disposition: eligible for an *inactive infrastructure-only* merge, not a live integration release.**
 
-## Observed facts (12 November 2026)
+## Decision
 
-1. The existing Workpeg Reception Peg displays its **Workpeg-owned** service-request and audit tables with owner-only `700` permissions. Its staff permissions and live write/readback are not verified.
-2. Draft PR #37 has transactional request/audit writes **in its own PostgreSQL database**, plus a separate FastAPI guest/staff view. Its default Workpeg hotel snapshot reader is deliberately unavailable and returns sanitized `503 hotel_records_unavailable`; the old `WORKPEG_PK` external Tables reader has been removed.
-3. Workpeg directly clarified that a developer `WORKPEG_PK` is for developer/publishing work, **not** a standalone server Tables credential. In-Peg UI reads use an authenticated user session; an invoked Function receives a **short-lived, invocation-scoped** token and business context. No supported authenticated external guest/Vapi → Function invocation contract has been supplied. OIDC identifies staff; it is **not** a Tables credential.
-4. PostgreSQL 16 CI can validate local SQL transactions, audit ordering, row locks and concurrent retries. It **cannot** establish Workpeg authorization, an actual receptionist queue or shared hotel-data authority.
+**Workpeg Tables are ROOMAY's canonical operational store for hotel service requests and their audit history.** Reception and department interfaces must operate on the **same canonical request IDs, statuses and committed audit events**. A guest request is not successfully delivered to hotel staff merely because a standalone FastAPI service has inserted rows in its own database.
 
-## Decision required from owner + vendor
+The owner selected Option A rather than PostgreSQL as the hotel's request source of truth. The selected design **does not assert** that Workpeg currently exposes a supported external authenticated writer, or that request/audit writes are atomic. Those are explicit engineering/vendor acceptance gates.
 
-| Choice | Authoritative request/audit writer | Staff experience | What must be proven before enabling |
-| --- | --- | --- | --- |
-| **A — Workpeg canonical (preferred if vendor supports it)** | Exactly one authorized Workpeg Function/row-write path writes *both* request and audit with verified guest/stay scope | Existing Workpeg Reception and department views read the same committed rows | Vendor-approved external invocation, actor/business signature, token expiry/replay control, least privilege, atomic/reconcilable request+audit, pagination, fresh readback, guest own-status, cross-role denial |
-| **B — PostgreSQL canonical (only with approved staff projection)** | Exactly one FastAPI/PostgreSQL writer with committed audit, retries, durable operation identity | A **securely deployed, authenticated** FastAPI staff inbox replaces the operational Workpeg request list, **or** a vendor-approved read-only projection surfaces PostgreSQL in Workpeg | Workpeg hotel snapshot read authorization (or an owner-approved independent canonical hotel/stay authority), real registered OIDC callback, authenticated external staff view/role checks, guest confirmation + durable audit, explicit history/migration policy, no mismatched Workpeg queue |
+## Intended architecture and responsibilities
 
-Do **not** use both as independently authoritative operational writers, or silently copy eventually consistent records and call them one live queue. A post-save asynchronous hook alone does not prove atomic request/audit or delivery. No platform hook creates an external caller authorization entrypoint by itself.
+1. **Hotel/stay identity:** use a Workpeg-authorized, business/hotel-scoped source. A verified active stay and registered occupant—not a room number, QR string, caller ID or AI output—must authorize guest-specific service requests.
+2. **Single operational writer:** only a Workpeg-approved, authenticated, least-privilege path may commit a canonical service request and linked audit event. It must validate actor, business, hotel, stay, department and consent; handle idempotency and retry ambiguity without duplicate tickets. **No direct external `WORKPEG_PK` Tables call is authorized.** A Workpeg Function's invocation-scoped `context["token"]` must never be exported to or reused by an external server.
+3. **Staff inbox:** the existing Workpeg Reception and department interfaces read the authoritative Workpeg request/audit tables. An unconfirmed guest request cannot be shown as `sent` or `received by staff`. Staff transitions must be authorized, preserve department scope and commit/read back the same record and audit ledger.
+4. **Guest status:** the guest sees a projection of only their current or permissible historical stay requests via a supported authenticated read/bridge, with true committed status on a separate refresh. A Workpeg-side change cannot be inferred from a PostgreSQL-only change.
+5. **Uncertain writes:** the approved integration must define what happens if one of request/audit commits, notifications or readbacks fails. A post-save hook alone does not prove atomicity or delivery. Until true transaction/serialization or a durable reconciliation protocol is verified, fail closed and require review rather than reporting false success.
+6. **Least privilege:** existing owner-only `700` Workpeg table permissions remain unchanged until actual authorized staff roles/ACLs are approved and tested. We do not widen permissions merely to make the demo pass.
 
-**Recommended decision sequence:** request Workpeg's formal supported external invocation/bridge contract; if approved, review choice A and implement its actual reconciliation. If unavailable, ask the owner whether choice B and replacing/bridging the native receptionist queue is acceptable for this hackathon, including any Workpeg-native requirements. Record explicit owner acceptance in WOR-62 before changing PR #37's persistence architecture.
+## Retained PostgreSQL code in PR #37
 
-## Minimal end-to-end acceptance (whichever option is approved)
+The FastAPI/PostgreSQL/Alembic implementation is preserved in the repository **only as a dormant, isolated engineering prototype**. It can verify relational transactions, idempotency, audit ordering and staff/guest authorization contracts in local tests. It is **not ROOMAY's approved operational request writer**; no dual-write, reverse proxy, synchronization or automatically accepted staff projection exists.
 
-A synthetic **verified active stay** and approved guest session (not room number/ANI/QR alone) → explicit request confirmation → one authorized committed request + audit event → **separate authenticated** receptionist session sees the same request → correct department acknowledges/resolves → original guest sees the status after independent reload → replay/duplicate, wrong-business, wrong-department, expired/revoked stay, room transfer, and partial-write denial all pass.
+The standalone `backend.main` ASGI entrypoint now refuses startup by default. A deliberate **`ROOMAY_ENABLE_STANDALONE_PROTOTYPE=local-only`** setting is required merely to run it in an isolated developer environment; this flag **is not production authorization**. Even when set, the default hotel snapshot adapter fails with sanitized `503 hotel_records_unavailable`. No supported public Workpeg Function invocation, OIDC registration, hotel read, staff write, or real guest notification is implied. Production deployment/public ingress is forbidden until a separate reviewed integration gate is approved.
 
-For either option, trace one canonical `request_id`, `operation_id`, `business_id`, `hotel_id`, `stay_id`, authorization scope, commit/audit sequence, readback and timestamp in a **sanitized** verification record. Store no bearer secrets, real guest personal data, images of IDs or provider credentials in GitHub/Linear logs.
+The source tree's existing FastAPI request-confirm endpoints can still write to PostgreSQL when directly exercised with injected synthetic hotel-reader fixtures in tests. Those writes remain **non-authoritative test records** and may never be presented as delivered to the real Workpeg receptionist.
 
-## Current disposition
+**A later move to PostgreSQL as the operational request store (Option B) would require a new explicit owner decision**, plus a secure staff-facing replacement/projection, history reconciliation, real OIDC and guaranteed removal of competing Workpeg writers. Option B is not approved as a silent fallback to a Workpeg vendor refusal.
 
-- **PR #37 stays draft.** PostgreSQL is an isolated, offline-tested prototype: no externally authorized hotel snapshot reader, no real Workpeg staff request queue, no verified OIDC client registration or public deployment. No fake 200/success state should replace sanitized 503 for unavailable integration.
-- WOR-61 and WOR-62 remain In Progress until the owner approves one strategy and real Workpeg supported invocation/OIDC is demonstrated. WOR-65 starts only after that choice is actionable.
-- No Workpeg table permissions, data, Functions, public endpoints or production secrets may be changed as an implied side effect of merging documentation or running PostgreSQL integration tests.
+## Vendor confirmation and live acceptance outstanding
+
+The owner has already received a Workpeg clarification that developer `WORKPEG_PK` is **not** a general standalone Tables credential. The supported authenticated *external* guest/Vapi → Function or Tables invocation method has **not** been established. Workpeg OIDC requires official client registration and proves identity, not Tables permission. These are blocking dependencies, not documentation-only tasks.
+
+Before any live activation, independently verify in an owner-authorized test business:
+
+- One guest attached to a verified checked-in stay explicitly confirms a service request.
+- Exactly one canonical **Workpeg request and linked committed audit** are produced; a second confirmation/retry cannot duplicate the operation.
+- A separately authenticated Reception user sees the request, a correctly authorized department user updates it, and the guest sees the same status on an independent reload.
+- Wrong business/hotel/guest/department, expired session, revoked stay, room move, checkout, audit failure and unavailable Workpeg reject safely without leaking guest data or claiming delivery.
+- Capture sanitized request/operation IDs and readback evidence; no credentials or real guest PII in PR, Linear or test logs.
+
+**While blocked:** existing staff can take requests manually using an *actually authorized Workpeg interface* only when its permissions, persistence and audit have been validated. Do not claim the external guest portal or voice tool submitted a ticket.
+
+## Merge, release and issue-state separation
+
+After GitHub CI and review gates are green, the project owner authorizes **merging PR #37 into protected `main` as inactive infrastructure**, with no backend deployment, OIDC registration, Workpeg table edit, permissions expansion, public guest operation or auto-migration. No service is started by GitHub CI or the compiled Workpeg UI.
+
+**WOR-61, WOR-62 and WOR-65 remain In Progress/blocked until the hosted integration is verified.** WOR-15's live guest safety acceptance is likewise incomplete. PR merge is a source-control milestone, *not* a declaration that a real guest request can reach staff.
