@@ -309,3 +309,20 @@ body.remi-modal-open { overflow: hidden; }
 @media (prefers-reduced-motion: reduce) {
   .remi-dialog-overlay { backdrop-filter: none; }
 }
+
+/* Speech dictation: one compact mic control; any remote-provider consent is
+   presented only on the guest's microphone click, never on page load. */
+.voice-tools-compact { padding: 7px 0 10px; border-top: 1px solid #f0f2ef; align-items: center; }
+.voice-icon-button { display: inline-grid; place-items: center; width: 39px; height: 39px; min-height: 39px; padding: 0; border: 1px solid #c8d9cc; border-radius: 12px; background: #f5faf6; color: var(--forest); }
+.voice-icon-button:hover:not(:disabled) { background: var(--sage); }
+.voice-icon-button[aria-pressed="true"] { color: #fff; border-color: var(--forest); background: var(--forest); box-shadow: 0 0 0 3px #d5e7da; }
+.voice-icon-button svg { pointer-events: none; }
+.voice-consent-overlay { position: fixed; inset: 0; z-index: 130; display: grid; place-items: center; padding: 15px; background: rgba(11, 31, 21, .52); backdrop-filter: blur(5px); }
+.voice-consent-card { width: min(390px, 100%); padding: 23px; border: 1px solid #d5e4d9; border-radius: 19px; background: #fbfdfa; box-shadow: 0 20px 70px rgba(20, 55, 36, .25); }
+.voice-consent-card h3 { margin: 0 0 9px; color: var(--forest-deep); font-size: 19px; }
+.voice-consent-card p { color: #516459; font-size: 12px; line-height: 1.65; }
+.voice-consent-actions { display: flex; justify-content: flex-end; gap: 9px; flex-wrap: wrap; margin-top: 20px; }
+.voice-consent-actions button { min-height: 41px; padding: 0 13px; border-radius: 9px; font-size: 11px; font-weight: 750; }
+.voice-consent-cancel { border: 1px solid #cfdbd0; background: white; color: var(--forest); }
+.voice-consent-allow { border: 1px solid var(--forest); background: var(--forest); color: #fff; }
+@media (prefers-reduced-motion: reduce) { .voice-consent-overlay { backdrop-filter: none; } }
