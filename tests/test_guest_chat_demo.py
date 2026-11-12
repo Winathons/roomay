@@ -112,21 +112,62 @@ class GuestChatDemoFlowTests(unittest.TestCase):
         self.assertNotIn("request_id", json.dumps(guest))
         self.assertNotIn("guest_id", json.dumps(guest))
 
-    def test_missing_room_clarification_then_room_reply_prepares_only_after_confirm(self):
+    def test_missing_room_uses_trusted_scope_and_prepares_only_after_confirm(self):
         first = self.send("The AC is not cooling.")
+        self.assertEqual(first["state"], "awaiting_confirmation")
+        self.assertIsNotNone(first["pending"])
+        self.assertNotIn("Which room", first["messages"][-1]["text"])
+        self.assertIn("not be sent or saved", first["messages"][-1]["text"])
+        confirmed = self.demo.confirm(self.session_id, first["pending"]["revision"])
+        request = self.demo._sessions[self.session_id].scope.existing_requests[0]
+        self.assertEqual(request["room_id"], uid("205"))
+        self.assertFalse(confirmed["submitted"])
+
+    def test_my_room_towels_and_ac_requests_use_verified_room_205(self):
+        for text in (
+            "Please bring two extra towels to my room.",
+            "Please send towels.",
+            "The AC is broken.",
+        ):
+            with self.subTest(text=text):
+                demo = GuestChatDemo()
+                session_id, _ = demo.create_session()
+                result = demo.send_message(session_id, text)
+                self.assertEqual(result["state"], "awaiting_confirmation")
+                self.assertNotIn("Which room", result["messages"][-1]["text"])
+                demo.confirm(session_id, result["pending"]["revision"])
+                self.assertEqual(
+                    demo._sessions[session_id].scope.existing_requests[0]["room_id"],
+                    uid("205"),
+                )
+
+    def test_room_120_claim_is_rejected_without_revealing_room_205(self):
+        first = self.send("Please bring two extra towels to my room.")
+        self.assertEqual(first["state"], "awaiting_confirmation")
+        mismatch = self.send("YES I am in room 120.")
+        self.assertEqual(mismatch["state"], "handoff")
+        self.assertIsNone(mismatch["pending"])
+        self.assertIn("doesn't match the stay I can verify", mismatch["messages"][-1]["text"])
+        self.assertIn("contact Reception", mismatch["messages"][-1]["text"])
+        self.assertNotIn("205", mismatch["messages"][-1]["text"])
+        self.assertNotIn("120", mismatch["messages"][-1]["text"])
+        self.assertFalse(self.demo._sessions[self.session_id].scope.existing_requests)
+
+    def test_answer_to_problem_clarification_keeps_context_and_does_not_repeat(self):
+        first = self.send("Help")
         self.assertEqual(first["state"], "needs_clarification")
-        self.assertIsNone(first["pending"])
-        self.assertIn("Which room", first["messages"][-1]["text"])
-        second = self.send("205")
+        self.assertIn("describe what is happening", first["messages"][-1]["text"])
+        second = self.send("The AC is broken")
         self.assertEqual(second["state"], "awaiting_confirmation")
-        self.assertIn("room 205", second["pending"]["summary"]["description"].lower())
-        self.assertFalse(second["submitted"])
+        self.assertEqual(second["pending"]["summary"]["department"], "Maintenance")
+        self.assertNotIn("Which room", second["messages"][-1]["text"])
+        self.assertNotIn("describe what is happening", second["messages"][-1]["text"])
 
     def test_guest_supplied_wrong_room_is_not_authentication(self):
         result = self.send("Please bring towels to room 204.")
         self.assertEqual(result["state"], "handoff")
         self.assertIsNone(result["pending"])
-        self.assertIn("couldn't verify an active stay", result["messages"][-1]["text"])
+        self.assertIn("doesn't match the stay I can verify", result["messages"][-1]["text"])
         self.assertFalse(self.demo._sessions[self.session_id].scope.existing_requests)
 
     def test_room_enquiry_hands_off_to_reception_without_booking_claim(self):

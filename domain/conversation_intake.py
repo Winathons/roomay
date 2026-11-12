@@ -24,7 +24,12 @@ _ROOM_NUMBER = re.compile(r"^[A-Za-z0-9][A-Za-z0-9-]{0,19}$")
 _ROOM_IN_TEXT = re.compile(
     r"\b(?:room|rm)(?:\s+(?:number|no\.?))?\s*#?\s*([A-Za-z0-9][A-Za-z0-9-]{0,19})\b", re.I,
 )
-_ROOM_FILLER = {"a", "and", "dey", "has", "have", "is", "the", "to"}
+_ROOM_FILLER = {
+    "a", "about", "am", "and", "are", "as", "at", "because", "by",
+    "dey", "for", "from", "has", "have", "here", "i", "in", "is",
+    "it", "my", "needs", "no", "number", "of", "on", "our", "please",
+    "the", "there", "to", "us", "was", "we", "were", "will", "you", "your",
+}
 _EMERGENCY_TERMS = (
     "emergency", "fire", "smoke", "medical emergency", "someone is hurt",
     "someone is injured", "electric shock", "sparking", "gas smell",
@@ -68,9 +73,15 @@ def _clean_text(value):
     return text
 
 
+def _room_numbers(text):
+    # Preserve alphanumeric room labels, but filter common words that follow
+    # ordinary phrases such as "to my room please" or "the room is ready".
+    return [value for value in _ROOM_IN_TEXT.findall(text)
+            if value.lower() not in _ROOM_FILLER]
+
+
 def _room_number(text):
-    found = [value for value in _ROOM_IN_TEXT.findall(text)
-             if value.lower() not in _ROOM_FILLER]
+    found = _room_numbers(text)
     if len(found) == 1:
         return found[0]
     return None
@@ -242,8 +253,13 @@ def _verify_guest_scope(access_context, scope, intent):
     )
     rooms = [room for room in scope.snapshot["rooms"]
              if room["entity_id"] == scope.room_id]
-    if len(rooms) != 1 or rooms[0]["number"] != intent["room_number"]:
+    if len(rooms) != 1:
         raise AccessDenied("guest_scope_denied")
+    authoritative_room_number = rooms[0]["number"]
+    if (intent["room_number"] is not None
+            and authoritative_room_number != intent["room_number"]):
+        raise AccessDenied("guest_room_mismatch")
+    return authoritative_room_number
 
 
 def handle_conversation_turn(
@@ -294,22 +310,35 @@ def handle_conversation_turn(
             "I can connect you with Reception for room information. No availability or booking has been confirmed.",
             intent, "room_enquiry_handoff",
         )
-    if intent["room_number"] is None:
-        return _result(
-            "needs_clarification", "Which room are you contacting us about?",
-            intent=intent, clarification="room_number",
+    try:
+        authoritative_room_number = _verify_guest_scope(access_context, scope, intent)
+    except AccessDenied as exc:
+        if exc.code == "guest_room_mismatch":
+            return _safe_handoff(
+                "That room doesn't match the stay I can verify. Please contact Reception for assistance.",
+                intent, "guest_room_mismatch",
+            )
+        return _safe_handoff(
+            "I couldn't verify an active stay for this request. Please contact Reception.",
+            intent, "stay_verification_required",
         )
+    except (KeyError, TypeError, AttributeError):
+        return _safe_handoff(
+            "I couldn't verify an active stay for this request. Please contact Reception.",
+            intent, "stay_verification_required",
+        )
+    if len(_room_numbers(original)) > 1:
+        return _safe_handoff(
+            "I couldn't match that room reference to your verified stay. Please contact Reception for assistance.",
+            intent, "ambiguous_room_reference",
+        )
+    # The room ID and number come only from the trusted active stay. A spoken
+    # or typed room number is a consistency check, never authentication.
+    intent = {**intent, "room_number": authoritative_room_number}
     if intent["intent"] == "unknown" and len(original.split()) <= 3:
         return _result(
             "needs_clarification", "Could you briefly describe what is happening?",
             intent=intent, clarification="problem_description",
-        )
-    try:
-        _verify_guest_scope(access_context, scope, intent)
-    except (AccessDenied, KeyError, TypeError, AttributeError):
-        return _safe_handoff(
-            "I couldn't verify an active stay for this request. Please contact Reception.",
-            intent, "stay_verification_required",
         )
     if type(confirmed) is not bool:
         return _result("unavailable", "Please confirm the request with Reception.",

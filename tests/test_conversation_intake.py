@@ -54,6 +54,8 @@ class ConversationIntakeTests(unittest.TestCase):
                 self.assertEqual(intent["room_number"], "205")
         self.assertEqual(classify_text("AC is broken in room A-201")["room_number"], "A-201")
         self.assertIsNone(classify_text("The room is too hot")["room_number"])
+        self.assertIsNone(classify_text("Please send towels to my room please")["room_number"])
+        self.assertIsNone(classify_text("Please send towels to my room and my room is ready")["room_number"])
 
     def test_room_enquiry_hands_off_to_reception_without_availability_claim(self):
         result = self.turn("Can I ask about room availability?")
@@ -62,20 +64,56 @@ class ConversationIntakeTests(unittest.TestCase):
         self.assertIn("No availability or booking has been confirmed", result["message"])
         self.assertNotIn("request_plan", result["internal"])
 
-    def test_missing_or_ambiguous_room_number_requires_clarification(self):
+    def test_verified_stay_supplies_omitted_room_but_ambiguous_room_refs_handoff(self):
         missing = self.turn("The AC is not cooling.")
         ambiguous = self.turn("The AC in room 205 and room 206 is not cooling.")
-        self.assertEqual(missing["state"], "needs_clarification")
-        self.assertEqual(missing["clarification"], "room_number")
-        self.assertEqual(ambiguous["state"], "needs_clarification")
-        self.assertEqual(ambiguous["clarification"], "room_number")
+        self.assertEqual(missing["state"], "awaiting_confirmation")
+        self.assertEqual(missing["internal"]["intent"]["room_number"], "205")
+        self.assertNotIn("Which room", missing["message"])
+        self.assertEqual(ambiguous["state"], "handoff")
+        self.assertEqual(ambiguous["internal"]["failure_code"], "ambiguous_room_reference")
+        self.assertIn("contact Reception", ambiguous["message"])
         self.assertNotIn("request_plan", missing["internal"])
+
+    def test_explicit_wrong_room_has_safe_mismatch_handoff(self):
+        result = self.turn("Please bring two extra towels to room 120.")
+        self.assertEqual(result["state"], "handoff")
+        self.assertEqual(result["internal"]["failure_code"], "guest_room_mismatch")
+        self.assertIn("doesn't match the stay I can verify", result["message"])
+        self.assertIn("contact Reception", result["message"])
+        self.assertNotIn("205", result["message"])
+        self.assertNotIn("120", result["message"])
+        self.assertNotIn("request_plan", result["internal"])
+
+    def test_my_room_request_uses_only_the_trusted_stay_room(self):
+        result = self.turn("Please bring two extra towels to my room.")
+        self.assertEqual(result["state"], "awaiting_confirmation")
+        self.assertEqual(result["internal"]["intent"]["room_number"], "205")
+        prepared = self.turn("Please bring two extra towels to my room.", confirmed=True)
+        request = prepared["internal"]["request_plan"]["target_request"]
+        self.assertEqual(request["room_id"], self.scope.room_id)
+
+    def test_voice_transcript_text_uses_same_trusted_room_validation(self):
+        transcript = "Please bring two extra towels to my room."
+        result = self.turn(transcript, channel="vapi")
+        self.assertEqual(result["state"], "awaiting_confirmation")
+        self.assertEqual(result["internal"]["intent"]["room_number"], "205")
+        wrong = self.turn("Yes, I am in room 120.", channel="vapi")
+        self.assertEqual(wrong["state"], "handoff")
+        self.assertEqual(wrong["internal"]["failure_code"], "guest_room_mismatch")
 
     def test_unverified_guest_identity_hands_off_without_disclosing_stay(self):
         result = self.turn("Please bring towels to room 205.", access_context=None)
         self.assertEqual(result["state"], "handoff")
         self.assertIn("couldn't verify an active stay", result["message"])
         self.assertNotIn(self.guest_id, str(result))
+        self.assertNotIn("request_plan", result["internal"])
+
+    def test_omitted_room_never_uses_trusted_scope_when_guest_is_unverified(self):
+        result = self.turn("Please bring towels to my room.", access_context=None)
+        self.assertEqual(result["state"], "handoff")
+        self.assertEqual(result["internal"]["failure_code"], "stay_verification_required")
+        self.assertIn("couldn't verify an active stay", result["message"])
         self.assertNotIn("request_plan", result["internal"])
 
     def test_wrong_room_stay_or_business_fails_closed(self):
