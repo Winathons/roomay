@@ -275,7 +275,9 @@
         input.value = text.trim().slice(0, 1000);
         input.dispatchEvent(new Event("input", { bubbles: true }));
         setFeedback("Transcript added to the editable request field. Review it, then send to Roomay’s validated intake. No request has been submitted yet.");
-        input.focus();
+        // Do not move keyboard focus behind the open modal; the guest can
+        // close/end the call before editing the imported transcript.
+        if (document.getElementById("remi-call-overlay")?.hidden) input.focus();
       },
     });
   }
