@@ -9,6 +9,15 @@ let loadHandler;
 globalThis.addEventListener = (event, handler) => { if (event === 'load') loadHandler = handler; };
 globalThis.fetch = () => { throw new Error('NETWORK FORBIDDEN IN RECEPTION TEST'); };
 const output = process.argv[2];
+const releaseHtml = fs.readFileSync(path.join(output, 'index.html'), 'utf8');
+const compiledApp = fs.readFileSync(path.join(output, 'app.js'), 'utf8');
+const compiledIcons = fs.readFileSync(path.join(output, 'icons.css'), 'utf8');
+assert.match(releaseHtml, /fonts\.googleapis\.com\/css2\?family=Plus\+Jakarta\+Sans/);
+assert.match(compiledApp, /--color-brand-primary/);
+assert.match(compiledApp, /--font-base/);
+for (const icon of ['layout-dashboard', 'bed', 'clipboard-list', 'eye', 'refresh']) {
+  assert.match(compiledIcons, new RegExp(`\\.ti-${icon}(?:\\s|\\{)`));
+}
 vm.runInThisContext(fs.readFileSync(path.join(output, 'workpeg-runtime.js'), 'utf8'));
 let registeredRoutes;
 Workpeg.router = routes => { registeredRoutes = routes; };
@@ -65,12 +74,67 @@ const visit = (node, predicate, found = []) => {
   return found;
 };
 const tree = app.build();
-const detailButtons = visit(tree, node => node.type === 'button' && node.props.label === 'View details');
+const todayMarkup = JSON.stringify(tree);
+assert.match(todayMarkup, /Today at a glance/);
+for (const label of [
+  'In house', 'Arrivals', 'Scheduled departures today', 'Overdue active stays',
+  'Ready for check-in', 'Needs cleaning', 'Maintenance-blocked rooms',
+  'Open requests',
+]) assert.match(todayMarkup, new RegExp(label));
+assert.match(todayMarkup, /min-height/);
+assert.match(todayMarkup, /min-width/);
+assert.match(todayMarkup, /480px/);
+assert.match(todayMarkup, /max-width/);
+assert.match(todayMarkup, /outline-gray/);
+assert.doesNotMatch(todayMarkup, /outline-color/);
+assert.match(todayMarkup, /font-size/);
+assert.match(todayMarkup, /38px/);
+const navButtons = visit(tree, node => node.type === 'button' &&
+  ['Today', 'Rooms & availability', 'Service requests'].includes(node.props.label));
+assert.equal(navButtons.length, 3);
+assert.deepEqual(navButtons.map(node => node.props.icon),
+  ['layout-dashboard', 'bed', 'clipboard-list']);
+assert.equal(navButtons[0].props.variant, 'primary', 'current section retains the active contrast state');
+for (const inactive of navButtons.slice(1)) {
+  assert.equal(inactive.props.variant, 'ghost-gray');
+  assert.equal(inactive.props.style[':rest'].color, '#d8e2dc');
+  assert.equal(inactive.props.style[':hover'].color, '#14382c');
+  assert.equal(inactive.props.style[':hover']['background-color'], '#e8efe9');
+  assert.equal(inactive.props.style[':focus-visible'].color, '#14382c');
+  assert.equal(inactive.props.style[':focus-visible']['background-color'], '#e8efe9');
+  assert.equal(inactive.props.style[':focus-visible'].outline, '2px solid #14382c');
+  assert.equal(inactive.props.style[':active'].color, '#14382c');
+}
+assert.match(todayMarkup, /WORKPEG RECORDS/);
+assert.match(todayMarkup, /READ ONLY/);
+assert.doesNotMatch(todayMarkup, /WORKPEG RECORDS - READ ONLY/);
+const businessId = Workpeg.routeParam();
+assert.doesNotMatch(todayMarkup, new RegExp(businessId), 'business ID is collapsed by default');
+const showBusinessId = visit(tree, node => node.type === 'button' && node.props.label === 'Show ID');
+assert.equal(showBusinessId.length, 1);
+assert.equal(showBusinessId[0].props.handler, 'toggle_business_id');
+app.toggle_business_id();
+assert.match(JSON.stringify(app.build()), new RegExp(businessId), 'business scope can be inspected without removing route validation');
+app.toggle_business_id();
+navButtons[1].props.handler();
+assert.equal(app.state.active_view, 'Rooms');
+app.state.active_view = 'Rooms';
+const roomsTree = app.build();
+assert.match(JSON.stringify(roomsTree), /Rooms & availability/);
+assert.match(JSON.stringify(roomsTree), /Room board/);
+assert.match(JSON.stringify(roomsTree), /Select a room to inspect details/);
+const detailButtons = visit(roomsTree, node => node.type === 'button' && node.props.label === 'View details');
 assert.equal(detailButtons.length, 3);
 for (const [index, roomNumber] of ['201', '202', '203'].entries()) {
   detailButtons[index].props.handler();
   assert.equal(app.state.selected_room, roomNumber);
 }
+app.state.active_view = 'Rooms';
+const filterButtons = visit(app.build(), node => node.type === 'button' && node.props.label === 'Needs cleaning');
+assert.equal(filterButtons.length, 1);
+filterButtons[0].props.handler();
+assert.equal(app.state.room_filter, 'Needs cleaning');
+app.set_filter('All rooms');
 
 const previousMetrics = JSON.stringify(app.state.metrics);
 app.set_operational_date('not-a-date');
@@ -101,10 +165,10 @@ assert.equal(overdue.state.overdue_departure_cards.length, 1);
 assert.equal(overdue.state.metrics.find(item => item.label === 'Overdue active stays').value, 1);
 
 const rendered = JSON.stringify(overdue.build());
-assert.match(rendered, /Reception workspace/);
+assert.match(rendered, /Today/);
 assert.match(rendered, /WORKPEG RECORDS/);
 assert.match(rendered, /OVERDUE/);
-assert.match(rendered, /No mutation controls are enabled/);
+assert.match(rendered, /This workspace is read only/);
 assert.match(rendered, /Authentication required/);
 assert.match(rendered, /Access denied/);
 assert.match(rendered, /Connection unavailable/);
@@ -115,7 +179,7 @@ assert.doesNotMatch(rendered, /DEMO DATA|Fictional|create_table|add_row|update_r
 // rows. Canary private fields must not enter the rendered receptionist tree.
 const sliceApp = new ReceptionTest();
 sliceApp.state.operational_date = '2026-11-08';
-sliceApp.state.room_types = [{entity_id: id(101), name: 'Roomay TEST Room Type (Fictional)', capacity: 3}];
+sliceApp.state.room_types = [{entity_id: id(101), name: 'Roomay TEST Room Type (Fictional) Presidential Family Suite With A Long Label', capacity: 3}];
 sliceApp.state.rooms = [{entity_id: id(102), number: '205', room_type_id: id(101),
   enabled: true, housekeeping: 'ready'}];
 sliceApp.state.guests = [{entity_id: id(103), display_name: 'WOR-60 Fictional Guest (Synthetic)'}];
@@ -146,15 +210,30 @@ assert.equal(sliceApp.state.in_house_cards[0].stay_status, 'checked_in');
 assert.equal(sliceApp.state.request_cards[0].room, '205');
 assert.equal(sliceApp.state.request_cards[0].department, 'housekeeping');
 assert.equal(sliceApp.state.request_cards[0].status, 'received');
+assert.equal(sliceApp.state.request_cards[0].audit_tone, 'warning');
+assert.equal(sliceApp.state.request_cards[0].department_label, 'Housekeeping');
+assert.equal(sliceApp.state.request_cards[0].category_label, 'Extra towels');
+assert.equal(sliceApp.state.request_cards[0].status_label, 'Received');
 assert.match(sliceApp.state.request_cards[0].audit_status, /delivery is not represented/);
+sliceApp.state.active_view = 'Rooms';
+const roomsSliceTree = JSON.stringify(sliceApp.build());
+assert.match(roomsSliceTree, /Roomay TEST Room Type/);
+assert.match(roomsSliceTree, /overflow-wrap/);
+assert.match(roomsSliceTree, /Presidential Family Suite With A Long Label/);
+assert.match(roomsSliceTree, /Room details/);
+assert.match(roomsSliceTree, /WOR-60 Fictional Guest \(Synthetic\)/);
+assert.match(roomsSliceTree, /Reservation: confirmed/);
+sliceApp.state.active_view = 'Requests';
 const sliceTree = JSON.stringify(sliceApp.build());
-assert.match(sliceTree, /Roomay TEST Room Type/);
-assert.match(sliceTree, /WOR-60 Fictional Guest \(Synthetic\)/);
-assert.match(sliceTree, /Reservation: confirmed - Physical stay: checked_in/);
-assert.match(sliceTree, /extra_towels - housekeeping/);
-assert.match(sliceTree, /received/);
+assert.match(sliceTree, /Request category: Extra towels/);
+assert.match(sliceTree, /Housekeeping/);
+assert.match(sliceTree, /Received/);
 assert.match(sliceTree, /Audit 1: created - start/);
 assert.match(sliceTree, /delivery is not represented/);
 assert.doesNotMatch(sliceTree, /PRIVATE-ACTOR-CANARY|PRIVATE-REASON-CANARY|PRIVATE-OPERATION-CANARY|PRIVATE-SIGNATURE-CANARY/);
+sliceApp.state.request_audit[0].commit_state = 'committed';
+sliceApp.project_records();
+assert.equal(sliceApp.state.request_cards[0].audit_tone, 'neutral');
+assert.match(sliceApp.state.request_cards[0].audit_status, /delivery is not represented/);
 
 console.log('compiled reception controller: Room 205 vertical slice, audit privacy, dates, overdue stays and three room callbacks passed');

@@ -43,7 +43,9 @@ class HotelData(App):
     overdue_departure_cards = State([])
     room_filter = State("All rooms")
     selected_room = State("")
+    active_view = State("Today")
     date_error = State("")
+    show_business_id = State(False)
 
     async def on_mount(self):
         set_interval(self.watch_timeout, 1000)
@@ -86,6 +88,45 @@ class HotelData(App):
 
     def set_filter(self, value):
         self.room_filter = value
+
+    def set_view(self, value):
+        if value in ["Today", "Rooms", "Requests"]:
+            self.active_view = value
+
+    def toggle_business_id(self):
+        self.show_business_id = not self.show_business_id
+
+    def _nav_button(self, label, view):
+        if view == "Today":
+            return self._nav_button_for(label, view, "layout-dashboard")
+        if view == "Rooms":
+            return self._nav_button_for(label, view, "bed")
+        return self._nav_button_for(label, view, "clipboard-list")
+
+    def _nav_button_for(self, label, view, icon):
+        if self.active_view == view:
+            return Button(label, on_click=lambda: self.set_view(view),
+                          variant="primary", full_width=True, icon=icon,
+                          icon_position="left")
+        return Button(label, on_click=lambda: self.set_view(view),
+                      variant="ghost-gray", full_width=True, icon=icon,
+                      icon_position="left",
+                      style={"justify-content": "flex-start", "text-align": "left",
+                             "border-radius": "10px",
+                             ":rest": {"color": "#d8e2dc", "background-color": "transparent"},
+                             ":hover": {"color": "#14382c", "background-color": "#e8efe9"},
+                             ":focus-visible": {"color": "#14382c",
+                                                 "background-color": "#e8efe9",
+                                                 "outline": "2px solid #14382c",
+                                                 "outline-offset": "2px"},
+                             ":active": {"color": "#14382c", "background-color": "#d8e2dc"}})
+
+    def _filter_button(self, label, value):
+        if self.room_filter == value:
+            return Button(label, on_click=lambda: self.set_filter(value),
+                          variant="primary", size="sm")
+        return Button(label, on_click=lambda: self.set_filter(value),
+                      variant="outline-gray", size="sm")
 
     def select_room(self, value):
         self.selected_room = value
@@ -679,6 +720,28 @@ class HotelData(App):
             audit_items = audit_by_request.get(event["request_id"], [])
             audit_items.append(event)
             audit_by_request[event["request_id"]] = audit_items
+        department_display = {
+            "housekeeping": "Housekeeping", "maintenance": "Maintenance",
+            "food_and_beverage": "Food & beverage", "reception": "Reception",
+            "human_triage": "Human triage",
+        }
+        category_display = {
+            "unknown": "Needs triage", "extra_towels": "Extra towels",
+            "linen": "Linen", "room_cleaning": "Room cleaning",
+            "toiletries": "Toiletries", "plumbing": "Plumbing",
+            "electrical": "Electrical", "air_conditioning": "Air conditioning",
+            "room_equipment": "Room equipment", "room_service": "Room service",
+            "dining": "Dining", "minibar": "Minibar", "transport": "Transport",
+            "wake_up_call": "Wake-up call", "billing_question": "Billing question",
+            "general_help": "General help",
+        }
+        status_display = {
+            "received": "Received", "assigned": "Assigned",
+            "acknowledged": "Acknowledged", "in_progress": "In progress",
+            "resolved": "Resolved", "reopened": "Reopened",
+            "cancelled": "Cancelled", "escalated": "Escalated",
+        }
+        urgency_display = {"low": "Low", "normal": "Normal", "high": "High", "urgent": "Urgent"}
         request_cards = []
         for request in self.service_requests:
             audit_history = self.ordered_audit_events(
@@ -687,22 +750,31 @@ class HotelData(App):
                            if event["event_id"] == request["last_event_id"]), None)
             if not audit_history:
                 audit_status = "No audit event visible"
+                audit_tone = "warning"
             elif latest is None:
                 audit_status = "Audit history incomplete; latest request event is not visible"
+                audit_tone = "warning"
             elif latest["to_status"] != request["status"]:
                 audit_status = "Audit history does not match the current request status"
+                audit_tone = "warning"
             elif latest["commit_state"] == "pending":
                 audit_status = "Latest audit event pending commit; delivery is not represented"
+                audit_tone = "warning"
             else:
                 audit_status = "Latest event marked committed; delivery is not represented"
+                audit_tone = "neutral"
             guest = next((item["display_name"] for item in self.guests
                           if item["entity_id"] == request["guest_id"]), "Unknown")
             request_cards.append({
                 "request_id": request["request_id"], "description": request["description"],
                 "category": request["category"], "department": request["department"],
+                "category_label": category_display.get(request["category"], request["category"]),
+                "department_label": department_display.get(request["department"], request["department"]),
+                "status_label": status_display.get(request["status"], request["status"]),
+                "urgency_label": urgency_display.get(request["urgency"], request["urgency"]),
                 "urgency": request["urgency"], "status": request["status"],
                 "room": room_numbers.get(request["room_id"], "Unknown"),
-                "guest": guest, "audit_status": audit_status,
+                "guest": guest, "audit_status": audit_status, "audit_tone": audit_tone,
                 "audit_history": [{
                     "sequence": event["sequence"], "event_type": event["event_type"],
                     "from_status": event["from_status"], "to_status": event["to_status"],
@@ -730,7 +802,7 @@ class HotelData(App):
         self.in_house_cards = in_house
         self.room_cards = room_cards
         self.request_cards = request_cards
-        if not self.selected_room and room_cards:
+        if room_cards and not any(room["number"] == self.selected_room for room in room_cards):
             self.selected_room = room_cards[0]["number"]
 
     async def load_snapshot(self):
@@ -815,231 +887,342 @@ class HotelData(App):
     def mark_stale(self):
         self.freshness = "Stale: reload before any decision or mutation"
 
-    def build(self):
-        return Authenticated(Container(
-            Column(
-                Container(
-                    Wrap(
-                        Column(
-                            Text("Roomay", variant="title", weight="bold", style={"color": "#ffffff"}),
-                            Text("Reception workspace", variant="caption", style={"color": "#c9ddd5"}),
-                            gap=2,
-                        ),
-                        Column(
-                            Tag("WORKPEG RECORDS (READ ONLY)", tone="success", size="sm",
-                                visible=self.view_state == "loaded"),
-                            Tag("WORKPEG INVENTORY EMPTY", tone="warning", size="sm",
-                                visible=self.view_state == "empty_inventory"),
-                            Tag("CHECKING WORKPEG ACCESS", tone="warning", size="sm",
-                                visible=self.view_state == "loading"),
-                            Tag("WORKPEG READ NOT VERIFIED", tone="warning", size="sm",
-                                visible=(self.view_state == "connection_unavailable"
-                                         or self.view_state == "authentication_required"
-                                         or self.view_state == "access_denied")),
-                            Text(f"Business {route.business_id}", variant="caption", style={"color": "#e8f2ee"}),
-                            gap=6,
-                        ),
-                        spacing=16,
-                        cross_alignment="center",
-                    ),
-                    padding=24, radius=20, color="#12372a",
-                    style={"box-shadow": "0 16px 40px rgba(18,55,42,0.18)"},
-                ),
-                Container(
-                    Wrap(
-                        Column(
-                            Text(self.status, variant="label", weight="bold"),
-                            Text(self.freshness, variant="caption", tone="muted"),
-                            gap=3,
-                        ),
-                        TextInput(value=self.operational_date, on_change=self.set_operational_date,
-                                  placeholder="Operational date YYYY-MM-DD"),
-                        Text(self.date_error, variant="caption", tone="warning",
-                             visible=self.date_error != ""),
-                        Button("Refresh records", on_click=self.load_snapshot,
-                               variant="outline-color") if not self.busy else Text("Refreshing..."),
-                        spacing=12, cross_alignment="center",
-                    ),
-                    padding=16, radius=14, color="#eef7f3",
-                    style={"border": "1px solid #cde4da"},
-                ),
-                Container(
-                    Column(
-                        Text("Loading authenticated Workpeg records...", variant="subheading", weight="bold"),
-                        Text("No cached or fictional hotel records are shown while the snapshot is incomplete.", tone="muted"),
-                        gap=6,
-                    ),
-                    padding=24, radius=16, color="#ffffff",
-                    style={"border": "1px solid #dce7e2"}, visible=self.view_state == "loading",
-                ),
-                Container(
-                    Column(
-                        Text("No rooms configured", variant="heading", weight="bold"),
-                        Text("The authenticated read succeeded, but the Roomay room inventory is empty. No records were seeded."),
-                        Text("An authorized owner must provision and populate the reviewed table contract outside this read-only route.", tone="muted"),
-                        gap=8,
-                    ),
-                    padding=24, radius=16, color="#fffaf0",
-                    style={"border": "1px solid #ecd6a4"}, visible=self.view_state == "empty_inventory",
-                ),
-                Container(
-                    Column(
-                        Text("Authentication required", variant="heading", weight="bold"),
-                        Text(self.failure),
-                        Text("Use the Workpeg sign-in flow for this business; credentials are never accepted by Roomay UI fields.", tone="muted"),
-                        gap=8,
-                    ),
-                    padding=24, radius=16, color="#fff4f4",
-                    style={"border": "1px solid #e6b8b8"}, visible=self.view_state == "authentication_required",
-                ),
-                Container(
-                    Column(
-                        Text("Access denied", variant="heading", weight="bold"),
-                        Text(self.failure),
-                        Text("No fallback business, public table, or alternate data store was queried.", tone="muted"),
-                        gap=8,
-                    ),
-                    padding=24, radius=16, color="#fff4f4",
-                    style={"border": "1px solid #e6b8b8"}, visible=self.view_state == "access_denied",
-                ),
-                Container(
-                    Column(
-                        Text("Connection unavailable", variant="heading", weight="bold"),
-                        Text(self.failure),
-                        Text("The receptionist snapshot is unavailable until every required page passes validation.", tone="muted"),
-                        gap=8,
-                    ),
-                    padding=24, radius=16, color="#fff4f4",
-                    style={"border": "1px solid #e6b8b8"}, visible=self.view_state == "connection_unavailable",
-                ),
-                Container(
-                    Column(
-                        Wrap(
-                            Tag("READ ONLY", tone="info", size="sm"),
-                            Text(f"Operational date: {self.operational_date}", variant="label", weight="semibold"),
-                            Text("Browser-local date; hotel timezone is not yet persisted", variant="caption", tone="muted"),
-                            spacing=10, cross_alignment="center",
-                        ),
-                        Tabs(
-                            Tab("Today", Column(
-                                Column(
-                                    Text("Today at a glance", variant="heading", weight="bold"),
-                                    Text("Counts are derived from the same validated Workpeg snapshot shown below.", tone="muted"),
-                                    gap=4,
-                                ),
-                                Wrap(*[
-                                    Container(Column(
-                                        Text(metric["label"], variant="label", tone="muted", weight="medium"),
-                                        Text(metric["value"], variant="display", weight="bold", style={"color": "#12372a"}),
-                                        Text(metric["helper"], variant="caption", tone="muted"),
-                                        gap=6,
-                                    ), padding=18, width=210, radius=16, color="#ffffff",
-                                    style={"border": "1px solid #dce7e2", "min-height": "138px"})
-                                    for metric in self.metrics
-                                ], spacing=12, run_spacing=12),
-                                Wrap(
-                                    Container(Column(
-                                        Text("Currently in house", variant="subheading", weight="bold"),
-                                        Text("No active stays", tone="muted", visible=len(self.in_house_cards) == 0),
-                                        Column(*[Text(f"{item['guest']} - Room {item['room']} - departs {item['departure']} - {item['departure_status']}") for item in self.in_house_cards], gap=8),
-                                        Text("Physical checked-in stays only.", variant="caption", tone="muted"),
-                                        gap=10,
-                                    ), padding=20, width=330, radius=16, color="#ffffff", style={"border": "1px solid #dce7e2"}),
-                                    Container(Column(
-                                        Text("Arrivals", variant="subheading", weight="bold"),
-                                        Text("No confirmed arrivals", tone="muted", visible=len(self.arrival_cards) == 0),
-                                        Column(*[Text(f"{item['guest']} - Room {item['room']}") for item in self.arrival_cards], gap=8),
-                                        Text("Reservations are not treated as checked-in guests.", variant="caption", tone="muted"),
-                                        gap=10,
-                                    ), padding=20, width=330, radius=16, color="#ffffff", style={"border": "1px solid #dce7e2"}),
-                                    Container(Column(
-                                        Text("Scheduled departures today", variant="subheading", weight="bold"),
-                                        Text("No active stays due today", tone="muted", visible=len(self.departure_cards) == 0),
-                                        Column(*[Text(f"{item['guest']} - Room {item['room']}") for item in self.departure_cards], gap=8),
-                                        Text("Overdue active stays", variant="label", weight="bold",
-                                             tone="warning", visible=len(self.overdue_departure_cards) > 0),
-                                        Column(*[Text(f"OVERDUE - {item['guest']} - Room {item['room']} - scheduled {item['departure']}", tone="warning") for item in self.overdue_departure_cards], gap=8),
-                                        Text("Physical occupancy remains active until checkout is recorded.", variant="caption", tone="muted"),
-                                        gap=10,
-                                    ), padding=20, width=330, radius=16, color="#ffffff", style={"border": "1px solid #dce7e2"}),
-                                    spacing=12, run_spacing=12,
-                                ),
-                                gap=20,
-                            )),
-                            Tab("Rooms", Column(
-                                Column(Text("Room board", variant="heading", weight="bold"),
-                                       Text("Occupancy, housekeeping, and maintenance remain separate persisted signals.", tone="muted"), gap=4),
-                                Wrap(
-                                    Button("All rooms", on_click=lambda: self.set_filter("All rooms"), variant="outline-color", size="sm"),
-                                    Button("In house", on_click=lambda: self.set_filter("In house"), variant="outline-color", size="sm"),
-                                    Button("Arriving today", on_click=lambda: self.set_filter("Arriving today"), variant="outline-color", size="sm"),
-                                    Button("Needs cleaning", on_click=lambda: self.set_filter("Needs cleaning"), variant="outline-color", size="sm"),
-                                    Button("Blocked", on_click=lambda: self.set_filter("Blocked"), variant="outline-color", size="sm"),
-                                    spacing=8, run_spacing=8,
-                                ),
-                                Text(f"Filter: {self.room_filter}", variant="label", weight="semibold"),
-                                Wrap(*[
-                                    Container(Column(
-                                        Row(Text(f"Room {room['number']}", variant="subheading", weight="bold"), Tag(room["room_type"], tone="neutral", size="sm"), justify="space_between", align="center", gap=8),
-                                        Text(room["occupancy"], variant="label", weight="semibold", style={"color": "#156b50"}),
-                                        Divider(spacing=4),
-                                        Text(f"Housekeeping - {room['housekeeping']}", variant="caption", tone="muted"),
-                                        Text(f"Maintenance - {room['maintenance']}", variant="caption", tone="muted"),
-                                        Text(f"Reservation: {room['reservation_status'] or 'None'} - Stay: {room['stay_status'] or 'None'}", variant="caption", tone="muted"),
-                                        Button("View details", on_click=lambda: self.select_room(room["number"]), variant="text", size="sm"),
-                                        gap=8,
-                                    ), padding=18, width=242, radius=16, color="#ffffff",
-                                    style={"border": "1px solid #dce7e2", "min-height": "205px"})
-                                    for room in self.room_cards
-                                    if self.room_filter == "All rooms"
-                                    or self.room_filter == room["occupancy"]
-                                    or (self.room_filter == "Needs cleaning" and room["housekeeping"] != "ready")
-                                    or (self.room_filter == "Blocked" and room["maintenance"] == "Blocked")
-                                ], spacing=12, run_spacing=12),
-                                Column(*[
-                                    Container(Column(
-                                        Row(Text(f"Room {room['number']} details", variant="subheading", weight="bold"), Tag("READ ONLY", tone="info", size="sm"), justify="space_between", align="center", gap=12),
-                                        Text(f"{room['room_type']} - {room['occupancy']}", weight="semibold"),
-                                        Text(room["guest"] if room["guest"] else "No guest linked"),
-                                        Text(f"Reservation: {room['reservation_status'] or 'None'} - Physical stay: {room['stay_status'] or 'None'}", variant="caption", tone="muted"),
-                                        Text(f"Housekeeping: {room['housekeeping']} - Maintenance: {room['maintenance']}", variant="caption", tone="muted"),
-                                        Text(room["maintenance_reason"], tone="warning", visible=room["maintenance_reason"] != ""),
-                                        Text("Booking, assignment, and check-in writes are disabled until a protected writer is verified.", variant="caption", tone="muted"),
-                                        gap=9,
-                                    ), padding=20, radius=16, color="#eef7f3", style={"border": "1px solid #cde4da"})
-                                    for room in self.room_cards if room["number"] == self.selected_room
-                                ]),
-                                gap=18,
-                            )),
-                            Tab("Requests", Column(
-                                Column(Text("Guest service requests", variant="heading", weight="bold"),
-                                       Text("Persisted requests are read only; lifecycle actions remain governed by WOR-14 authorization rules.", tone="muted"), gap=4),
-                                Text("No service requests", tone="muted", visible=len(self.request_cards) == 0),
-                                Wrap(*[
-                                    Container(Column(
-                                        Row(Tag(request["urgency"], tone="warning", size="sm"), Tag(request["status"], tone="info", size="sm"), justify="space_between", align="center", gap=8),
-                                        Text(request["description"], weight="semibold"),
-                                        Text(f"{request['category']} - {request['department']}", variant="caption", tone="muted"),
-                                        Text(f"{request['guest']} - Room {request['room']}", variant="caption", tone="muted"),
-                                        Text(request["audit_status"], variant="caption", tone="warning"),
-                                        Column(*[
-                                            Text(f"Audit {event['sequence']}: {event['event_type']} - {event['from_status'] or 'start'} -> {event['to_status']} - {event['commit_state']} - {event['occurred_at']}", variant="caption", tone="muted")
-                                            for event in request["audit_history"]
-                                        ], gap=5),
-                                        gap=9,
-                                    ), padding=18, width=320, radius=16, color="#ffffff", style={"border": "1px solid #dce7e2"})
-                                    for request in self.request_cards
-                                ], spacing=12, run_spacing=12),
-                                gap=18,
-                            )),
-                        ),
-                        Container(Text("No mutation controls are enabled. Local eligibility is advisory; confirmation requires a trusted concurrency-safe writer.", variant="caption", tone="muted"), padding=14, radius=12, color="#f5f7f6"),
-                        gap=18,
-                    ),
-                    visible=self.view_state == "loaded",
-                ),
-                gap=18,
+    def _metric_card(self, metric):
+        return Container(Column(
+            Text(metric["label"], variant="label", tone="muted", weight="medium"),
+            Text(metric["value"], variant="display", weight="bold",
+                 style={"color": "#14382c", "font-size": "38px",
+                        "line-height": "1.08", "letter-spacing": "-1px"}),
+            Text(metric["helper"], variant="caption", tone="muted"),
+            gap=8,
+        ), padding=20, width=232, radius=16, color="#ffffff",
+            style={"border": "1px solid #dce7e2", "min-height": "148px"})
+
+    def _room_card(self, room):
+        return Container(Column(
+            Text(f"Room {room['number']}", variant="subheading", weight="bold"),
+            Text(room["room_type"], variant="caption", tone="muted",
+                 style={"overflow-wrap": "anywhere", "word-break": "break-word",
+                        "min-width": "0"}),
+            Text(room["occupancy"], variant="label", weight="semibold",
+                 style={"color": "#1b4332"}),
+            Divider(spacing=4),
+            Wrap(self._housekeeping_badge(room), self._maintenance_badge(room),
+                 spacing=6, run_spacing=6),
+            Text(f"Reservation: {room['reservation_status'] or 'None'} - Stay: {room['stay_status'] or 'None'}",
+                 variant="caption", tone="muted"),
+            Button("View details", on_click=lambda: self.select_room(room["number"]),
+                   variant="outline-gray", size="sm", icon="eye",
+                   icon_position="left"),
+            gap=9,
+        ), padding=18, width=228, radius=16, color="#ffffff",
+            style={"border": "1px solid #dce7e2", "min-height": "218px",
+                   "min-width": "0"})
+
+    def _housekeeping_badge(self, room):
+        if room["housekeeping"] == "ready":
+            return Tag(f"Housekeeping - {room['housekeeping']}", tone="success", size="sm")
+        return Tag(f"Housekeeping - {room['housekeeping']}", tone="warning", size="sm")
+
+    def _maintenance_badge(self, room):
+        if room["maintenance"] == "Blocked":
+            return Tag(f"Maintenance - {room['maintenance']}", tone="critical", size="sm")
+        return Tag(f"Maintenance - {room['maintenance']}", tone="neutral", size="sm")
+
+    def _room_guest(self, room):
+        if room["guest"]:
+            return Text(room["guest"])
+        return Text("No registered guest linked")
+
+    def _room_detail(self, room):
+        return Container(Column(
+            Row(Text(f"Room {room['number']} details", variant="subheading", weight="bold"),
+                Tag("READ ONLY", tone="info", size="sm"),
+                justify="space_between", align="center", gap=12),
+            Text(room["room_type"], weight="semibold",
+                 style={"overflow-wrap": "anywhere", "word-break": "break-word"}),
+            Text(room['occupancy'], variant="label", tone="muted"),
+            self._room_guest(room),
+            Text(f"Reservation: {room['reservation_status'] or 'None'} - Physical stay: {room['stay_status'] or 'None'}",
+                 variant="caption", tone="muted"),
+            Text(f"Housekeeping: {room['housekeeping']} - Maintenance: {room['maintenance']}",
+                 variant="caption", tone="muted"),
+            Text(room["maintenance_reason"], tone="warning", visible=room["maintenance_reason"] != ""),
+            Text("Booking, assignment and check-in writes are unavailable in this read-only workspace.",
+                 variant="caption", tone="muted"),
+            gap=9,
+        ), padding=16, width=220, radius=16, color="#e8efe9",
+            style={"border": "1px solid #cde4da", "min-width": "0"})
+
+    def _room_inspector(self):
+        return Column(
+            *[self._room_detail(room) for room in self.room_cards
+              if room["number"] == self.selected_room],
+            Container(Column(
+                Text("Room details", variant="subheading", weight="bold"),
+                Text("Select a room to inspect its verified operational details.",
+                     variant="caption", tone="muted"),
+                gap=8,
+            ), padding=16, width=220, radius=16, color="#e8efe9",
+                style={"border": "1px solid #cde4da"},
+                visible=self.selected_room == ""),
+            gap=0,
+        )
+
+    def _today_content(self):
+        return Column(
+            Column(Text("Today at a glance", variant="heading", weight="bold"),
+                   Text("Counts are calculated from the complete, validated Workpeg snapshot.", tone="muted"),
+                   gap=4),
+            Wrap(*[self._metric_card(metric) for metric in self.metrics],
+                 spacing=12, run_spacing=12),
+            Wrap(
+                Container(Column(
+                    Row(Text("Currently in house", variant="subheading", weight="bold"),
+                        Tag(str(len(self.in_house_cards)), tone="info", size="sm"),
+                        justify="space_between", align="center", gap=8),
+                    Text("No active stays", tone="muted", visible=len(self.in_house_cards) == 0),
+                    Column(*[Text(f"{item['guest']} - Room {item['room']} - departure {item['departure']} - {item['departure_status']}")
+                             for item in self.in_house_cards], gap=8),
+                    Text("Only physically checked-in stays count as in house.", variant="caption", tone="muted"),
+                    gap=10,
+                ), padding=20, width=300, radius=16, color="#ffffff",
+                    style={"border": "1px solid #dce7e2", "min-height": "190px"}),
+                Container(Column(
+                    Row(Text("Arrivals", variant="subheading", weight="bold"),
+                        Tag(str(len(self.arrival_cards)), tone="info", size="sm"),
+                        justify="space_between", align="center", gap=8),
+                    Text("No confirmed arrivals", tone="muted", visible=len(self.arrival_cards) == 0),
+                    Column(*[Text(f"{item['guest']} - Room {item['room']}") for item in self.arrival_cards], gap=8),
+                    Text("A reservation is not a checked-in stay.", variant="caption", tone="muted"),
+                    gap=10,
+                ), padding=20, width=300, radius=16, color="#ffffff",
+                    style={"border": "1px solid #dce7e2", "min-height": "190px"}),
+                Container(Column(
+                    Row(Text("Scheduled departures", variant="subheading", weight="bold"),
+                        Tag(str(len(self.departure_cards)), tone="neutral", size="sm"),
+                        justify="space_between", align="center", gap=8),
+                    Text("No active stays due today", tone="muted", visible=len(self.departure_cards) == 0),
+                    Column(*[Text(f"{item['guest']} - Room {item['room']}") for item in self.departure_cards], gap=8),
+                    Text("Overdue active stays", variant="label", weight="bold", tone="warning",
+                         visible=len(self.overdue_departure_cards) > 0),
+                    Column(*[Text(f"OVERDUE - {item['guest']} - Room {item['room']} - scheduled {item['departure']}", tone="warning")
+                             for item in self.overdue_departure_cards], gap=8),
+                    Text("An overdue guest remains in house until checkout is recorded.", variant="caption", tone="muted"),
+                    gap=10,
+                ), padding=20, width=300, radius=16, color="#ffffff",
+                    style={"border": "1px solid #dce7e2", "min-height": "190px"}),
+                spacing=12, run_spacing=12,
             ),
-            padding=24, color="#f4f7f5",
-            style={"min-height": "100vh", "max-width": "1440px", "margin": "0 auto"},
-        ))
+            Container(Column(
+                Text("Operational date", variant="label", weight="bold"),
+                Text(f"{self.operational_date} - browser-local date; hotel timezone is not persisted",
+                     variant="caption", tone="muted"),
+                gap=4,
+            ), padding=14, radius=12, color="#f0f4f1"),
+            gap=20,
+        )
+
+    def _rooms_content(self):
+        return Column(
+            Column(Text("Rooms & availability", variant="heading", weight="bold"),
+                   Text("Occupancy, housekeeping readiness and maintenance blocks are separate verified signals.", tone="muted"),
+                   gap=4),
+            Wrap(
+                self._filter_button("All rooms", "All rooms"),
+                self._filter_button("In house", "In house"),
+                self._filter_button("Arriving today", "Arriving today"),
+                self._filter_button("Needs cleaning", "Needs cleaning"),
+                self._filter_button("Blocked", "Blocked"),
+                spacing=8, run_spacing=8,
+            ),
+            Text(f"Showing: {self.room_filter}", variant="caption", tone="muted"),
+            Text("Room board", variant="subheading", weight="bold"),
+            Text("Select a room to inspect details.", variant="caption", tone="muted"),
+            Wrap(
+                Container(Wrap(*[self._room_card(room) for room in self.room_cards
+                                 if self.room_filter == "All rooms"
+                                 or self.room_filter == room["occupancy"]
+                                 or (self.room_filter == "Needs cleaning" and room["housekeeping"] != "ready")
+                                 or (self.room_filter == "Blocked" and room["maintenance"] == "Blocked")],
+                              spacing=12, run_spacing=12),
+                         padding=16, width=610, radius=16, color="#ffffff",
+                         style={"border": "1px solid #dce7e2", "max-width": "100%",
+                                "box-sizing": "border-box"}),
+                self._room_inspector(), spacing=12, run_spacing=12,
+                cross_alignment="start"),
+            Text("No rooms match this filter.", tone="muted",
+                 visible=len(self.room_cards) == 0 or not any(
+                     self.room_filter == "All rooms"
+                     or self.room_filter == room["occupancy"]
+                     or (self.room_filter == "Needs cleaning" and room["housekeeping"] != "ready")
+                     or (self.room_filter == "Blocked" and room["maintenance"] == "Blocked")
+                     for room in self.room_cards)),
+            gap=18,
+        )
+
+    def _requests_content(self):
+        return Column(
+            Column(Text("Guest service requests", variant="heading", weight="bold"),
+                   Text("Read-only records. Lifecycle actions require verified staff authorization and committed audit writes.", tone="muted"),
+                   gap=4),
+            Text("No service requests", tone="muted", visible=len(self.request_cards) == 0),
+            Wrap(*[
+                Container(Column(
+                    Wrap(Tag(request["department_label"], tone="success", size="sm"),
+                         Tag(request["status_label"], tone="neutral", size="sm"),
+                         Tag(request["urgency_label"], tone="warning", size="sm"),
+                         spacing=6, run_spacing=6),
+                    Text(request["description"], weight="semibold"),
+                    Text("Request category: " + request["category_label"],
+                         variant="caption", tone="muted"),
+                    Text("Guest: " + request["guest"] + " - Room " + request["room"],
+                         variant="caption", weight="medium"),
+                    self._audit_note(request),
+                    Column(*[Text(f"Audit {event['sequence']}: {event['event_type']} - {event['from_status'] or 'start'} -> {event['to_status']} - {event['commit_state']} - {event['occurred_at']}",
+                                  variant="caption", tone="muted")
+                             for event in request["audit_history"]], gap=5),
+                    gap=9,
+                ), padding=18, width=264, radius=16, color="#ffffff",
+                    style={"border": "1px solid #dce7e2", "min-width": "0"})
+                for request in self.request_cards
+            ], spacing=12, run_spacing=12),
+            gap=18,
+        )
+
+    def _audit_note(self, request):
+        if request["audit_tone"] == "warning":
+            return Container(Text("Audit: " + request["audit_status"], variant="caption",
+                                  tone="warning"), padding=10, radius=10, color="#fef6ee",
+                             style={"border": "1px solid #ecd6a4"})
+        return Container(Text("Audit: " + request["audit_status"], variant="caption",
+                              tone="muted"), padding=10, radius=10, color="#f0f4f1",
+                         style={"border": "1px solid #dce7e2"})
+
+    def _state_panel(self, title, message, detail, color, border, state):
+        return Container(Column(
+            Text(title, variant="heading", weight="bold"),
+            Text(message), Text(detail, tone="muted"), gap=8,
+        ), padding=24, radius=16, color=color,
+            style={"border": f"1px solid {border}"}, visible=self.view_state == state)
+
+    def _sidebar(self):
+        return Container(Column(
+            Column(Text("ROOMAY", variant="title", weight="bold", style={"color": "#ffffff"}),
+                   Text("HOTEL OPERATIONS", variant="caption", style={"color": "#c9ddd5"}), gap=2),
+            Divider(spacing=10),
+            Text("FRONT DESK", variant="caption", weight="bold", style={"color": "#a8c5b7"}),
+            self._nav_button("Today", "Today"),
+            self._nav_button("Rooms & availability", "Rooms"),
+            self._nav_button("Service requests", "Requests"),
+            Divider(spacing=10),
+            Text("DATA SOURCE", variant="caption", weight="bold",
+                 style={"color": "#a8c5b7"}, visible=self.view_state == "loaded"),
+            Wrap(Tag("WORKPEG RECORDS", tone="success", size="sm"),
+                 Tag("READ ONLY", tone="neutral", size="sm"),
+                 spacing=6, run_spacing=6, visible=self.view_state == "loaded"),
+            Tag("CHECKING ACCESS", tone="warning", size="sm", visible=self.view_state == "loading"),
+            Tag("READ NOT VERIFIED", tone="warning", size="sm",
+                visible=self.view_state == "connection_unavailable"
+                        or self.view_state == "authentication_required"
+                        or self.view_state == "access_denied"),
+            Text("No records were seeded or substituted.", variant="caption",
+                 style={"color": "#c9ddd5"}, visible=self.view_state != "loaded"),
+            gap=10,
+        ), padding=22, width=248, radius=18, color="#0d281e",
+            style={"min-height": "360px"})
+
+    def _loaded_view(self):
+        return Column(
+            self._active_content(),
+            Container(Text("This workspace is read only. No booking, check-in, assignment or service-request writes are enabled.",
+                           variant="caption", tone="muted"),
+                      padding=14, radius=12, color="#f0f4f1"),
+            gap=18,
+            visible=self.view_state == "loaded",
+        )
+
+    def _controls(self):
+        return Container(Wrap(
+            Column(Text(self.status, variant="label", weight="bold"),
+                   Text(self.freshness, variant="caption", tone="muted"), gap=3),
+            self._business_scope(),
+            Column(Text("Operational date", variant="caption", tone="muted"),
+                   TextInput(value=self.operational_date, on_change=self.set_operational_date,
+                             placeholder="YYYY-MM-DD"), gap=2),
+            Text(self.date_error, variant="caption", tone="warning", visible=self.date_error != ""),
+            self._refresh_control(),
+            spacing=14, run_spacing=10, cross_alignment="center",
+        ), padding=16, radius=14, color="#ffffff",
+             style={"border": "1px solid #dce7e2"})
+
+    def _main_content(self):
+        return Container(Column(
+            Wrap(
+                Column(Text("Reception", variant="caption", tone="muted"),
+                       Text(self._page_title(), variant="heading", weight="bold"),
+                       Text("A clear view of verified hotel operations.", variant="caption", tone="muted"), gap=2),
+                Tag("READ ONLY", tone="info", size="sm"),
+                spacing=12, cross_alignment="center",
+            ),
+            self._controls(),
+            self._state_panel("Loading authenticated records...",
+                "No cached or fictional hotel records are shown while the snapshot is incomplete.",
+                "Operational information appears only after all required reads and relationship checks pass.",
+                "#ffffff", "#dce7e2", "loading"),
+            self._state_panel("No rooms configured",
+                "The authenticated read succeeded, but the Roomay room inventory is empty. No records were seeded.",
+                "An authorized owner must provision and populate the reviewed table contract outside this read-only route.",
+                "#fef6ee", "#ecd6a4", "empty_inventory"),
+            self._state_panel("Authentication required", self.failure,
+                "Use the Workpeg sign-in flow for this business; Roomay does not accept credentials in UI fields.",
+                "#fff4f4", "#e6b8b8", "authentication_required"),
+            self._state_panel("Access denied", self.failure,
+                "No fallback business, public table or alternate data store was queried.",
+                "#fff4f4", "#e6b8b8", "access_denied"),
+            self._state_panel("Connection unavailable", self.failure,
+                "The receptionist snapshot is unavailable until every required page passes validation.",
+                "#fff4f4", "#e6b8b8", "connection_unavailable"),
+            self._loaded_view(),
+            gap=18,
+        ), style={"flex": "1 1 480px", "min-width": "300px",
+                  "max-width": "100%"})
+
+    def _active_content(self):
+        if self.active_view == "Today":
+            return self._today_content()
+        if self.active_view == "Rooms":
+            return self._rooms_content()
+        return self._requests_content()
+
+    def _page_title(self):
+        if self.view_state == "loaded":
+            return self.active_view
+        return "Reception workspace"
+
+    def _refresh_control(self):
+        if self.busy:
+            return Text("Refreshing records...")
+        return Button("Refresh records", on_click=self.load_snapshot, variant="outline-gray",
+                      icon="refresh", icon_position="left")
+
+    def _business_scope(self):
+        if self.show_business_id:
+            return Column(
+                Row(Text("Business scope", variant="caption", tone="muted"),
+                    Button("Hide ID", on_click=self.toggle_business_id,
+                           variant="ghost-gray", size="sm"),
+                    align="center", gap=6),
+                Text(route.business_id, variant="caption", weight="medium",
+                     style={"overflow-wrap": "anywhere", "word-break": "break-all"}),
+                gap=2,
+            )
+        return Row(Text("Business scope", variant="caption", tone="muted"),
+                   Button("Show ID", on_click=self.toggle_business_id,
+                          variant="ghost-gray", size="sm"),
+                   align="center", gap=6)
+
+    def build(self):
+        return Authenticated(Container(Wrap(self._sidebar(), self._main_content(), spacing=18, run_spacing=18,
+                cross_alignment="start"), padding=20, color="#f7f9f6",
+            style={"min-height": "100vh", "max-width": "1440px", "margin": "0 auto"}))
