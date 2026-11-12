@@ -1,18 +1,8 @@
-FROM python:3.12-slim
+# Workpeg's function base image begins at SDK 0.157.0.
+# The Peg UI remains pinned separately to SDK 0.152.0.
+# No Function is installed, submitted, or enabled by this Dockerfile.
+FROM registry.gitlab.com/workpeg/workpeg-sdk/pegfn-base:0.157.0
 
-ENV PYTHONDONTWRITEBYTECODE=1
-ENV PYTHONUNBUFFERED=1
-
-RUN useradd -m -u 10001 appuser
-
-WORKDIR /app
-
-COPY requirements.txt /app/requirements.txt
-RUN pip install --no-cache-dir workpeg
-RUN pip install --no-cache-dir -r /app/requirements.txt
-
+# The base supplies the non-root appuser, /app workdir, SDK and runtime.
+# No requirements or online build steps are needed for this disabled entrypoint.
 COPY app /app/app
-
-USER appuser
-
-ENTRYPOINT ["workpeg", "function", "runtime", "--server"]
