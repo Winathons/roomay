@@ -25,17 +25,20 @@ available.
 
 On-device en-NG dictation is preferred whenever the browser exposes
 `processLocally` and `available()` reports an installed local pack. The page
-never downloads a pack. If local dictation is unavailable, the guest may
-explicitly check “Use my browser’s speech service if needed.” This choice is
-unchecked by default. It is checked before the microphone button can use a
-browser-managed remote speech service. The browser may transmit audio to its
-provider, and that provider's privacy terms and retention practices apply.
-ROOMAY does not receive or store the raw audio in either mode. The page shows
-this disclosure adjacent to the opt-in control.
+never downloads a pack. The normal guest chat shows a single compact mic icon,
+not a technical description or persistent browser-service checkbox. Clicking
+the mic starts verified local dictation and triggers the browser's microphone
+permission prompt when needed. If local recognition is unavailable, the click
+instead opens a short, explicit provider-processing consent dialog. Only after
+the guest chooses **Continue with browser speech** does recognition start;
+microphone permission alone is not consent to remote processing. The browser
+may transmit audio to its speech provider and that provider's privacy and
+retention terms apply. ROOMAY does not collect/store raw microphone audio.
+The guest can decline and continue typing. The disclosure never starts a
+remote speech request automatically on page load.
 
 The availability check does not request microphone access. Recognition starts
-only from a direct click on the voice button, after the optional remote-service
-choice. A denied permission, unavailable provider or device, language issue,
+only from the user's microphone click or their affirmative dialog click. A denied permission, unavailable provider or device, language issue,
 interruption, or empty result produces a status message and leaves typed input
 available. Recognized text is placed in the existing editable composer and is
 not submitted until the guest presses Send. See [MDN SpeechRecognition](https://developer.mozilla.org/en-US/docs/Web/API/SpeechRecognition),
@@ -85,7 +88,7 @@ microphone, external service, Workpeg API, or production data is used by CI.
 
 ## What remains unverified
 
-- No physical-microphone trial was performed here. The available desktop
+- The original dictation implementation was physically tested in Chrome using the prior checkbox UI; the compact microphone and contextual consent layout still require a separate owner browser check. The available desktop
   browser routed loopback navigation to a proxy 404, so rendered-browser and
   screenshot checks could not be completed. The mocked controller and direct
   local HTTP checks passed. Before release, manually test a supported browser
