@@ -44,27 +44,10 @@
         <section class="chat-panel guest-chat" aria-labelledby="request-heading">
           <div class="chat-heading">
             <div class="assistant-avatar" aria-hidden="true">R</div>
-            <div><h2 id="request-heading">How can we help you?</h2><p>Describe what you need during your stay.</p></div>
-          </div>
-          <section class="remi-call" aria-labelledby="remi-call-heading">
-            <div class="remi-call-top">
-              <div><p class="section-kicker">VOICE CONVERSATION</p><h3 id="remi-call-heading">Talk with Remi</h3></div>
-              <div class="remi-call-actions">
-                <button id="call-remi" class="call-remi-button" type="button" aria-describedby="remi-call-status remi-call-disclosure">Call Remi</button>
-                <button id="mute-remi" class="voice-call-secondary" type="button" hidden aria-pressed="false">Mute microphone</button>
-                <button id="end-remi" class="voice-call-end" type="button" hidden>End call</button>
-              </div>
-            </div>
-            <div class="remi-orb-stage" aria-hidden="true">
-              <span class="remi-orb-fallback"></span>
-              <roomay-orb id="remi-orb" state="idle" aria-hidden="true"></roomay-orb>
-              <span class="remi-orb-connecting"></span>
-            </div>
-            <p id="remi-call-status" class="remi-call-status" role="status" aria-live="polite">Voice conversation is unavailable until this local test is explicitly configured.</p>
-            <div id="remi-call-captions" class="remi-call-captions" role="log" aria-live="polite" aria-relevant="additions text" hidden></div>
-            <button id="use-call-transcript" class="use-transcript-button" type="button" hidden>Use my latest transcript in the request chat</button>
-            <p id="remi-call-disclosure" class="remi-call-disclosure">When enabled, live audio is sent to Vapi to run this conversation. ROOMAY does not record or store audio. Vapi may process or retain call metadata, speech transcripts and artifacts according to the selected assistant settings. Use test phrases only. A call does not submit a hotel request.</p>
-          </section>
+            <div class="chat-heading-copy"><h2 id="request-heading">How can we help you?</h2><p>Describe what you need during your stay.</p></div>
+            <button id="call-remi" class="call-remi-button call-remi-trigger" type="button" aria-label="Call Remi AI receptionist" aria-haspopup="dialog" aria-controls="remi-call">
+              <span aria-hidden="true" class="call-remi-icon">☎</span><span id="call-remi-label">Call Remi</span>
+            </button>          </div>
           <div id="messages" class="messages" role="log" aria-live="polite" aria-relevant="additions text">
             <div class="loading-state">Loading your stay…</div>
           </div>
@@ -102,6 +85,29 @@
             <span aria-hidden="true">!</span><p><strong>Need urgent help?</strong> Contact local emergency services and Reception using the hotel's official contact information.</p>
           </section>
         </aside>
+      </div>
+
+      <div id="remi-call-overlay" class="remi-dialog-overlay" hidden>
+        <section id="remi-call" class="remi-call remi-dialog" role="dialog" aria-modal="true" aria-labelledby="remi-call-heading" aria-describedby="remi-call-status remi-call-disclosure" tabindex="-1">
+          <div class="remi-call-top">
+            <div><p class="section-kicker">ROOMAY AI RECEPTIONIST</p><h3 id="remi-call-heading">Talking with Remi</h3></div>
+            <button id="close-remi" class="remi-close-button" type="button" aria-label="Close voice conversation">×</button>
+          </div>
+          <div class="remi-orb-stage" aria-hidden="true">
+            <span class="remi-orb-fallback"></span>
+            <roomay-orb id="remi-orb" state="idle" aria-hidden="true"></roomay-orb>
+            <span class="remi-orb-connecting"></span>
+          </div>
+          <p id="remi-call-duration" class="remi-call-duration" role="timer" aria-label="Elapsed call time">00:00</p>
+          <p id="remi-call-status" class="remi-call-status" role="status" aria-live="polite">Voice calls are unavailable until this local test is explicitly configured.</p>
+          <div class="remi-call-actions">
+            <button id="mute-remi" class="voice-call-secondary" type="button" hidden aria-pressed="false">Mute microphone</button>
+            <button id="end-remi" class="voice-call-end" type="button" hidden>End call</button>
+          </div>
+          <div id="remi-call-captions" class="remi-call-captions" role="log" aria-live="polite" aria-relevant="additions text" hidden></div>
+          <button id="use-call-transcript" class="use-transcript-button" type="button" hidden>Use my latest transcript in the request chat</button>
+          <p id="remi-call-disclosure" class="remi-call-disclosure">When enabled, live audio is sent to Vapi to run this conversation. ROOMAY does not record or store audio. Vapi may process or retain call metadata, speech transcripts and artifacts according to the selected assistant settings. Use test phrases only. A call does not submit a hotel request.</p>
+        </section>
       </div>
 
       <p class="session-note" role="note">Example property · Request updates are limited to this example session and are not sent to hotel staff.</p>
