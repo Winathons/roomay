@@ -101,12 +101,18 @@ matrix in [WOR-23 demo rehearsal](docs/wor-23-rehearsal.md).
 
 ## Guest-service backend (draft; **not** a live Workpeg integration)
 
-The separate FastAPI + PostgreSQL guest-service prototype lives in `backend/`.
-It has real transactional PostgreSQL tests in GitHub CI, but **the hotel data
-reader deliberately returns 503** until Workpeg confirms a supported server
-invocation/read contract. The backend's PostgreSQL request/audit ledger is
-**not synchronized** with the Workpeg receptionist's operational request tables;
-WOR-62's single-writer decision and real staff visibility are unapproved.
+The owner selected **Workpeg Tables as ROOMAY's authoritative service-request
+and audit store (Option A)**. The separate FastAPI/PostgreSQL backend in
+`backend/` is **dormant infrastructure for isolated engineering tests**, not a
+second operational request writer. Its default `backend.main` entrypoint
+refuses startup without explicit `ROOMAY_ENABLE_STANDALONE_PROTOTYPE=local-only`,
+and its hotel-data reader returns sanitized 503 even when opted in. That
+local-only value is not deployment authorization.
+
+The backend's PostgreSQL request/audit ledger is **not synchronized** with
+Workpeg Reception's tables. The supported secure external Workpeg bridge,
+transaction/reconciliation guarantees and independently authenticated guest →
+staff → guest status readback remain blocked in WOR-61/62/65.
 
 See [the backend security/setup guide](docs/guest-service-backend.md) and
 [WOR-61 auth boundary](docs/wor-61-auth-boundary.md). Do not deploy, publish,
