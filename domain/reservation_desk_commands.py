@@ -10,6 +10,7 @@ from datetime import timedelta
 from hashlib import sha256
 import json
 from uuid import NAMESPACE_URL, uuid5
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from .hotel import parse_day, parse_instant, validate_snapshot
 from .reservation_commands import (
@@ -122,7 +123,7 @@ def _decision(action, reservation_id, before, after, context, now, key, details,
 
 def prepare_staff_confirmation(
     snapshot, *, reservation_id, room_id, review, idempotency_key,
-    context, prior_operation=None,
+    context, hotel_timezone, prior_operation=None,
 ):
     """Recheck pending inventory and propose a staff confirmation + audit.
 
@@ -151,7 +152,13 @@ def prepare_staff_confirmation(
         raise ReservationRejected("valid_review_timestamp_required") from None
     if reviewed_at > now or now - reviewed_at > timedelta(minutes=30):
         raise ReservationRejected("staff_review_stale_or_future")
-    if parse_day(booking["departure"]) <= now.date():
+    if not isinstance(hotel_timezone, str) or not hotel_timezone.strip():
+        raise ReservationRejected("authoritative_hotel_timezone_required")
+    try:
+        hotel_day = now.astimezone(ZoneInfo(hotel_timezone)).date()
+    except (ZoneInfoNotFoundError, ValueError, TypeError):
+        raise ReservationRejected("authoritative_hotel_timezone_unavailable") from None
+    if parse_day(booking["departure"]) <= hotel_day:
         raise ReservationRejected("booking_departure_already_passed")
     plan = prepare_authorized_room_confirmation(
         snapshot, reservation_id=reservation_id, room_id=room_id, context=context,
