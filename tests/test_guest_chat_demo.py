@@ -9,9 +9,12 @@ import unittest
 from pathlib import Path
 
 from domain.fixtures import uid
+from domain.staff_actions import _audit_history_is_consistent
 from tools.guest_chat_demo import (
     LOOPBACK, DemoError, GuestChatDemo, make_server,
 )
+
+ROOT = Path(__file__).resolve().parents[1]
 
 
 class GuestChatDemoFlowTests(unittest.TestCase):
@@ -89,6 +92,22 @@ class GuestChatDemoFlowTests(unittest.TestCase):
         self.assertEqual(view["state"], "awaiting_confirmation")
         self.assertEqual(view["pending"]["summary"]["department"], "Housekeeping")
         self.assertEqual(view["pending"]["summary"]["category"], "Extra Towels")
+
+    def test_synthetic_request_and_committed_audit_chain_reuse_canonical_domain(self):
+        view = self.send("Please bring extra towels to room 205.")
+        self.demo.confirm(self.session_id, view["pending"]["revision"])
+        self.demo.switch_role(self.session_id, "reception")
+        self.demo.assign_latest_to_housekeeping(self.session_id)
+        self.demo.switch_role(self.session_id, "housekeeping")
+        for action in ("acknowledge", "start", "resolve"):
+            self.demo.department_action(self.session_id, action)
+            session = self.demo._sessions[self.session_id]
+            self.assertTrue(_audit_history_is_consistent(
+                session.demo_requests[0], session.demo_audit))
+        guest = self.demo.switch_role(self.session_id, "guest")["guest"]
+        self.assertEqual(guest["requests"][0]["status"], "resolved")
+        self.assertNotIn("request_id", json.dumps(guest))
+        self.assertNotIn("guest_id", json.dumps(guest))
 
     def test_missing_room_clarification_then_room_reply_prepares_only_after_confirm(self):
         first = self.send("The AC is not cooling.")
@@ -296,7 +315,7 @@ class GuestChatDemoHttpTests(unittest.TestCase):
         self.assertEqual(self.server.server_address[0], LOOPBACK)
         status, headers, html = self.dispatch("/")
         self.assertEqual(status, 200)
-        self.assertIn("OFFLINE DEMO — SYNTHETIC DATA — NO REQUEST SUBMITTED", html.decode("utf-8"))
+        self.assertIn("SYNTHETIC DEMO — NO LIVE HOTEL REQUEST SUBMITTED", html.decode("utf-8"))
         self.assertIn("default-src 'self'", headers["Content-Security-Policy"])
         self.assertIn('src="/voice_intake.js"', html.decode("utf-8"))
         self.assertIn("script-src 'self'", headers["Content-Security-Policy"])
@@ -320,13 +339,13 @@ class GuestChatDemoHttpTests(unittest.TestCase):
         cookie_pair = cookie.split(";", 1)[0]
         session_view = json.loads(body)
         self.assertNotIn("session_id", session_view)
-        self.assertFalse(session_view["submitted"])
+        self.assertFalse(session_view["chat"]["submitted"])
 
         message = json.dumps({"text": "Abeg, my AC no dey cool for room 205."}).encode()
         status, _, body = self.dispatch("/api/message", method="POST", body=message,
                                         cookie=cookie_pair)
         self.assertEqual(status, 200)
-        view = json.loads(body)
+        view = json.loads(body)["chat"]
         self.assertEqual(view["pending"]["summary"]["department"], "Maintenance")
         self.assertNotIn("internal", view)
         self.assertNotIn("request_plan", json.dumps(view))
@@ -342,6 +361,73 @@ class GuestChatDemoHttpTests(unittest.TestCase):
     def test_protected_action_requires_session_cookie(self):
         status, _, _ = self.dispatch("/api/confirm", method="POST", body=b'{"revision":1}')
         self.assertEqual(status, 401)
+
+    def test_complete_browser_journey_is_role_scoped_and_survives_reload(self):
+        status, headers, body = self.dispatch("/api/session", method="POST", body=b"{}")
+        self.assertEqual(status, 200)
+        cookie = headers["Set-Cookie"].split(";", 1)[0]
+        state = json.loads(body)
+        self.assertEqual(state["role"], "guest")
+        self.assertEqual(state["guest"]["room"], "205")
+        self.assertEqual(state["guest"]["stay_status"], "checked_in")
+        self.assertTrue(state["demo"])
+        self.assertIn("server process memory", state["storage"])
+
+        status, _, body = self.dispatch(
+            "/api/message", method="POST",
+            body=json.dumps({"text": "Please bring extra towels to room 205."}).encode(),
+            cookie=cookie,
+        )
+        self.assertEqual(status, 200)
+        state = json.loads(body)
+        self.assertEqual(state["chat"]["pending"]["summary"]["department"], "Housekeeping")
+        revision = state["chat"]["pending"]["revision"]
+        status, _, body = self.dispatch(
+            "/api/confirm", method="POST",
+            body=json.dumps({"revision": revision}).encode(), cookie=cookie,
+        )
+        self.assertEqual(status, 200)
+        state = json.loads(body)
+        self.assertEqual(state["reception"]["requests"][0]["status"], "received")
+        self.assertIn("No live hotel request", state["chat"]["messages"][-1]["text"])
+
+        def act(path, payload):
+            status, _, result = self.dispatch(
+                path, method="POST", body=json.dumps(payload).encode(), cookie=cookie)
+            self.assertEqual(status, 200, result.decode())
+            return json.loads(result)
+
+        act("/api/role", {"role": "reception"})
+        state = act("/api/assign", {})
+        self.assertEqual(state["reception"]["requests"][0]["status"], "assigned")
+        act("/api/role", {"role": "housekeeping"})
+        for action, expected in (("acknowledge", "acknowledged"),
+                                 ("start", "in_progress"), ("resolve", "resolved")):
+            state = act("/api/staff-action", {"action": action})
+            self.assertEqual(state["housekeeping"]["requests"][0]["status"], expected)
+        act("/api/role", {"role": "guest"})
+
+        status, _, body = self.dispatch("/api/session", method="POST", body=b"{}", cookie=cookie)
+        self.assertEqual(status, 200)
+        reloaded = json.loads(body)
+        self.assertEqual(reloaded["guest"]["requests"][0]["status"], "resolved")
+        self.assertEqual(reloaded["reception"]["requests"][0]["demo_version"], 5)
+        self.assertEqual(reloaded["reception"]["requests"][0]["demo_history"],
+                         ["received", "assigned", "acknowledged", "in_progress", "resolved"])
+        self.assertNotIn("request_id", json.dumps(reloaded["guest"]))
+        self.assertNotIn("operation_signature", json.dumps(reloaded))
+        self.assertIn("not a Workpeg audit", (ROOT / "tools/guest_chat_demo_assets/app.js").read_text())
+
+    def test_browser_demo_refuses_actions_outside_selected_synthetic_role(self):
+        status, headers, _ = self.dispatch("/api/session", method="POST", body=b"{}")
+        self.assertEqual(status, 200)
+        cookie = headers["Set-Cookie"].split(";", 1)[0]
+        status, _, body = self.dispatch("/api/assign", method="POST", body=b"{}", cookie=cookie)
+        self.assertEqual(status, 403)
+        self.assertEqual(json.loads(body)["error"], "demo_reception_role_required")
+        status, _, body = self.dispatch(
+            "/api/role", method="POST", body=b'{"role":"owner"}', cookie=cookie)
+        self.assertEqual(status, 400)
 
 
 if __name__ == "__main__":

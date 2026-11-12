@@ -1,10 +1,11 @@
-"""Loopback-only offline guest chat demo backed by WOR-18 domain contracts.
+"""Loopback-only synthetic hotel journey backed by Roomay domain contracts.
 
 Run from the repository root with ``python -m tools.guest_chat_demo``. This server never contacts
-Workpeg, Vapi, YarnGPT, or any other remote service.
+Workpeg, Vapi, YarnGPT, PostgreSQL, or any other remote service.
 """
 
 from dataclasses import dataclass, field, replace
+from copy import deepcopy
 from http.cookies import SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import argparse
@@ -13,6 +14,7 @@ import re
 import secrets
 import threading
 import time
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from urllib.parse import urlsplit
 from uuid import uuid4
@@ -20,7 +22,11 @@ from uuid import uuid4
 from domain.access_control import AccessContext
 from domain.conversation_intake import ConversationScope, handle_conversation_turn
 from domain.fixtures import synthetic_hotel, uid
-from domain.service_requests import CATEGORY_DEPARTMENTS, DEPARTMENTS
+from domain.reception import build_reception_snapshot
+from domain.service_requests import (
+    CATEGORY_DEPARTMENTS, DEPARTMENTS, AuthorizationError, ConflictError,
+    RequestError, reconcile_write, request_view, transition_request,
+)
 
 
 LOOPBACK = "127.0.0.1"
@@ -30,7 +36,8 @@ SESSION_TTL_SECONDS = 20 * 60
 MAX_SESSIONS = 32
 MAX_BODY_BYTES = 4096
 MAX_GUEST_TEXT_CHARS = 1000
-DEMO_TIMESTAMP = "2026-11-06T12:00:00+01:00"
+# Synthetic hotel calendar uses Nigeria's current fixed UTC+01:00 offset.
+DEMO_TIMEZONE = timezone(timedelta(hours=1), name="Africa/Lagos")
 _ROOM_TOKEN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9-]{0,19}$")
 _ROOM_RESPONSE = re.compile(r"^(?:room\s+|rm\s+)?([A-Za-z0-9][A-Za-z0-9-]{0,19})$", re.I)
 
@@ -72,6 +79,10 @@ class DemoSession:
     revision: int = 0
     completed_revision: int | None = None
     completed_reply: str | None = None
+    pending_at: str | None = None
+    demo_requests: list = field(default_factory=list)
+    demo_audit: list = field(default_factory=list)
+    active_role: str = "guest"
     last_activity: float = field(default_factory=time.monotonic)
     lock: object = field(default_factory=threading.RLock)
 
@@ -82,6 +93,29 @@ def _new_synthetic_scope():
     business_id = uid("conversation-business")
     hotel_id = uid("conversation-hotel")
     guest_id = uid("Guest C")
+    now = datetime.now(DEMO_TIMEZONE).replace(microsecond=0)
+    today = now.date()
+    reservations = hotel["reservations"]
+    by_id = {record["entity_id"]: record for record in reservations}
+    by_id[uid("in-house")].update(
+        arrival=today.isoformat(), departure=(today + timedelta(days=1)).isoformat())
+    by_id[uid("future")].update(
+        arrival=(today + timedelta(days=1)).isoformat(),
+        departure=(today + timedelta(days=3)).isoformat())
+    by_id[uid("walk-in")].update(
+        arrival=today.isoformat(), departure=(today + timedelta(days=2)).isoformat())
+    checkin_at = now.isoformat()
+    hotel["stays"][0]["checked_in_at"] = checkin_at
+    hotel["stay_guests"][0]["joined_at"] = checkin_at
+    hotel["room_blocks"][0].update(
+        start=(today - timedelta(days=1)).isoformat(),
+        end=(today + timedelta(days=1)).isoformat())
+    staff_directory = [
+        {"actor_id": uid("offline-demo-reception"), "hotel_id": hotel_id,
+         "department": "reception", "roles": [], "active": True},
+        {"actor_id": uid("offline-demo-housekeeping"), "hotel_id": hotel_id,
+         "department": "housekeeping", "roles": [], "active": True},
+    ]
     context = AccessContext(
         actor_id=uid("offline-demo-guest-actor"), business_id=business_id,
         hotel_id=hotel_id, role="guest", authenticated=True,
@@ -91,7 +125,7 @@ def _new_synthetic_scope():
     scope = ConversationScope(
         business_id=business_id, record_business_id=business_id,
         trusted_snapshot_hotel_id=hotel_id, snapshot=hotel,
-        stay_id=uid("stay"), room_id=uid("205"), staff_directory=[],
+        stay_id=uid("stay"), room_id=uid("205"), staff_directory=staff_directory,
         existing_requests=[],
     )
     return context, scope
@@ -121,7 +155,7 @@ def _public_summary(text, intent):
 
 
 class GuestChatDemo:
-    """In-memory, per-session adapter that delegates all request rules to WOR-18."""
+    """Loopback-only journey store; all hotel actions are synthetic and in memory."""
 
     def __init__(self, *, max_sessions=MAX_SESSIONS, clock=time.monotonic):
         self.max_sessions = max_sessions
@@ -148,10 +182,14 @@ class GuestChatDemo:
                 "role": "assistant",
                 "text": ("Welcome to Roomay. Tell me what you need and I’ll help route it. "
                          "This page uses a fictional guest context; no real stay is verified "
-                         "and hotel staff cannot see this conversation."),
+                         "and no real hotel staff can see this demo."),
             })
             self._sessions[session_id] = session
-            return session_id, self._view(session)
+            return session_id, self.journey_view(session_id)
+
+    def resume_session(self, session_id):
+        """Return the same process-memory journey after a browser reload."""
+        return self.journey_view(session_id)
 
     def _get_session(self, session_id):
         if not isinstance(session_id, str) or not session_id:
@@ -181,6 +219,187 @@ class GuestChatDemo:
         }
 
     @staticmethod
+    def _now():
+        return datetime.now(DEMO_TIMEZONE).replace(microsecond=0).isoformat()
+
+    @staticmethod
+    def _staff_actor(session, department):
+        match = next((row for row in session.scope.staff_directory
+                      if row["department"] == department), None)
+        if match is None:
+            raise DemoError("demo_role_unavailable", 409)
+        return {"actor_id": match["actor_id"], "hotel_id": match["hotel_id"],
+                "kind": "staff"}
+
+    @staticmethod
+    def _advance_demo_transaction(session, plan):
+        """Apply canonical pending-event/request/committed-event steps in memory."""
+        request_id = plan["target_request"]["request_id"]
+        current = next((deepcopy(row) for row in session.demo_requests
+                        if row["request_id"] == request_id), None)
+        events = [deepcopy(event) for event in session.demo_audit
+                  if event["request_id"] == request_id]
+        for _ in range(5):
+            step = reconcile_write(plan, current, events)
+            if step == "append_pending_event":
+                events.append(deepcopy(plan["event"]))
+            elif step == "apply_request":
+                current = deepcopy(plan["target_request"])
+            elif step == "commit_event":
+                event = next(item for item in events
+                             if item["operation_id"] == plan["event"]["operation_id"])
+                event["commit_state"] = "committed"
+            elif step == "complete":
+                if current is None:
+                    raise DemoError("demo_reconciliation_failed", 409)
+                session.demo_requests = [row for row in session.demo_requests
+                                         if row["request_id"] != request_id]
+                session.demo_requests.append(deepcopy(current))
+                session.demo_audit = [event for event in session.demo_audit
+                                      if event["request_id"] != request_id]
+                session.demo_audit.extend(deepcopy(events))
+                retained = [row for row in session.scope.existing_requests
+                            if row["request_id"] != request_id]
+                retained.append(deepcopy(current))
+                session.scope.existing_requests[:] = retained
+                return deepcopy(current)
+            else:
+                raise DemoError("demo_reconciliation_failed", 409)
+        raise DemoError("demo_reconciliation_failed", 409)
+
+    @staticmethod
+    def _safe_request(request, hotel, role):
+        guest = next((row["display_name"] for row in hotel["guests"]
+                      if row["entity_id"] == request["guest_id"]), "Fictional guest")
+        room = next((row["number"] for row in hotel["rooms"]
+                     if row["entity_id"] == request["room_id"]), "—")
+        events = sorted((event for event in request.get("_demo_events", [])),
+                        key=lambda event: event.get("sequence", 0))
+        return {"description": request["description"], "category": request["category"],
+                "department": request["department"], "urgency": request["urgency"],
+                "status": request["status"], "room": room,
+                "guest": guest if role == "reception" else None,
+                "demo_version": request["version"],
+                "demo_history": [event["to_status"] for event in events]}
+
+    def journey_view(self, session_id):
+        session = self._get_session(session_id)
+        with session.lock:
+            hotel = session.scope.snapshot
+            today = datetime.now(DEMO_TIMEZONE).date().isoformat()
+            projection = build_reception_snapshot(
+                hotel, session.demo_requests, today, session.demo_audit)
+            room = next(item for item in projection["rooms"] if item["number"] == "205")
+            stay = next(item for item in hotel["stays"]
+                        if item["entity_id"] == session.scope.stay_id)
+            booking = next(item for item in hotel["reservations"]
+                           if item["entity_id"] == stay["reservation_id"])
+            guest = next(item for item in hotel["guests"]
+                         if item["entity_id"] == session.context.guest_id)
+            guest_requests = []
+            department_requests = []
+            for request in session.demo_requests:
+                guest_projection = request_view(
+                    request,
+                    {"actor_id": session.context.actor_id, "hotel_id": session.context.hotel_id,
+                     "kind": "guest", "guest_id": session.context.guest_id},
+                    session.scope.staff_directory, snapshot=hotel,
+                )
+                if request["guest_id"] == session.context.guest_id:
+                    guest_requests.append(guest_projection)
+                if request["department"] == "housekeeping":
+                    staff_projection = request_view(
+                        request, self._staff_actor(session, "housekeeping"),
+                        session.scope.staff_directory,
+                    )
+                    department_requests.append(self._safe_request(
+                        staff_projection, hotel, "housekeeping"))
+            request_history = {request["request_id"]: [
+                deepcopy(event) for event in session.demo_audit
+                if event["request_id"] == request["request_id"]
+            ] for request in session.demo_requests}
+            safe_reception_requests = []
+            for item in session.demo_requests:
+                enriched = deepcopy(item)
+                enriched["_demo_events"] = request_history.get(item["request_id"], [])
+                safe_reception_requests.append(
+                    self._safe_request(enriched, hotel, "reception"))
+            return {
+                "demo": True, "notice": "SYNTHETIC DEMO — NO LIVE HOTEL REQUEST SUBMITTED",
+                "storage": "This journey is held in this local server process memory; it survives page reload, not a server restart.",
+                "role": session.active_role, "date": today,
+                "chat": self._view(session),
+                "guest": {"name": guest["display_name"], "room": "205",
+                          "stay_status": stay["status"], "reservation_status": booking["status"],
+                          "departure": booking["departure"],
+                          "requests": guest_requests},
+                "reception": {"metrics": projection["metrics"],
+                              "room": room,
+                              "rooms": projection["rooms"],
+                              "requests": safe_reception_requests},
+                "housekeeping": {"requests": department_requests},
+            }
+
+    def switch_role(self, session_id, role):
+        if role not in {"guest", "reception", "housekeeping"}:
+            raise DemoError("invalid_demo_role")
+        session = self._get_session(session_id)
+        with session.lock:
+            session.active_role = role
+        return self.journey_view(session_id)
+
+    def assign_latest_to_housekeeping(self, session_id):
+        session = self._get_session(session_id)
+        with session.lock:
+            if session.active_role != "reception":
+                raise DemoError("demo_reception_role_required", 403)
+            if not session.demo_requests:
+                raise DemoError("no_demo_request", 409)
+            request = session.demo_requests[-1]
+            if request["department"] != "housekeeping":
+                raise DemoError("demo_assignment_unavailable", 409)
+            actor = self._staff_actor(session, "reception")
+            assignee_id = next(row["actor_id"] for row in session.scope.staff_directory
+                               if row["department"] == request["department"])
+            try:
+                result = transition_request(
+                    request, "assigned", actor, session.scope.staff_directory,
+                    at=self._now(), operation_key="demo-assign-housekeeping-v1",
+                    assignee_id=assignee_id,
+                )
+                if result["kind"] == "transitioned":
+                    self._advance_demo_transaction(session, result["plan"])
+            except (AuthorizationError, ConflictError, RequestError, StopIteration):
+                raise DemoError("demo_assignment_unavailable", 409) from None
+            return self.journey_view(session_id)
+
+    def department_action(self, session_id, action):
+        targets = {"acknowledge": "acknowledged", "start": "in_progress",
+                   "resolve": "resolved"}
+        if action not in targets:
+            raise DemoError("invalid_department_action")
+        session = self._get_session(session_id)
+        with session.lock:
+            if session.active_role != "housekeeping":
+                raise DemoError("demo_housekeeping_role_required", 403)
+            if not session.demo_requests:
+                raise DemoError("no_demo_request", 409)
+            request = session.demo_requests[-1]
+            if request["department"] != "housekeeping":
+                raise DemoError("demo_department_action_unavailable", 409)
+            actor = self._staff_actor(session, "housekeeping")
+            try:
+                result = transition_request(
+                    request, targets[action], actor, session.scope.staff_directory,
+                    at=self._now(), operation_key="demo-housekeeping-" + action + "-v1",
+                )
+                if result["kind"] == "transitioned":
+                    self._advance_demo_transaction(session, result["plan"])
+            except (AuthorizationError, ConflictError, RequestError):
+                raise DemoError("demo_department_action_unavailable", 409) from None
+            return self.journey_view(session_id)
+
+    @staticmethod
     def _append(session, role, text):
         session.messages.append({"role": role, "text": text})
         if len(session.messages) > 40:
@@ -201,9 +420,12 @@ class GuestChatDemo:
             raise DemoError("invalid_message")
         session = self._get_session(session_id)
         with session.lock:
+            if session.active_role != "guest":
+                raise DemoError("demo_guest_role_required", 403)
             text = text.strip()
             if session.pending is not None:
                 session.pending = None
+                session.pending_at = None
                 self._append(session, "assistant",
                              "I canceled the earlier unsubmitted draft. Let’s look at your new message.")
             session.completed_revision = None
@@ -256,9 +478,10 @@ class GuestChatDemo:
             session.clarification = None
             session.active_turn_id = turn_id
 
+            turn_at = self._now()
             result = handle_conversation_turn(
                 combined, channel="typed_chat", conversation_id=session.conversation_id,
-                turn_id=turn_id, at=DEMO_TIMESTAMP, confirmed=False,
+                turn_id=turn_id, at=turn_at, confirmed=False,
                 provider_status=_provider_status, access_context=session.context,
                 scope=session.scope,
             )
@@ -279,6 +502,7 @@ class GuestChatDemo:
                     "turn_id": turn_id,
                     "summary": summary,
                 }
+                session.pending_at = turn_at
                 session.active_turn_id = None
                 self._append(session, "assistant", result["message"])
             else:
@@ -291,6 +515,8 @@ class GuestChatDemo:
             raise DemoError("confirmation_out_of_date", 409)
         session = self._get_session(session_id)
         with session.lock:
+            if session.active_role != "guest":
+                raise DemoError("demo_guest_role_required", 403)
             if (session.completed_revision == revision and session.completed_reply is not None):
                 return self._view(session)
             pending = session.pending
@@ -300,20 +526,21 @@ class GuestChatDemo:
             result = handle_conversation_turn(
                 pending["text"], channel="typed_chat",
                 conversation_id=session.conversation_id,
-                turn_id=pending["turn_id"], at=DEMO_TIMESTAMP,
+                turn_id=pending["turn_id"], at=session.pending_at or self._now(),
                 confirmed=True, access_context=session.context, scope=session.scope,
             )
             session.pending = None
+            session.pending_at = None
             session.state = result["state"]
             intent = result.get("internal", {}).get("intent", {})
             if result["state"] == "prepared":
                 plan = result.get("internal", {}).get("request_plan", {})
                 request = plan.get("target_request")
-                if isinstance(request, dict):
-                    session.scope.existing_requests.append(request)
+                if isinstance(request, dict) and isinstance(plan, dict):
+                    self._advance_demo_transaction(session, plan)
                 department = _department_label(intent.get("department"))
-                reply = (f"The {department} request has been prepared in this offline demo. "
-                         "It has not been sent to hotel staff or saved; no ticket was created.")
+                reply = (f"The request now appears in the synthetic {department} demo workflow. "
+                         "It has not been sent to hotel staff or saved to Workpeg. No live hotel request was submitted, no ticket was created, and no real staff were notified.")
                 session.completed_revision = revision
                 session.completed_reply = reply
             else:
@@ -329,9 +556,12 @@ class GuestChatDemo:
             raise DemoError("confirmation_out_of_date", 409)
         session = self._get_session(session_id)
         with session.lock:
+            if session.active_role != "guest":
+                raise DemoError("demo_guest_role_required", 403)
             if session.pending is None or session.pending["revision"] != revision:
                 raise DemoError("confirmation_out_of_date", 409)
             session.pending = None
+            session.pending_at = None
             session.state = "cancelled"
             session.completed_revision = None
             session.completed_reply = None
@@ -448,17 +678,25 @@ def make_server(demo=None, port=PORT_DEFAULT):
         def do_POST(self):
             if not self._local_host() or not self._same_origin():
                 return self._send(403, {"error": "same_origin_required"})
-            if self.path not in ("/api/session", "/api/message", "/api/confirm", "/api/cancel"):
+            if self.path not in ("/api/session", "/api/message", "/api/confirm", "/api/cancel",
+                                 "/api/role", "/api/assign", "/api/staff-action"):
                 return self._send(404, {"error": "not_found"})
             try:
                 body = self._json_body()
                 if self.path == "/api/session":
                     if body:
                         raise DemoError("invalid_request")
-                    session_id, view = demo.create_session()
-                    cookie = (f"{SESSION_COOKIE}={session_id}; Path=/; Max-Age={SESSION_TTL_SECONDS}; "
-                              "HttpOnly; SameSite=Strict")
-                    return self._send(200, view, extra=(("Set-Cookie", cookie),))
+                    session_id = _decode_cookie(self.headers.get("Cookie", ""))
+                    try:
+                        view = demo.resume_session(session_id) if session_id else None
+                    except DemoError:
+                        view = None
+                    if view is None:
+                        session_id, view = demo.create_session()
+                        cookie = (f"{SESSION_COOKIE}={session_id}; Path=/; Max-Age={SESSION_TTL_SECONDS}; "
+                                  "HttpOnly; SameSite=Strict")
+                        return self._send(200, view, extra=(("Set-Cookie", cookie),))
+                    return self._send(200, view)
 
                 session_id = _decode_cookie(self.headers.get("Cookie", ""))
                 if session_id is None:
@@ -466,15 +704,30 @@ def make_server(demo=None, port=PORT_DEFAULT):
                 if self.path == "/api/message":
                     if set(body) != {"text"}:
                         raise DemoError("invalid_request")
-                    view = demo.send_message(session_id, body["text"])
+                    demo.send_message(session_id, body["text"])
+                    view = demo.journey_view(session_id)
                 elif self.path == "/api/confirm":
                     if set(body) != {"revision"}:
                         raise DemoError("invalid_request")
-                    view = demo.confirm(session_id, body["revision"])
-                else:
+                    demo.confirm(session_id, body["revision"])
+                    view = demo.journey_view(session_id)
+                elif self.path == "/api/cancel":
                     if set(body) != {"revision"}:
                         raise DemoError("invalid_request")
-                    view = demo.cancel(session_id, body["revision"])
+                    demo.cancel(session_id, body["revision"])
+                    view = demo.journey_view(session_id)
+                elif self.path == "/api/role":
+                    if set(body) != {"role"}:
+                        raise DemoError("invalid_request")
+                    view = demo.switch_role(session_id, body["role"])
+                elif self.path == "/api/assign":
+                    if body:
+                        raise DemoError("invalid_request")
+                    view = demo.assign_latest_to_housekeeping(session_id)
+                else:
+                    if set(body) != {"action"}:
+                        raise DemoError("invalid_request")
+                    view = demo.department_action(session_id, body["action"])
                 self._send(200, view)
             except DemoError as error:
                 self._send(error.status, {"error": error.code})
@@ -488,12 +741,12 @@ def make_server(demo=None, port=PORT_DEFAULT):
 
 
 def main(argv=None):
-    parser = argparse.ArgumentParser(description="Run the offline Roomay guest chat demo on loopback.")
+    parser = argparse.ArgumentParser(description="Run the synthetic Roomay hotel journey on loopback.")
     parser.add_argument("--port", type=int, default=PORT_DEFAULT)
     args = parser.parse_args(argv)
     server = make_server(port=args.port)
     print(f"Roomay offline guest chat listening at http://{LOOPBACK}:{server.server_port}/")
-    print("Synthetic data only. No request is submitted or saved. Press Ctrl+C to stop.")
+    print("Synthetic data only; actions stay in server memory and never reach a real hotel system. Press Ctrl+C to stop.")
     try:
         server.serve_forever()
     except KeyboardInterrupt:

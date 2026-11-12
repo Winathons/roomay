@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="color-scheme" content="light">
-  <title>Roomay | Offline Guest Chat</title>
+  <title>Roomay | Local Hotel Journey</title>
   <link rel="stylesheet" href="/app.css">
   <script src="/voice_intake.js" defer></script>
   <script src="/app.js" defer></script>
@@ -16,19 +16,34 @@
         <span class="brand-mark" aria-hidden="true">R</span>
         <span class="brand-name">roomay<span class="brand-period">.</span></span>
       </a>
-      <div class="demo-status"><span class="status-dot"></span> Local demo</div>
+      <div class="demo-status"><span class="status-dot"></span> Synthetic journey</div>
     </header>
 
     <main>
       <section class="notice" role="note" aria-label="Demo status">
         <span class="notice-icon" aria-hidden="true">i</span>
-        <strong>OFFLINE DEMO — SYNTHETIC DATA — NO REQUEST SUBMITTED</strong>
+        <strong>SYNTHETIC DEMO — NO LIVE HOTEL REQUEST SUBMITTED</strong>
       </section>
 
+      <nav class="journey-nav" aria-label="Choose a synthetic demo view">
+        <span class="nav-label">DEMO VIEW</span>
+        <button type="button" class="role-tab" data-role="guest" aria-pressed="true">My Stay</button>
+        <button type="button" class="role-tab" data-role="reception" aria-pressed="false">Reception</button>
+        <button type="button" class="role-tab" data-role="housekeeping" aria-pressed="false">Housekeeping</button>
+      </nav>
+      <p id="journey-feedback" class="journey-feedback" role="status" aria-live="polite"></p>
+
+      <section id="guest-panel" class="role-panel" aria-label="Synthetic guest stay">
       <section class="intro">
         <p class="eyebrow">ROOMAY GUEST CARE</p>
         <h1>How can we help?</h1>
         <p class="intro-copy">Tell us what you need. Roomay can clarify the request and show which hotel team would handle it.</p>
+      </section>
+
+      <section id="my-stay-card" class="stay-card" aria-label="My synthetic stay">
+        <div><p class="side-kicker">MY STAY · SYNTHETIC</p><h2 id="guest-stay-title">Loading fictional stay…</h2></div>
+        <p id="guest-stay-meta" class="stay-meta"></p>
+        <div id="guest-request-status" class="request-status-list"></div>
       </section>
 
       <div class="workspace">
@@ -100,7 +115,7 @@
             <ol class="steps">
               <li><span>1</span><div><strong>Describe it</strong><small>Use your own words or Nigerian Pidgin.</small></div></li>
               <li><span>2</span><div><strong>Review the route</strong><small>Roomay checks the request and asks if details are missing.</small></div></li>
-              <li><span>3</span><div><strong>Confirm to prepare</strong><small>Nothing is sent or saved in this demo.</small></div></li>
+              <li><span>3</span><div><strong>Confirm the request</strong><small>It appears in the synthetic workflow only; no live hotel system is changed.</small></div></li>
             </ol>
           </section>
 
@@ -110,10 +125,25 @@
           </section>
         </aside>
       </div>
+      </section>
+
+      <section id="reception-panel" class="role-panel" aria-label="Synthetic Reception workspace" hidden>
+        <section class="intro"><p class="eyebrow">FRONT DESK · SYNTHETIC WORKSPACE</p><h1>Reception Today</h1><p class="intro-copy">A fictional hotel snapshot for this local journey. It is separate from authenticated Workpeg records.</p></section>
+        <div id="reception-metrics" class="metric-grid" aria-live="polite"></div>
+        <section class="staff-card"><div class="staff-card-heading"><div><p class="side-kicker">ACTIVE STAY</p><h2>Room 205</h2></div><span class="status-pill">IN HOUSE</span></div><div id="active-stay-details" class="stay-details"></div></section>
+        <section class="staff-card"><div class="staff-card-heading"><div><p class="side-kicker">ROOMS</p><h2>Room board</h2></div></div><div id="room-board" class="room-board"></div></section>
+        <section class="staff-card"><div class="staff-card-heading"><div><p class="side-kicker">SERVICE REQUESTS</p><h2>Request activity</h2></div><button id="assign-housekeeping" class="action-button" type="button">Assign to Housekeeping</button></div><div id="reception-requests" class="request-list"></div></section>
+      </section>
+
+      <section id="housekeeping-panel" class="role-panel" aria-label="Synthetic Housekeeping inbox" hidden>
+        <section class="intro"><p class="eyebrow">HOUSEKEEPING · SYNTHETIC INBOX</p><h1>Department requests</h1><p class="intro-copy">Only fictional housekeeping requests appear in this demo inbox.</p></section>
+        <section class="staff-card"><div class="staff-card-heading"><div><p class="side-kicker">HOUSEKEEPING QUEUE</p><h2>Assigned work</h2></div></div><div id="housekeeping-requests" class="request-list"></div><p id="housekeeping-empty" class="empty-state" hidden>No housekeeping requests yet. Submit a guest request, then assign it from Reception.</p></section>
+        <p class="workflow-note">Acknowledge → Start work → Resolve. Every transition runs through Roomay's canonical offline service-request rules and updates this local synthetic journey only.</p>
+      </section>
 
       <footer class="page-footer">
         <span>Roomay · Guest care, made clear</span>
-        <span>Fictional context · Session kept in local memory only</span>
+        <span>Fictional context · server-process memory · no Workpeg writes</span>
       </footer>
     </main>
   </div>

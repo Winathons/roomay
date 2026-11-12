@@ -1,9 +1,12 @@
-# WOR-57 Offline Guest Chat Demo
+# ROOMAY Local Hotel Journey
 
-This is an isolated, local-only chat preview that delegates classification,
-clarification, routing, authorization checks, and request preparation to the
-existing WOR-18 conversation-intake contract. It does not add a production
-Workpeg route or a second hotel database.
+This local browser journey shows how the existing guest, Reception and
+Housekeeping contracts fit together. Guest classification, clarification,
+routing, stay checks and explicit confirmation reuse WOR-18. Request creation,
+Reception assignment, Housekeeping acknowledgement, start and resolution use
+the canonical service-request domain functions. A small process-memory store
+holds the explicitly synthetic request and audit history; it is not an
+operational or Workpeg writer.
 
 ## Run locally
 
@@ -14,64 +17,54 @@ From the repository root in PowerShell:
 ```
 
 Open `http://127.0.0.1:8765/`. Stop the server with `Ctrl+C`. The server binds
-only to IPv4 loopback. It uses Python's standard library and the repository's
-installed dependencies; it makes no outbound requests. If the default port is
-busy, pass `--port 8766` and open the matching URL.
+only to IPv4 loopback. It makes no outbound requests. If port 8765 is busy, run
+with `--port 8766` and open the matching URL.
 
-The page is explicitly labelled **OFFLINE DEMO — SYNTHETIC DATA — NO REQUEST
-SUBMITTED**. Each in-memory session gets a fictional guest context and a
-synthetic room 205 scope. The page also tells the guest that this is fictional
-and not a real authenticated stay. A room number supplied in chat is never
-treated as proof of identity or access.
+The interface displays **SYNTHETIC DEMO — NO LIVE HOTEL REQUEST SUBMITTED**.
+Start at My Stay, submit and confirm “Please bring extra towels to room 205,”
+open Reception and assign the request, then use the Housekeeping tab to
+acknowledge, start and resolve it. Return to My Stay to see the same final
+status. Reception also shows the Room 205 active stay, rooms board, metrics and
+the demo-only request history.
 
-The optional “Start voice input” control in this demo requires browser support
-for **on-device** Web Speech recognition and an already installed `en-NG`
-language pack. It never enables cloud recognition or downloads a language
-pack. Voice text appears in the editable message box and is not sent until the
-guest reviews it and submits it. If private on-device recognition is
-unsupported or denied, type the message instead. See
-[WOR-19 browser voice intake](wor-19-browser-voice-intake.md) for privacy,
-accessibility and test details.
+The Guest, Reception and Housekeeping tabs are selectable demo roles. They are
+not authenticated identities or proof of real permissions. Each demo session
+uses fictional records and one synthetic active stay. Request/status updates
+are kept in the server process memory, so they survive normal page reloads for
+the same HttpOnly session cookie (up to 20 minutes inactivity). Restarting the
+server discards them. No data is seeded to Workpeg or PostgreSQL, and no real
+staff are notified.
 
-Try these messages:
+The optional “Start voice input” control requires browser support for on-device
+Web Speech recognition and an already-installed `en-NG` language pack. It does
+not enable cloud recognition or download language packs. Type a message if
+private on-device recognition is unavailable. See
+[WOR-19 browser voice intake](wor-19-browser-voice-intake.md).
 
-- `Hi` (greeting, no room or ticket requested)
-- `205` then `Hi are you here` then `The AC is not cooling` (room context is preserved, greeting is not a ticket)
-- `Abeg, my AC no dey cool for room 205.`
-- `The air conditioner in room 205 is not cooling.`
-- `Please bring extra towels to room 205.`
-- `I need help with my room.` (clarification / human triage)
-- `There is a fire in the room.` (urgent human handoff)
-
-For a prepared request, review the summary and explicitly confirm. Confirmation
-only creates a request plan in process memory and the response says it was not
-sent or saved; no ticket number or staff notification is produced. Sessions
-expire after 20 minutes of inactivity, have a bounded process-local capacity,
-and disappear when the server stops. No chat body or cookie is written to
-server request logs.
+Try `Please bring extra towels to room 205.` or `Abeg, my AC no dey cool for
+room 205.`. Emergency messages ask the guest to contact Reception; nobody is
+contacted by the demo.
 
 ## Validation
-
-Run the dedicated tests with:
 
 ```powershell
 ..\.venv\Scripts\python.exe -m unittest tests.test_guest_chat_demo -v
 ```
 
-The HTTP tests exercise the handler in memory; they do not claim to be a browser
-or hosted Workpeg test. The offline text classifier is not an AI model, and the
-Pidgin examples do not measure speech recognition. No screenshot is included
-because this environment has no enabled local browser preview surface.
+The endpoint tests exercise the browser HTTP routes and confirm status changes
+survive reloading through the same session. Manual browser review verifies
+visible navigation, request controls and responsive screens. None of these
+checks prove hosted Workpeg access, staff login, guest verification or live
+request persistence. The offline text classifier is not an AI model, and
+Pidgin examples do not measure speech-recognition accuracy.
 
-## Production integration still required
+## Production work still required
 
-Before using this flow with guests, the team must provide a trusted guest
-authentication gateway and derive the hotel, active stay, room, and business
-scope from trusted Workpeg records. The browser must not supply those claims.
-The prepared request then needs a server-side Workpeg persistence path with
-verified authorization, idempotency, concurrency control, and read-back
-reconciliation, followed by a staff department inbox and guest status tracking.
-Those hosted persistence and permission requirements remain blocked pending
-Workpeg access verification. Real AI classification and Vapi tool adapters
-must feed the same validated domain contract; this demo calls neither AI nor
-Vapi. Do not expose the local synthetic-session mechanism as a public endpoint.
+The production receptionist route remains an authenticated, read-only Workpeg
+reader. Before real guest use, Roomay needs the owner-approved trusted guest
+verification and active-stay lookup, a server-backed role/department identity
+boundary, an approved single source of truth and request/audit writer, verified
+department permissions, concurrency control and read-back reconciliation. This
+journey calls none of Workpeg, Vapi, YarnGPT or PostgreSQL and does not replace
+WOR-61/WOR-62 or Yusuf's WOR-17 guest portal. Never expose its synthetic role
+switch or session mechanism as a public endpoint.
