@@ -1,15 +1,18 @@
 """Offline guest chat demo tests; every guest context and request is synthetic."""
 
 from dataclasses import replace
+import http.client
 import io
 import json
 import subprocess
 import sys
+import threading
 import unittest
 from pathlib import Path
 
 from domain.fixtures import uid
 from domain.staff_actions import _audit_history_is_consistent
+from domain.conversation_intake import classify_text
 from tools.guest_chat_demo import (
     LOOPBACK, DemoError, GuestChatDemo, make_server,
 )
@@ -26,7 +29,8 @@ class GuestChatDemoFlowTests(unittest.TestCase):
         return self.demo.send_message(self.session_id, text, **kwargs)
 
     def test_greeting_is_not_a_hotel_request(self):
-        for greeting in ("Hi", "Hi are you here", "Hello!", "Good evening", "Thanks"):
+        for greeting in ("Hi", "Hi are you here", "Hello!", "Good evening", "Thanks",
+                         "Hey Hi", "Hey hey", "Hi Remi", "How far Remi?"):
             with self.subTest(greeting=greeting):
                 result = self.send(greeting)
                 self.assertEqual(result["state"], "ready")
@@ -34,7 +38,129 @@ class GuestChatDemoFlowTests(unittest.TestCase):
                 self.assertFalse(result["submitted"])
                 self.assertFalse(result["persisted"])
                 self.assertNotIn("Which room", result["messages"][-1]["text"])
+                self.assertNotIn("describe what is happening", result["messages"][-1]["text"])
+                self.assertTrue(any(value in result["messages"][-1]["text"]
+                                    for value in ("Hello!", "You're welcome", "I’m here")))
         self.assertEqual(self.demo._sessions[self.session_id].scope.existing_requests, [])
+
+    def test_greeting_prefix_does_not_mask_real_service_problems(self):
+        for text, department in (("Hi, my AC isn't cooling", "Maintenance"),
+                                 ("Abeg bring towels", "Housekeeping")):
+            with self.subTest(text=text):
+                demo = GuestChatDemo()
+                session_id, _ = demo.create_session()
+                result = demo.send_message(session_id, text)
+                self.assertEqual(result["state"], "awaiting_confirmation")
+                self.assertEqual(result["pending"]["summary"]["department"], department)
+                self.assertFalse(result["submitted"])
+                self.assertFalse(result["persisted"])
+
+    def test_unclassified_conversation_is_not_converted_to_a_request_by_length(self):
+        for text in ("Tell me something interesting about the day.",
+                     "I had a lovely walk along the beach today.",
+                     "What a beautiful evening here."):
+            with self.subTest(text=text):
+                result = self.send(text)
+                self.assertEqual(result["state"], "ready")
+                self.assertIsNone(result["pending"])
+                self.assertFalse(self.demo._sessions[self.session_id].scope.existing_requests)
+
+    def test_hotel_information_question_never_uses_unverified_model_facts(self):
+        class Provider:
+            def __init__(self): self.calls = []
+            def reply(self, text, *, previous_chat_id=None):
+                self.calls.append(text)
+                return "chat_1", "Breakfast is served at 7 AM."
+        provider = Provider()
+        demo = GuestChatDemo(chat_provider=provider)
+        session_id, _ = demo.create_session()
+        demo.set_ai_chat_consent(session_id, True)
+        for question in ("What time is breakfast?", "What's your address?",
+                         "Do you have a gym?", "What's the Wi-Fi password?"):
+            with self.subTest(question=question):
+                result = demo.send_message(session_id, question)
+                self.assertIn("don't have verified hotel information", result["messages"][-1]["text"])
+        self.assertFalse(provider.calls)
+        self.assertFalse(result["pending"])
+
+    def test_explicit_room_problem_uses_triage_instead_of_model_facts(self):
+        class Provider:
+            calls = 0
+            def reply(self, text, *, previous_chat_id=None):
+                self.calls += 1
+                return "chat_1", "I have reported this to the hotel."
+        provider = Provider()
+        demo = GuestChatDemo(chat_provider=provider)
+        session_id, _ = demo.create_session()
+        demo.set_ai_chat_consent(session_id, True)
+        result = demo.send_message(session_id, "The Wi-Fi is down in my room.")
+        self.assertEqual(result["state"], "awaiting_confirmation")
+        self.assertEqual(result["pending"]["summary"]["department"], "Reception")
+        self.assertEqual(provider.calls, 0)
+
+    def test_ai_chat_requires_guest_consent_and_preserves_multi_turn_context(self):
+        class Provider:
+            def __init__(self): self.calls = []
+            def reply(self, text, *, previous_chat_id=None):
+                self.calls.append((text, previous_chat_id))
+                number = len(self.calls)
+                return f"chat_{number}", ("Hello! I’m doing well, thank you." if number == 1
+                                           else "I dey fine, thank you. How can I help?")
+        provider = Provider()
+        demo = GuestChatDemo(chat_provider=provider)
+        session_id, _ = demo.create_session()
+        off = demo.send_message(session_id, "What's good, Remi?")
+        self.assertIn("What would you like to talk about", off["messages"][-1]["text"])
+        self.assertFalse(provider.calls)
+        consented = demo.set_ai_chat_consent(session_id, True)
+        self.assertTrue(consented["chat"]["ai_chat"]["consented"])
+        first = demo.send_message(session_id, "What's good, Remi?")
+        second = demo.send_message(session_id, "I dey alright, how you dey?")
+        self.assertIn("I’m doing well", first["messages"][-1]["text"])
+        self.assertIn("I dey fine", second["messages"][-1]["text"])
+        self.assertEqual(provider.calls, [("What's good, Remi?", None),
+                                          ("I dey alright, how you dey?", "chat_1")])
+        self.assertFalse(second["pending"])
+        self.assertFalse(second["submitted"])
+        self.assertFalse(second["persisted"])
+        self.assertFalse(demo._sessions[session_id].scope.existing_requests)
+        demo.set_ai_chat_consent(session_id, False)
+        demo.send_message(session_id, "Thanks, Remi.")
+        self.assertEqual(len(provider.calls), 2)
+        demo.set_ai_chat_consent(session_id, True)
+        resumed = demo.send_message(session_id, "Can we keep chatting?")
+        self.assertEqual(provider.calls[-1], ("Can we keep chatting?", None))
+        self.assertEqual(resumed["state"], "ready")
+
+    def test_ai_is_not_called_for_operational_intent_and_domain_routes_request(self):
+        class Provider:
+            calls = 0
+            def reply(self, text, *, previous_chat_id=None):
+                self.calls += 1
+                return "chat_1", "Your request is complete."
+        provider = Provider()
+        demo = GuestChatDemo(chat_provider=provider)
+        session_id, _ = demo.create_session()
+        demo.set_ai_chat_consent(session_id, True)
+        result = demo.send_message(session_id, "Abeg, bring extra towels to my room.")
+        self.assertEqual(result["state"], "awaiting_confirmation")
+        self.assertEqual(result["pending"]["summary"]["department"], "Housekeeping")
+        self.assertEqual(provider.calls, 0)
+        self.assertFalse(result["submitted"])
+        self.assertFalse(result["persisted"])
+
+    def test_untrusted_ai_action_claim_is_not_displayed(self):
+        class Provider:
+            def reply(self, text, *, previous_chat_id=None):
+                return "chat_1", "I've submitted your request and notified Housekeeping."
+        demo = GuestChatDemo(chat_provider=Provider())
+        session_id, _ = demo.create_session()
+        demo.set_ai_chat_consent(session_id, True)
+        result = demo.send_message(session_id, "What's good, Remi?")
+        self.assertIn("trouble reaching Remi", result["messages"][-1]["text"])
+        self.assertNotIn("notified Housekeeping", result["messages"][-1]["text"])
+        self.assertFalse(result["pending"])
+        self.assertFalse(demo._sessions[session_id].scope.existing_requests)
 
     def test_room_only_then_greeting_preserves_missing_issue_context(self):
         self.assertEqual(self.send("Hi")["state"], "ready")
@@ -92,6 +218,11 @@ class GuestChatDemoFlowTests(unittest.TestCase):
         self.assertEqual(view["pending"]["summary"]["department"], "Housekeeping")
         self.assertEqual(view["pending"]["summary"]["category"], "Extra Towels")
 
+    def test_room_cleaning_and_room_service_use_canonical_departments(self):
+        self.assertEqual(classify_text("Can I get room cleaning?")["category"], "room_cleaning")
+        self.assertEqual(classify_text("Please send room service.")["category"], "room_service")
+        self.assertEqual(classify_text("What time is breakfast?")["intent"], "room_enquiry")
+
     def test_synthetic_request_and_committed_audit_chain_reuse_canonical_domain(self):
         view = self.send("Please bring extra towels to room 205.")
         self.demo.confirm(self.session_id, view["pending"]["revision"])
@@ -141,11 +272,11 @@ class GuestChatDemoFlowTests(unittest.TestCase):
                     uid("205"),
                 )
 
-    def test_ordinary_hotel_phrases_after_room_are_not_mismatch_claims(self):
-        for text in (
-            "Please send room service.",
-            "My room smells bad.",
-            "Can I get room cleaning?",
+    def test_hotel_phrases_route_by_canonical_need_without_room_mismatch(self):
+        for text, department in (
+            ("Please send room service.", "Food And Beverage"),
+            ("My room smells bad.", "Reception"),
+            ("Can I get room cleaning?", "Housekeeping"),
         ):
             with self.subTest(text=text):
                 demo = GuestChatDemo()
@@ -154,7 +285,7 @@ class GuestChatDemoFlowTests(unittest.TestCase):
                 self.assertNotEqual(result["state"], "handoff")
                 self.assertNotIn("doesn't match the stay", result["messages"][-1]["text"])
                 self.assertEqual(result["state"], "awaiting_confirmation")
-                self.assertEqual(result["pending"]["summary"]["department"], "Reception")
+                self.assertEqual(result["pending"]["summary"]["department"], department)
 
     def test_room_120_claim_is_rejected_without_revealing_room_205(self):
         first = self.send("Please bring two extra towels to my room.")
@@ -242,14 +373,10 @@ class GuestChatDemoFlowTests(unittest.TestCase):
         first = self.send("The AC is not cooling in room 205.")
         old_revision = first["pending"]["revision"]
         second = self.send("Please bring towels to room 205.")
-        new_revision = second["pending"]["revision"]
-        self.assertNotEqual(old_revision, new_revision)
-        self.assertEqual(second["state"], "awaiting_confirmation")
-        with self.assertRaises(DemoError) as caught:
-            self.demo.confirm(self.session_id, old_revision)
-        self.assertEqual(caught.exception.code, "confirmation_out_of_date")
+        self.assertEqual(second["pending"]["revision"], old_revision)
+        self.assertIn("Confirm or cancel it", second["messages"][-1]["text"])
         self.assertFalse(self.demo._sessions[self.session_id].scope.existing_requests)
-        canceled = self.demo.cancel(self.session_id, new_revision)
+        canceled = self.demo.cancel(self.session_id, old_revision)
         self.assertIsNone(canceled["pending"])
         self.assertIn("Nothing was prepared", canceled["messages"][-1]["text"])
 
@@ -318,6 +445,140 @@ class GuestChatDemoHttpTests(unittest.TestCase):
 
     def tearDown(self):
         self.server.server_close()
+
+    def test_real_http_greeting_returns_conversation_without_creating_request(self):
+        server = make_server(port=0, enable_local_qa=True)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        connection = http.client.HTTPConnection(LOOPBACK, server.server_port, timeout=3)
+        origin = f"http://{LOOPBACK}:{server.server_port}"
+        try:
+            connection.request("POST", "/api/session", body=b"{}", headers={
+                "Content-Type": "application/json", "Origin": origin,
+            })
+            initial = connection.getresponse()
+            self.assertEqual(initial.status, 200)
+            cookie = initial.getheader("Set-Cookie").split(";", 1)[0]
+            initial.read()
+
+            connection.request("POST", "/api/message", body=b'{"text":"Hey Hi"}', headers={
+                "Content-Type": "application/json", "Origin": origin, "Cookie": cookie,
+            })
+            response = connection.getresponse()
+            payload = json.loads(response.read())
+            self.assertEqual(response.status, 200)
+            self.assertEqual(payload["workspace"], "guest")
+            self.assertEqual([item["role"] for item in payload["chat"]["messages"][-2:]],
+                             ["guest", "assistant"])
+            self.assertEqual(payload["chat"]["messages"][-2]["text"], "Hey Hi")
+            self.assertIn("Hello!", payload["chat"]["messages"][-1]["text"])
+            self.assertNotIn("describe what is happening", payload["chat"]["messages"][-1]["text"])
+            self.assertIsNone(payload["chat"]["pending"])
+            self.assertEqual(payload["requests"], [])
+            self.assertFalse(payload["chat"]["submitted"])
+            self.assertFalse(payload["chat"]["persisted"])
+        finally:
+            connection.close()
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=2)
+
+    def test_real_http_greeting_prefix_still_creates_guarded_ac_proposal(self):
+        server = make_server(port=0, enable_local_qa=True)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        connection = http.client.HTTPConnection(LOOPBACK, server.server_port, timeout=3)
+        origin = f"http://{LOOPBACK}:{server.server_port}"
+        try:
+            connection.request("POST", "/api/session", body=b"{}", headers={
+                "Content-Type": "application/json", "Origin": origin,
+            })
+            initial = connection.getresponse()
+            self.assertEqual(initial.status, 200)
+            cookie = initial.getheader("Set-Cookie").split(";", 1)[0]
+            initial.read()
+            connection.request("POST", "/api/message", body=b'{"text":"Hi, my AC isn\'t cooling"}', headers={
+                "Content-Type": "application/json", "Origin": origin, "Cookie": cookie,
+            })
+            response = connection.getresponse()
+            payload = json.loads(response.read())
+            self.assertEqual(response.status, 200)
+            self.assertEqual(payload["chat"]["pending"]["summary"]["department"], "Maintenance")
+            self.assertFalse(payload["chat"]["submitted"])
+            self.assertFalse(payload["chat"]["persisted"])
+            self.assertEqual(payload["requests"], [])
+        finally:
+            connection.close()
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=2)
+
+    def test_browser_chat_submit_and_error_feedback_preserve_input(self):
+        result = subprocess.run(
+            ["node", str(ROOT / "tests" / "guest_chat_app.cjs")],
+            cwd=ROOT, capture_output=True, text=True, timeout=20, check=False,
+        )
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("passed", result.stdout)
+
+    def test_text_ai_consent_is_session_bound_server_side_and_guest_only(self):
+        class MockChatProvider:
+            def __init__(self):
+                self.calls = []
+
+            def reply(self, text, *, previous_chat_id=None):
+                self.calls.append((text, previous_chat_id))
+                return "mock-chat-1", "Hello! I’m happy to help with your stay."
+
+        provider = MockChatProvider()
+        private_key = "private-placeholder-never-returned-or-used-by-test"
+        demo = GuestChatDemo(chat_provider=provider)
+        server = make_server(
+            demo=demo, port=0, enable_local_qa=True, enable_vapi_chat=True,
+            chat_environment={
+                "ROOMAY_VAPI_CHAT_PRIVATE_KEY": private_key,
+                "ROOMAY_VAPI_CHAT_ASSISTANT_ID": "assistant-test",
+            },
+        )
+        try:
+            status, headers, initial = self.dispatch(
+                "/api/session", method="POST", body=b"{}", server=server)
+            self.assertEqual(status, 200)
+            cookie = headers["Set-Cookie"].split(";", 1)[0]
+            self.assertNotIn(private_key, initial.decode("utf-8"))
+
+            # A configured provider does not receive messages before explicit
+            # per-session guest consent.
+            status, _, unconsented = self.dispatch(
+                "/api/message", method="POST",
+                body=json.dumps({"text": "What's good, Remi?"}).encode(),
+                cookie=cookie, server=server)
+            self.assertEqual(status, 200)
+            self.assertFalse(provider.calls)
+            self.assertNotIn(private_key, unconsented.decode("utf-8"))
+
+            status, _, consented = self.dispatch(
+                "/api/chat/consent", method="POST",
+                body=b'{"enabled":true}', cookie=cookie, server=server)
+            self.assertEqual(status, 200)
+            self.assertTrue(json.loads(consented)["chat"]["ai_chat"]["consented"])
+            status, _, reply = self.dispatch(
+                "/api/message", method="POST",
+                body=json.dumps({"text": "What's good, Remi?"}).encode(),
+                cookie=cookie, server=server)
+            self.assertEqual(status, 200)
+            self.assertEqual(len(provider.calls), 1)
+            self.assertNotIn(private_key, reply.decode("utf-8"))
+
+            self.dispatch("/api/qa/select", method="POST",
+                          body=b'{"role":"housekeeping"}', cookie=cookie, server=server)
+            status, _, denied = self.dispatch(
+                "/api/chat/consent", method="POST",
+                body=b'{"enabled":false}', cookie=cookie, server=server)
+            self.assertEqual(status, 403)
+            self.assertNotIn(private_key, denied.decode("utf-8"))
+        finally:
+            server.server_close()
 
     def dispatch(self, path, *, method="GET", body=None, cookie=None,
                  origin=None, host=None, server=None):
@@ -395,6 +656,13 @@ class GuestChatDemoHttpTests(unittest.TestCase):
         self.assertIn("id=\"voice-button\"", text)
         self.assertIn("id=\"voice-remote-consent\"", text)
         self.assertIn('id="call-remi"', text)
+        self.assertIn('id="request-heading">Chat with Remi', text)
+        self.assertIn('id="send-button" class="send-button" type="submit" aria-label="Send message"', text)
+        self.assertIn('id="chat-ai-consent" class="chat-ai-consent" hidden', text)
+        composer = text.split('<div class="composer-entry">', 1)[1].split('</div>', 1)[0]
+        self.assertLess(composer.index('id="voice-button"'), composer.index('id="send-button"'))
+        self.assertIn("Enter to send · Shift + Enter for a new line", text)
+        self.assertIn("Vapi chat conversations are logged", text)
         self.assertIn('aria-haspopup="dialog"', text)
         self.assertIn('id="remi-call-overlay" class="remi-dialog-overlay" hidden', text)
         self.assertIn('role="dialog" aria-modal="true"', text)
@@ -411,6 +679,8 @@ class GuestChatDemoHttpTests(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertIn("text/javascript", headers["Content-Type"])
         self.assertIn("textContent", app_js.decode("utf-8"))
+        self.assertIn("Send message", app_js.decode("utf-8"))
+        self.assertNotIn('"Send request"', app_js.decode("utf-8"))
         status, headers, voice_js = self.dispatch("/voice_intake.js")
         self.assertEqual(status, 200)
         self.assertIn("text/javascript", headers["Content-Type"])

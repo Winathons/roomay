@@ -405,7 +405,7 @@ test('edited transcript is explicitly sent once through the existing typed-intak
   h.recognition.onresult({ results: [{ isFinal: true, 0: { transcript: 'rough transcript' } }] });
   h.recognition.onend();
   assert.equal(h.calls.filter(call => call.url === '/api/message').length, 0, 'recognition must never auto-submit');
-  assert.equal(h.elements['send-button'].span.textContent, 'Send reviewed transcript');
+  assert.equal(h.elements['send-button'].span.textContent, 'Send message');
   h.elements['guest-message'].value = 'Please bring extra towels to room 205.';
   h.elements['chat-form'].emit('submit', { preventDefault() {} });
   h.elements['chat-form'].emit('submit', { preventDefault() {} });

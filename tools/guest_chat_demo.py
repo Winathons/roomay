@@ -1,7 +1,8 @@
 """Loopback-only sample hotel journey backed by Roomay domain contracts.
 
-This internal browser harness never contacts Workpeg, Vapi, YarnGPT, PostgreSQL,
-or any other remote service. It is not registered in the released Peg UI.
+It never contacts Workpeg, YarnGPT or PostgreSQL. Vapi text chat or voice call
+requires separate local opt-in, valid configuration and a guest-session choice.
+It is not registered in the released Peg UI.
 """
 
 from dataclasses import dataclass, field, replace
@@ -21,13 +22,17 @@ from urllib.parse import urlsplit
 from uuid import uuid4
 
 from domain.access_control import AccessContext
-from domain.conversation_intake import ConversationScope, handle_conversation_turn
+from domain.conversation_intake import (
+    ConversationScope, classify_text, handle_conversation_turn,
+    is_explicit_hotel_problem,
+)
 from domain.fixtures import synthetic_hotel, uid
 from domain.reception import build_reception_snapshot
 from domain.service_requests import (
     CATEGORY_DEPARTMENTS, DEPARTMENTS, AuthorizationError, ConflictError,
     RequestError, reconcile_write, request_view, transition_request,
 )
+from tools.vapi_chat import VapiChatClient, VapiChatUnavailable
 
 
 LOOPBACK = "127.0.0.1"
@@ -44,23 +49,43 @@ DEMO_TIMEZONE = timezone(timedelta(hours=1), name="Africa/Lagos")
 SAMPLE_PROPERTY_NAME = "The Linden House"
 _ROOM_TOKEN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9-]{0,19}$")
 _ROOM_RESPONSE = re.compile(r"^(?:room\s+|rm\s+)?([A-Za-z0-9][A-Za-z0-9-]{0,19})$", re.I)
+_ROOM_CLAIM = re.compile(r"\b(?:room|rm)\s+(?:(?:number|no\.?)\s*)?#?([A-Za-z0-9-]*\d[A-Za-z0-9-]*)\b", re.I)
 
 # Only standalone social turns count. "Hi, the AC is broken" is still a request.
 _SOCIAL_GREETING = frozenset((
     "hi", "hello", "hey", "hi there", "hello there", "hey there",
     "hi are you here", "hi are you there", "are you here", "are you there",
     "good morning", "good afternoon", "good evening", "how are you",
+    "what's good remi", "whats good remi", "what's good", "whats good",
+    "how you dey", "how body", "how far",
 ))
+_CASUAL_GREETING_SEQUENCE = re.compile(
+    r"^(?:hey|hi|hello)(?:\s+(?:hey|hi|hello)){0,2}(?:\s+(?:there|remi))?$"
+)
+_PIDGIN_HOW_FAR = re.compile(r"^how\s+far(?:\s+remi)?$")
 _SOCIAL_THANKS = frozenset(("thanks", "thank you", "thank you very much"))
 
 
 def _social_kind(text):
-    normalized = re.sub(r"\s+", " ", text.lower().strip(" \t\r\n.!?,"))
-    if normalized in _SOCIAL_GREETING:
+    normalized = re.sub(r"\s+", " ", re.sub(r"[,.!?]", "", text.lower()).strip())
+    if (normalized in _SOCIAL_GREETING or _CASUAL_GREETING_SEQUENCE.fullmatch(normalized)
+            or _PIDGIN_HOW_FAR.fullmatch(normalized)):
         return "greeting"
     if normalized in _SOCIAL_THANKS:
         return "thanks"
     return None
+
+
+_UNSAFE_AI_ACTION_CLAIM = re.compile(
+    r"\b(?:i(?:'ve| have)\s+(?:sent|submitted|saved|created|booked|confirmed|assigned|notified)"
+    r"|your\s+(?:request|booking|reservation).{0,50}\b(?:sent|submitted|saved|created|booked|confirmed|assigned|received|resolved|completed)"
+    r"|(?:staff|housekeeping|maintenance)\s+(?:has\s+been\s+)?(?:notified|assigned|sent)\b)",
+    re.IGNORECASE,
+)
+
+
+def _claims_hotel_action(text):
+    return isinstance(text, str) and bool(_UNSAFE_AI_ACTION_CLAIM.search(text))
 
 
 class DemoError(ValueError):
@@ -84,6 +109,10 @@ class DemoSession:
     completed_revision: int | None = None
     completed_reply: str | None = None
     pending_at: str | None = None
+    ai_chat_consent: bool = False
+    ai_chat_status: str = "disabled"
+    vapi_chat_previous_id: str | None = None
+    vapi_chat_turns: int = 0
     demo_requests: list = field(default_factory=list)
     demo_audit: list = field(default_factory=list)
     vapi_calls_started: int = 0
@@ -181,9 +210,11 @@ def _public_summary(text, intent):
 class GuestChatDemo:
     """Loopback-only journey store; all hotel actions are synthetic and in memory."""
 
-    def __init__(self, *, max_sessions=MAX_SESSIONS, clock=time.monotonic):
+    def __init__(self, *, max_sessions=MAX_SESSIONS, clock=time.monotonic,
+                 chat_provider=None):
         self.max_sessions = max_sessions
         self.clock = clock
+        self.chat_provider = chat_provider
         self._sessions = {}
         self._lock = threading.RLock()
 
@@ -228,6 +259,7 @@ class GuestChatDemo:
             session_id = secrets.token_urlsafe(32)
             context, scope = _new_synthetic_scope()
             session = DemoSession(context, scope, str(uuid4()))
+            session.ai_chat_status = "available" if self.chat_provider is not None else "disabled"
             session.messages.append({
                 "role": "assistant",
                 "text": ("Welcome to Roomay. Tell us what you need and we’ll help route it. "
@@ -265,7 +297,29 @@ class GuestChatDemo:
             "pending": pending,
             "submitted": False,
             "persisted": False,
+            "ai_chat": {
+                "available": session.ai_chat_status != "disabled",
+                "consented": session.ai_chat_consent,
+                "status": session.ai_chat_status,
+            },
         }
+
+    def set_ai_chat_consent(self, session_id, enabled):
+        if type(enabled) is not bool:
+            raise DemoError("invalid_chat_consent")
+        session = self._get_session(session_id)
+        with session.lock:
+            if session.active_role != "guest":
+                raise DemoError("demo_guest_role_required", 403)
+            if enabled and self.chat_provider is None:
+                raise DemoError("chat_ai_unavailable", 409)
+            session.ai_chat_consent = enabled
+            session.ai_chat_status = "ready" if enabled else (
+                "available" if self.chat_provider is not None else "disabled")
+            if not enabled:
+                # Do not let Vapi context resume if the guest later opts in again.
+                session.vapi_chat_previous_id = None
+            return self.role_view(session_id)
 
     @staticmethod
     def _now():
@@ -521,92 +575,177 @@ class GuestChatDemo:
             if session.active_role != "guest":
                 raise DemoError("demo_guest_role_required", 403)
             text = text.strip()
-            if session.pending is not None:
-                session.pending = None
-                session.pending_at = None
-                self._append(session, "assistant",
-                             "I canceled the earlier unsubmitted draft. Let’s look at your new message.")
             session.completed_revision = None
             session.completed_reply = None
             self._append(session, "guest", text)
 
             session.revision += 1
+            candidate = classify_text(text)
             social = _social_kind(text)
-            if social is not None:
-                # A greeting or thanks is not a new service request or a confirmation.
-                # Preserve an existing clarification so the guest can continue.
-                session.state = "needs_clarification" if session.clarification else "ready"
+            combined_text = text
+            turn_id = str(uuid4())
+
+            # Continue a previously requested clarification with the guest's
+            # answer. A spoken/typed room is still only a mismatch check against
+            # the trusted scope, never identity evidence.
+            if session.clarification is not None and not social:
+                previous = session.clarification["text"]
+                clarification_reply = (self._room_reply(text)
+                                       if session.clarification["kind"] == "room_number"
+                                       else text)
+                combined_text = previous + " " + clarification_reply
+                turn_id = session.clarification["turn_id"]
+                candidate = classify_text(combined_text)
+                session.clarification = None
+
+            actionable = (candidate["intent"] in {"service_request", "room_enquiry", "emergency"}
+                          or is_explicit_hotel_problem(combined_text))
+
+            # A room number by itself is context for a real follow-up, not a
+            # request and never a way to authenticate or change the stay.
+            standalone_room = _ROOM_RESPONSE.fullmatch(text)
+            if (candidate["intent"] == "unknown" and session.clarification is None
+                    and standalone_room is not None
+                    and any(character.isdigit() for character in standalone_room.group(1))):
+                session.clarification = {
+                    "kind": "problem_description",
+                    "text": "room " + standalone_room.group(1),
+                    "turn_id": turn_id,
+                }
+                session.state = "needs_clarification"
                 session.active_turn_id = None
-                if social == "thanks":
-                    reply = "You're welcome. What else can I help you with?"
-                elif session.clarification is not None:
-                    reply = "Yes, I'm here. Please tell me what you need help with."
-                else:
-                    reply = "Hello! I'm here to help. What do you need during your stay?"
-                self._append(session, "assistant", reply)
+                self._append(session, "assistant",
+                             "What do you need help with in that room? Please describe the issue.")
                 return self._view(session)
 
-            # Room-only statements are contextual information, not service requests.
-            # Do not claim that a guest has been authenticated by a room number.
-            if session.clarification is None:
-                standalone_room = _ROOM_RESPONSE.fullmatch(text)
-                if (standalone_room is not None
-                        and any(character.isdigit() for character in standalone_room.group(1))):
-                    session.clarification = {
-                        "kind": "problem_description",
-                        "text": "room " + standalone_room.group(1),
-                        "turn_id": str(uuid4()),
-                    }
-                    session.state = "needs_clarification"
+            if candidate["intent"] == "unknown" and not social and len(text.split()) <= 3:
+                session.clarification = {
+                    "kind": "problem_description", "text": text, "turn_id": turn_id,
+                }
+                session.state = "needs_clarification"
+                session.active_turn_id = None
+                self._append(session, "assistant", "Could you briefly describe what is happening?")
+                return self._view(session)
+
+            # A pending proposal is not silently canceled by a greeting or a new
+            # topic. Keep it visible; refuse stacking a second operational draft.
+            if session.pending is not None and (actionable or _ROOM_CLAIM.search(text)):
+                if candidate["intent"] == "emergency":
+                    session.pending = None
+                    session.pending_at = None
+                    self._append(session, "assistant",
+                                 "I’ve cleared the earlier unsubmitted draft. "
+                                 "This may be urgent. Contact Reception immediately; "
+                                 "if anyone is in immediate danger, follow the hotel’s "
+                                 "emergency procedure. This system has not contacted anyone.")
+                    session.state = "handoff"
                     session.active_turn_id = None
-                    self._append(
-                        session, "assistant",
-                        "What do you need help with in that room? Please describe the issue.",
+                    return self._view(session)
+                else:
+                    # Run the proposed second message through the canonical
+                    # scope/room checks before preserving the current proposal.
+                    # This catches a wrong-room claim instead of masking it as
+                    # a generic 'one proposal at a time' response.
+                    preflight_text = (combined_text if candidate["intent"] in {
+                        "service_request", "room_enquiry", "emergency"}
+                        else session.pending["text"] + " " + combined_text)
+                    preflight = handle_conversation_turn(
+                        preflight_text, channel="typed_chat",
+                        conversation_id=session.conversation_id, turn_id=str(uuid4()),
+                        at=self._now(), confirmed=False,
+                        access_context=session.context, scope=session.scope,
                     )
+                    if preflight["state"] == "handoff":
+                        session.pending = None
+                        session.pending_at = None
+                        session.state = "handoff"
+                        self._append(session, "assistant", preflight["message"])
+                    else:
+                        self._append(session, "assistant",
+                                     "There is already a request proposal above. Confirm or cancel it before starting another request.")
                     return self._view(session)
 
-            if session.clarification is not None:
-                previous = session.clarification["text"]
-                reply = (self._room_reply(text)
-                         if session.clarification["kind"] == "room_number" else text)
-                combined = previous + " " + reply
-                turn_id = session.clarification["turn_id"]
-            else:
-                combined = text
-                turn_id = str(uuid4())
-            session.clarification = None
-            session.active_turn_id = turn_id
+            if actionable:
+                # Operational proposals always pass through the canonical domain
+                # validator. The conversational model never selects a department,
+                # authorizes an action, or sees these request details.
+                session.vapi_chat_previous_id = None
+                session.ai_chat_status = "ready" if session.ai_chat_consent else (
+                    "available" if self.chat_provider is not None else "disabled")
+                session.clarification = None
+                session.active_turn_id = turn_id
+                turn_at = self._now()
+                result = handle_conversation_turn(
+                    combined_text, channel="typed_chat", conversation_id=session.conversation_id,
+                    turn_id=turn_id, at=turn_at, confirmed=False,
+                    provider_status=_provider_status, access_context=session.context,
+                    scope=session.scope,
+                )
+                session.state = result["state"]
+                if result["state"] == "awaiting_confirmation":
+                    intent = result.get("internal", {}).get("intent", {})
+                    session.pending = {
+                        "revision": session.revision, "text": combined_text,
+                        "turn_id": turn_id, "summary": _public_summary(combined_text, intent),
+                    }
+                    session.pending_at = turn_at
+                    session.active_turn_id = None
+                elif result.get("clarification"):
+                    session.clarification = {
+                        "kind": result["clarification"], "text": text,
+                        "turn_id": turn_id,
+                    }
+                else:
+                    session.active_turn_id = None
+                self._append(session, "assistant", result["message"])
+                return self._view(session)
 
-            turn_at = self._now()
-            result = handle_conversation_turn(
-                combined, channel="typed_chat", conversation_id=session.conversation_id,
-                turn_id=turn_id, at=turn_at, confirmed=False,
-                provider_status=_provider_status, access_context=session.context,
-                scope=session.scope,
-            )
-            session.state = result["state"]
-            if result["state"] == "needs_clarification":
-                session.clarification = {
-                    "kind": result.get("clarification"),
-                    "text": combined,
-                    "turn_id": turn_id,
-                }
-                self._append(session, "assistant", result["message"])
-            elif result["state"] == "awaiting_confirmation":
-                intent = result.get("internal", {}).get("intent", {})
-                summary = _public_summary(combined, intent)
-                session.pending = {
-                    "revision": session.revision,
-                    "text": combined,
-                    "turn_id": turn_id,
-                    "summary": summary,
-                }
-                session.pending_at = turn_at
+            # Text about hotel facts must never be answered from model memory.
+            # classify_text maps supported property-information topics to the
+            # safe Reception handoff above; this is an additional status guard.
+            normalized = re.sub(r"\s+", " ", text.casefold())
+            if any(term in normalized for term in (
+                    "breakfast", "check-out", "checkout", "wifi", "wi-fi",
+                    "parking", "pool", "hotel address", "amenities", "room rate",
+                    "available rooms", "availability")):
+                self._append(session, "assistant",
+                             "I don't have verified hotel details for that. Please contact Reception for current information.")
+                session.state = "ready"
                 session.active_turn_id = None
-                self._append(session, "assistant", result["message"])
+                return self._view(session)
+
+            # Natural chat is optional and requires an explicit per-session
+            # guest consent. Provider failure does not fall through to action logic.
+            if (self.chat_provider is not None and session.ai_chat_consent
+                    and session.vapi_chat_turns < 30 and _provider_status == "ok"):
+                try:
+                    chat_id, reply = self.chat_provider.reply(
+                        text, previous_chat_id=session.vapi_chat_previous_id)
+                    if _claims_hotel_action(reply):
+                        raise VapiChatUnavailable("unsafe_response")
+                    session.vapi_chat_previous_id = chat_id
+                    session.vapi_chat_turns += 1
+                    session.ai_chat_status = "ready"
+                    self._append(session, "assistant", reply)
+                except Exception:
+                    session.ai_chat_status = "unavailable"
+                    self._append(session, "assistant",
+                                 "I’m having trouble reaching Remi’s chat service right now. You can try again, or contact Reception for help.")
+                session.state = "ready"
+                session.active_turn_id = None
+                return self._view(session)
+
+            session.state = "needs_clarification" if session.clarification else "ready"
+            session.active_turn_id = None
+            if social == "thanks":
+                reply = "You're welcome. What else would you like to chat about?"
+            elif social == "greeting":
+                reply = "Hello! I’m here to help with your stay. What would you like to talk about?"
+            elif self.chat_provider is not None and not session.ai_chat_consent:
+                reply = "Remi’s text AI is off until you choose to share messages with the chat provider. You can still ask about service requests or contact Reception."
             else:
-                session.active_turn_id = None
-                self._append(session, "assistant", result["message"])
+                reply = "I’m here to help with your stay. You can ask me a question or describe something you need."
+            self._append(session, "assistant", reply)
             return self._view(session)
 
     def confirm(self, session_id, revision):
@@ -704,11 +843,28 @@ def _vapi_web_config(environ, *, enabled):
             "model_name": model_name, "max_duration_seconds": MAX_VAPI_CALL_SECONDS}
 
 
+def _vapi_chat_client(environ, *, enabled):
+    """Load a private-key client only after explicit local operator opt-in."""
+    if not enabled:
+        return None
+    environ = os.environ if environ is None else environ
+    private_key = environ.get("ROOMAY_VAPI_CHAT_PRIVATE_KEY", "")
+    assistant_id = environ.get("ROOMAY_VAPI_CHAT_ASSISTANT_ID", "")
+    try:
+        return VapiChatClient(private_key, assistant_id)
+    except (TypeError, ValueError):
+        return None
+
+
 def make_server(demo=None, port=PORT_DEFAULT, *, enable_local_qa=False,
-                enable_vapi_web_call=False, vapi_environment=None):
-    demo = demo or GuestChatDemo()
+                enable_vapi_web_call=False, vapi_environment=None,
+                enable_vapi_chat=False, chat_environment=None):
+    chat_client = _vapi_chat_client(chat_environment, enabled=enable_vapi_chat)
+    demo = demo or GuestChatDemo(chat_provider=chat_client)
     if enable_vapi_web_call and not enable_local_qa:
         raise ValueError("vapi_web_call_requires_local_qa")
+    if enable_vapi_chat and not enable_local_qa:
+        raise ValueError("vapi_chat_requires_local_qa")
     vapi_config = _vapi_web_config(vapi_environment, enabled=enable_vapi_web_call)
     assets = Path(__file__).with_name("guest_chat_demo_assets")
     allowed_hosts = {"127.0.0.1", "localhost"}
@@ -870,6 +1026,8 @@ def make_server(demo=None, port=PORT_DEFAULT, *, enable_local_qa=False,
                 return self._send(403, {"error": "same_origin_required"})
             allowed_api = {"/api/session", "/api/message", "/api/confirm", "/api/cancel",
                            "/api/assign", "/api/staff-action"}
+            if chat_client is not None:
+                allowed_api.add("/api/chat/consent")
             if vapi_config is not None:
                 allowed_api.update({"/api/voice/config", "/api/voice/claim", "/api/voice/release"})
             if enable_local_qa:
@@ -916,6 +1074,14 @@ def make_server(demo=None, port=PORT_DEFAULT, *, enable_local_qa=False,
                         cookie = self._session_cookie(session_id)
                         return self._send(200, view, extra=(("Set-Cookie", cookie),))
                     return self._send(200, view)
+
+                if self.path == "/api/chat/consent":
+                    if set(body) != {"enabled"} or type(body["enabled"]) is not bool:
+                        raise DemoError("invalid_chat_consent")
+                    session_id = _decode_cookie(self.headers.get("Cookie", ""))
+                    if session_id is None:
+                        raise DemoError("demo_session_expired", 401)
+                    return self._send(200, demo.set_ai_chat_consent(session_id, body["enabled"]))
 
                 if self.path == "/api/qa/select":
                     if set(body) != {"role"} or body["role"] not in {"guest", "reception", "housekeeping"}:
@@ -986,14 +1152,19 @@ def main(argv=None):
                         help="Enable the loopback-only role selection page for internal acceptance testing.")
     parser.add_argument("--enable-vapi-web-call", action="store_true",
                         help="Enable on-click Vapi calls in local QA; requires Vapi public-key, test-assistant and Remi voice env settings.")
+    parser.add_argument("--enable-vapi-chat", action="store_true",
+                        help="Enable opt-in Vapi text chat in local QA; requires server-only ROOMAY_VAPI_CHAT_PRIVATE_KEY and ROOMAY_VAPI_CHAT_ASSISTANT_ID. Provider usage may be billable and logged.")
     args = parser.parse_args(argv)
     server = make_server(port=args.port, enable_local_qa=args.enable_local_qa,
-                         enable_vapi_web_call=args.enable_vapi_web_call)
+                         enable_vapi_web_call=args.enable_vapi_web_call,
+                         enable_vapi_chat=args.enable_vapi_chat)
     print(f"Roomay local example journey listening at http://{LOOPBACK}:{server.server_port}/stay")
     if args.enable_local_qa:
         print(f"Internal test role selection: http://{LOOPBACK}:{server.server_port}/__qa/")
     if args.enable_vapi_web_call:
         print("Vapi browser calls: enabled only when local public-key/test-assistant/Remi settings validate; no call starts automatically.")
+    if args.enable_vapi_chat:
+        print("Vapi text chat: available only with valid server-side configuration and explicit guest consent; no provider call starts automatically.")
     print("Example records and request states are process-local; no hotel systems are contacted. Press Ctrl+C to stop.")
     try:
         server.serve_forever()

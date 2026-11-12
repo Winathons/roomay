@@ -107,6 +107,48 @@ def _urgency(text):
     return "urgent" if any(term in lowered for term in _URGENT_TERMS) else "normal"
 
 
+def _hotel_information_question(lowered):
+    if any(term in lowered for term in (
+            "room enquiry", "room inquiry", "room rate", "room type",
+            "room available", "room availability", "available rooms",
+            "book a room", "reservation", "vacant room")):
+        return True
+    question_cues = ("what time", "when is", "when does", "do you", "does the",
+                     "where is", "where are", "what is", "what's", "is there",
+                     "are there", "how do i", "how much", "can i", "tell me about")
+    has_question_cue = any(cue in lowered for cue in question_cues)
+    return bool(
+        ("breakfast" in lowered and (has_question_cue or "breakfast hours" in lowered
+                                      or "breakfast time" in lowered))
+        or any(term in lowered for term in (
+            "check-out", "checkout", "check out", "wi-fi", "wifi", "internet",
+            "parking", "swimming pool", "hotel address", "address", "location",
+            "directions", "hotel amenities", "amenities", "facilities", "gym",
+            "spa", "restaurant", "pool", "opening hours", "room rate", "price"))
+        and has_question_cue
+    )
+
+
+def is_explicit_hotel_problem(text):
+    """Distinguish a stated hotel problem from ordinary conversation.
+
+    This only decides whether unknown text may enter the existing human-triage
+    contract; it does not assign a category, department, or authorization.
+    """
+    if not isinstance(text, str):
+        return False
+    lowered = text.casefold()
+    return any(term in lowered for term in (
+        "loud vibration", "bad smell", "smells bad", "smell is bad",
+        "something is broken", "something is not working", "there is a problem",
+        "there's a problem", "there is an issue", "there's an issue",
+        "i have a problem", "i have an issue", "something is wrong",
+        "wifi is down", "wi-fi is down", "internet is down", "internet not working",
+        "shower is cold", "shower is not working", "toilet is blocked",
+        "room smells", "smells bad", "too noisy", "water pressure",
+    ))
+
+
 def _intent(kind, category, urgency, room_number):
     canonical, department, triage = route_category(category)
     return {
@@ -132,10 +174,7 @@ def classify_text(text):
     if _is_emergency(original):
         return _intent("emergency", "unknown", "urgent", room_number)
     urgency = _urgency(original)
-    if any(term in lowered for term in (
-            "room enquiry", "room inquiry", "room rate", "room type",
-            "room available", "room availability", "available rooms",
-            "book a room", "reservation", "vacant room")):
+    if _hotel_information_question(lowered):
         return _intent("room_enquiry", "general_help", urgency, room_number)
     if (re.search(r"\b(?:ac|a/c)\b", lowered) or any(term in lowered for term in (
             "air conditioning", "air conditioner", "aircon", "faulty ac",
@@ -143,6 +182,20 @@ def classify_text(text):
         return _intent("service_request", "air_conditioning", urgency, room_number)
     if any(term in lowered for term in ("towel", "towels", "linen", "bedsheet", "bed sheet")):
         return _intent("service_request", "extra_towels", urgency, room_number)
+    if any(term in lowered for term in ("room cleaning", "clean my room", "clean the room",
+                                        "room is dirty", "room looks dirty")):
+        return _intent("service_request", "room_cleaning", urgency, room_number)
+    if any(term in lowered for term in ("toiletries", "toothbrush", "toothpaste", "shampoo", "body wash")):
+        return _intent("service_request", "toiletries", urgency, room_number)
+    if any(term in lowered for term in ("light is not working", "light stopped working",
+                                        "power socket", "electrical", "sparking")):
+        return _intent("service_request", "electrical", urgency, room_number)
+    if ("room service" in lowered and any(term in lowered for term in
+            ("order", "send", "bring", "food", "menu"))):
+        return _intent("service_request", "room_service", urgency, room_number)
+    if any(term in lowered for term in ("bring breakfast", "send breakfast", "order breakfast",
+                                        "bring food", "send food", "order food")):
+        return _intent("service_request", "dining", urgency, room_number)
     if any(term in lowered for term in (
             "plumbing", "leak", "leaking", "pipe burst", "burst pipe",
             "water dey leak", "tap is dripping")):
@@ -314,7 +367,7 @@ def handle_conversation_turn(
         )
     if intent["intent"] == "room_enquiry":
         return _safe_handoff(
-            "I can connect you with Reception for room information. No availability or booking has been confirmed.",
+            "I don't have verified hotel information for that answer. Please contact Reception for current details; no hotel details were assumed. No availability or booking has been confirmed.",
             intent, "room_enquiry_handoff",
         )
     try:

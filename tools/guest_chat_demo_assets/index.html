@@ -44,7 +44,7 @@
         <section class="chat-panel guest-chat" aria-labelledby="request-heading">
           <div class="chat-heading">
             <div class="assistant-avatar" aria-hidden="true">R</div>
-            <div class="chat-heading-copy"><h2 id="request-heading">How can we help you?</h2><p>Describe what you need during your stay.</p></div>
+            <div class="chat-heading-copy"><h2 id="request-heading">Chat with Remi</h2><p>Ask a question or tell me what you need.</p></div>
             <button id="call-remi" class="call-remi-button call-remi-trigger" type="button" aria-label="Call Remi AI receptionist" aria-haspopup="dialog" aria-controls="remi-call">
               <span aria-hidden="true" class="call-remi-icon">☎</span><span id="call-remi-label">Call Remi</span>
             </button>
@@ -54,21 +54,33 @@
           </div>
           <div id="confirmation" class="confirmation-slot"></div>
           <form id="chat-form" class="composer">
-            <label class="sr-only" for="guest-message">Your request or reviewed voice transcript</label>
-            <textarea id="guest-message" name="message" rows="2" maxlength="1000" placeholder="What would make your stay more comfortable?" autocomplete="off" required></textarea>
-            <div class="voice-tools voice-tools-compact" aria-label="Voice dictation">
+            <label class="sr-only" for="guest-message">Message to Remi</label>
+            <div class="composer-entry">
+              <textarea id="guest-message" name="message" rows="1" maxlength="1000" placeholder="Message Remi…" autocomplete="off" required></textarea>
               <button id="voice-button" class="voice-button voice-icon-button" type="button" disabled aria-label="Dictate a message" title="Dictate a message" aria-pressed="false" aria-describedby="voice-status">
                 <svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">
                   <rect x="9" y="2" width="6" height="12" rx="3"></rect>
                   <path d="M5 10v2a7 7 0 0 0 14 0v-2M12 19v3m-4 0h8"></path>
                 </svg>
               </button>
-              <button id="voice-cancel" class="voice-cancel" type="button" hidden>Discard dictated text</button>
-              <span id="voice-status" class="sr-only" role="status" aria-live="polite">Checking voice availability…</span>
-              <input id="voice-remote-consent" type="checkbox" hidden aria-hidden="true" tabindex="-1">
+              <button id="send-button" class="send-button" type="submit" aria-label="Send message">
+                <span>Send message</span>
+                <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M5 12h14M13 6l6 6-6 6"></path></svg>
+              </button>
             </div>
-            <div class="composer-footer"><span id="send-help">Review your message before sending · Shift + Enter for a new line</span>
-              <button id="send-button" class="send-button" type="submit"><span>Send</span><span aria-hidden="true">↗</span></button></div>
+            <div class="composer-tools">
+              <div class="voice-tools voice-tools-compact" aria-label="Voice dictation">
+                <button id="voice-cancel" class="voice-cancel" type="button" hidden>Discard dictated text</button>
+                <span id="voice-status" class="sr-only" role="status" aria-live="polite">Checking voice availability…</span>
+                <input id="voice-remote-consent" type="checkbox" hidden aria-hidden="true" tabindex="-1">
+              </div>
+              <span id="send-help">Enter to send · Shift + Enter for a new line</span>
+            </div>
+            <div id="chat-ai-consent" class="chat-ai-consent" hidden>
+              <label><input id="chat-ai-enabled" type="checkbox"> <span>Use Remi AI for this conversation</span></label>
+              <p id="chat-ai-disclosure">When enabled, ordinary conversation messages may be sent to Vapi. Service requests, hotel-information questions and emergencies stay in ROOMAY’s validated local flow. Vapi chat conversations are logged and may be retained under the account’s settings; provider usage may incur charges. Do not share payment or sensitive personal information.</p>
+            </div>
+            <p id="chat-ai-status" class="chat-ai-status" role="status" aria-live="polite">Remi text AI is not enabled in this local session.</p>
           </form>
           <div id="voice-remote-dialog" class="voice-consent-overlay" hidden>
             <section class="voice-consent-card" role="dialog" aria-modal="true" aria-labelledby="voice-consent-title" aria-describedby="voice-consent-description">
