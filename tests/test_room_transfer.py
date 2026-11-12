@@ -142,11 +142,18 @@ class RoomTransferTests(unittest.TestCase):
     def test_checked_out_stay_cannot_view_historical_ticket(self):
         plan = self.plan()
         post = self.applied(plan)
-        checkout = prepare_checkout  # Existing separately covered guard.
-        self.assertIsNotNone(checkout)
-        post["stays"][0].update(status="checked_out",
-                                checked_out_at="2026-11-07T10:00:00+01:00")
-        post["stay_guests"][0]["left_at"] = "2026-11-07T10:00:00+01:00"
+        with patch("domain.checkout_commands.ZoneInfo",
+                   return_value=timezone(timedelta(hours=1))):
+            checkout = prepare_checkout(
+                post, stay_id=STAY, checked_out_at="2026-11-07T09:30:00+01:00",
+                today="2026-11-07", hotel_timezone="Africa/Lagos",
+                idempotency_key="checkout-after-transfer-1", context=self.context,
+            )
+        self.assertEqual(checkout.room_id, TO_ROOM)
+        self.assertEqual(checkout.room_after["housekeeping"], "dirty")
+        post["stays"][0] = checkout.stay_after
+        post["stay_guests"] = list(checkout.occupants_after)
+        post["rooms"][3] = checkout.room_after
         validate_snapshot(post)
         with self.assertRaisesRegex(RequestError, "inactive_or_wrong_stay"):
             request_view(self.request, self.guest, self.staff, snapshot=post)
