@@ -142,6 +142,22 @@ roomay/
 
 The `ui/dist/` compiler output and `.venv/` environment are **generated locally** and are not committed. `function/` exists because the Workpeg scaffold generated it; we do not need to run or publish functions merely to serve the starter UI.
 
+## WOR-23 — Synthetic acceptance rehearsal (not hosted E2E)
+
+To rehearse the complete booking → check-in → guest AC request → maintenance
+update → blocked-room refusal → alternative → checkout planning flow on
+fictional in-memory data, run:
+
+```powershell
+python -m unittest discover -s tests -p test_wor23_acceptance.py -v
+```
+
+See [WOR-23 acceptance walkthrough](docs/wor-23-synthetic-acceptance.md)
+for the exact scenario, authorization/negative cases, evidence labels,
+and the separate **owner-led Workpeg live verification** required before
+the product can claim an end-to-end workflow. Passing the test does not save
+hotel data or establish guest/department access in Workpeg.
+
 ## Making changes with the team
 
 1. Open the [Roomay Linear backlog](https://linear.app/workpeg/project/roomay-workpeg-hospitality-hackathon-7b7a7ce4b3b9), read the issue's dependencies and acceptance criteria, and **assign yourself** an available task.
