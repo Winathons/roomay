@@ -1,4 +1,6 @@
 """Offline guest conversation intake contract tests; no providers or writes."""
+from copy import deepcopy
+from dataclasses import replace
 import unittest
 
 from domain.access_control import AccessContext
@@ -56,6 +58,13 @@ class ConversationIntakeTests(unittest.TestCase):
         self.assertIsNone(classify_text("The room is too hot")["room_number"])
         self.assertIsNone(classify_text("Please send towels to my room please")["room_number"])
         self.assertIsNone(classify_text("Please send towels to my room and my room is ready")["room_number"])
+        for phrase in (
+            "Please send room service.",
+            "My room smells bad.",
+            "Can I get room cleaning?",
+        ):
+            with self.subTest(phrase=phrase):
+                self.assertIsNone(classify_text(phrase)["room_number"])
 
     def test_room_enquiry_hands_off_to_reception_without_availability_claim(self):
         result = self.turn("Can I ask about room availability?")
@@ -84,6 +93,17 @@ class ConversationIntakeTests(unittest.TestCase):
         self.assertNotIn("205", result["message"])
         self.assertNotIn("120", result["message"])
         self.assertNotIn("request_plan", result["internal"])
+
+    def test_letter_only_room_labels_are_recognized_only_from_trusted_inventory(self):
+        snapshot = deepcopy(self.scope.snapshot)
+        next(room for room in snapshot["rooms"] if room["entity_id"] == uid("205"))["number"] = "A"
+        next(room for room in snapshot["rooms"] if room["entity_id"] == uid("204"))["number"] = "B"
+        scope = replace(self.scope, snapshot=snapshot)
+        result = self.turn("Please bring towels to room B.", scope=scope)
+        self.assertEqual(result["state"], "handoff")
+        self.assertEqual(result["internal"]["failure_code"], "guest_room_mismatch")
+        self.assertNotIn("A", result["message"])
+        self.assertNotIn("B", result["message"])
 
     def test_my_room_request_uses_only_the_trusted_stay_room(self):
         result = self.turn("Please bring two extra towels to my room.")

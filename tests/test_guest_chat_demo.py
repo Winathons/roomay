@@ -141,6 +141,21 @@ class GuestChatDemoFlowTests(unittest.TestCase):
                     uid("205"),
                 )
 
+    def test_ordinary_hotel_phrases_after_room_are_not_mismatch_claims(self):
+        for text in (
+            "Please send room service.",
+            "My room smells bad.",
+            "Can I get room cleaning?",
+        ):
+            with self.subTest(text=text):
+                demo = GuestChatDemo()
+                session_id, _ = demo.create_session()
+                result = demo.send_message(session_id, text)
+                self.assertNotEqual(result["state"], "handoff")
+                self.assertNotIn("doesn't match the stay", result["messages"][-1]["text"])
+                self.assertEqual(result["state"], "awaiting_confirmation")
+                self.assertEqual(result["pending"]["summary"]["department"], "Reception")
+
     def test_room_120_claim_is_rejected_without_revealing_room_205(self):
         first = self.send("Please bring two extra towels to my room.")
         self.assertEqual(first["state"], "awaiting_confirmation")
