@@ -586,6 +586,45 @@ class HotelData(App):
             previous_sequence = candidate["sequence"]
         return ordered
 
+    def audit_history_matches_request(self, request, history):
+        """Check the visible audit sequence against its current request row.
+
+        This is a read-projection guard, not a replacement for the canonical
+        staff transition validator or a claim that Workpeg writes are atomic.
+        """
+        version = request.get("version")
+        try:
+            normalized_version = int(version)
+        except (TypeError, ValueError):
+            return False
+        if (version != normalized_version or str(version) != str(normalized_version)
+                or normalized_version < 1 or len(history) != normalized_version):
+            return False
+        for expected_sequence in range(1, normalized_version + 1):
+            event = history[expected_sequence - 1]
+            sequence = event.get("sequence")
+            try:
+                normalized_sequence = int(sequence)
+            except (TypeError, ValueError):
+                return False
+            if (sequence != normalized_sequence
+                    or str(sequence) != str(normalized_sequence)
+                    or normalized_sequence != expected_sequence
+                    or event.get("request_id") != request.get("request_id")
+                    or event.get("commit_state") not in {"pending", "committed"}
+                    or (expected_sequence < version
+                        and event.get("commit_state") != "committed")):
+                return False
+        latest = history[-1]
+        latest_time = self.instant_epoch(latest.get("occurred_at"))
+        updated_time = self.instant_epoch(request.get("updated_at"))
+        return (latest_time is not None
+                and latest_time == updated_time
+                and latest.get("event_id") == request.get("last_event_id")
+                and latest.get("sequence") == normalized_version
+                and latest.get("to_status") == request.get("status")
+                and latest.get("operation_signature") == request.get("last_operation_signature"))
+
     def readiness_reasons(self, booking, room):
         reasons = []
         if booking["status"] != "confirmed":
@@ -750,6 +789,9 @@ class HotelData(App):
                            if event["event_id"] == request["last_event_id"]), None)
             if not audit_history:
                 audit_status = "No audit event visible"
+                audit_tone = "warning"
+            elif not self.audit_history_matches_request(request, audit_history):
+                audit_status = "Audit history is incomplete or mismatched; request status is unverified"
                 audit_tone = "warning"
             elif latest is None:
                 audit_status = "Audit history incomplete; latest request event is not visible"
