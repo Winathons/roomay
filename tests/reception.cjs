@@ -194,7 +194,9 @@ sliceApp.state.room_blocks = [];
 sliceApp.state.service_requests = [{request_id: id(107), hotel_id: id(108), stay_id: id(105),
   room_id: id(102), guest_id: id(103), origin: 'reception_desk', category: 'extra_towels',
   description: 'Synthetic WOR-60 extra-towels request for Room 205.', urgency: 'normal',
-  department: 'housekeeping', status: 'received', last_event_id: id(109), triage_required: false}];
+  department: 'housekeeping', status: 'received', last_event_id: id(109),
+  version: 1, updated_at: '2026-11-08T15:01:00+00:00',
+  last_operation_signature: 'PRIVATE-SIGNATURE-CANARY', triage_required: false}];
 sliceApp.state.request_audit = [{event_id: id(109), hotel_id: id(108), request_id: id(107),
   sequence: 1, event_type: 'created', from_status: null, to_status: 'received',
   actor_id: 'PRIVATE-ACTOR-CANARY', actor_kind: 'staff', actor_department: 'reception',
@@ -236,4 +238,33 @@ sliceApp.project_records();
 assert.equal(sliceApp.state.request_cards[0].audit_tone, 'neutral');
 assert.match(sliceApp.state.request_cards[0].audit_status, /delivery is not represented/);
 
-console.log('compiled reception controller: Room 205 vertical slice, audit privacy, dates, overdue stays and three room callbacks passed');
+// A committed latest event cannot make a broken sequence look reconciled.
+const sliceRequest = sliceApp.state.service_requests[0];
+sliceRequest.status = 'in_progress';
+sliceRequest.version = 3;
+sliceRequest.last_event_id = id(110);
+sliceRequest.updated_at = '2026-11-08T15:03:00+00:00';
+sliceRequest.last_operation_signature = 'PRIVATE-SIGNATURE-GAP-CANARY';
+sliceApp.state.request_audit.push({event_id: id(110), hotel_id: id(108), request_id: id(107),
+  sequence: 3, event_type: 'status_changed', from_status: 'acknowledged', to_status: 'in_progress',
+  actor_id: 'PRIVATE-SECOND-ACTOR-CANARY', actor_kind: 'staff', actor_department: 'housekeeping',
+  reason: null, occurred_at: '2026-11-08T15:03:00+00:00', commit_state: 'committed',
+  operation_id: 'PRIVATE-SECOND-OPERATION-CANARY',
+  operation_signature: 'PRIVATE-SIGNATURE-GAP-CANARY'});
+sliceApp.project_records();
+assert.equal(sliceApp.state.request_cards[0].audit_tone, 'warning');
+assert.match(sliceApp.state.request_cards[0].audit_status, /incomplete or mismatched/);
+assert.doesNotMatch(sliceApp.state.request_cards[0].audit_status, /marked committed/);
+
+// Restore a complete single-event chain, then catch a stale request signature.
+sliceRequest.status = 'received';
+sliceRequest.version = 1;
+sliceRequest.last_event_id = id(109);
+sliceRequest.updated_at = '2026-11-08T15:01:00+00:00';
+sliceRequest.last_operation_signature = 'not-the-audit-signature';
+sliceApp.state.request_audit = [sliceApp.state.request_audit[0]];
+sliceApp.project_records();
+assert.equal(sliceApp.state.request_cards[0].audit_tone, 'warning');
+assert.match(sliceApp.state.request_cards[0].audit_status, /incomplete or mismatched/);
+
+console.log('compiled reception controller: hotel projection, complete audit matching, privacy, dates, overdue stays and room callbacks passed');
