@@ -2,6 +2,7 @@
 from dataclasses import dataclass
 import os
 from uuid import UUID
+from urllib.parse import urlsplit
 
 
 @dataclass(frozen=True)
@@ -43,6 +44,22 @@ class Settings:
             raise RuntimeError("production_urls_must_use_https")
         if not self.cookie_secure:
             raise RuntimeError("secure_cookies_required")
+        try:
+            origin = urlsplit(self.public_base_url)
+            callback = urlsplit(self.oidc_redirect_uri)
+        except ValueError:
+            raise RuntimeError("production_urls_invalid") from None
+        if (origin.scheme != "https" or not origin.hostname
+                or origin.username is not None or origin.password is not None
+                or origin.path not in ("", "/")
+                or origin.query or origin.fragment):
+            raise RuntimeError("public_base_url_must_be_https_origin")
+        expected_callback = self.public_base_url.rstrip("/") + "/auth/workpeg/callback"
+        if (self.oidc_redirect_uri != expected_callback
+                or callback.username is not None
+                or callback.password is not None
+                or callback.query or callback.fragment):
+            raise RuntimeError("oidc_callback_must_match_public_origin")
         try:
             if (str(UUID(self.business_id)) != self.business_id
                     or str(UUID(self.hotel_id)) != self.hotel_id):
