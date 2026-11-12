@@ -73,6 +73,12 @@ h2 { margin: 0; color: var(--forest-deep); font-size: 20px; line-height: 1.25; l
 .remi-call-top .section-kicker { margin-bottom: 4px; }
 .remi-call-top h3 { margin: 0; color: var(--forest-deep); font-size: 15px; line-height: 1.3; }
 .remi-call-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 7px; }
+.remi-orb-stage { position: relative; display: grid; place-items: center; width: min(224px, 64vw); aspect-ratio: 1; margin: 8px auto 0; }
+.remi-orb-fallback { position: absolute; width: 38%; aspect-ratio: 1; border: 1px solid #c7a866; border-radius: 50%; background: radial-gradient(circle at 35% 30%, #2f5f48, #1f4433 65%, #193829); box-shadow: 0 0 34px rgba(134,191,156,.24); }
+roomay-orb { position: relative; display: block; width: 100%; height: 100%; --orb-core: #1f4433; --orb-core-light: #2f5f48; --orb-core-shade: #193829; --orb-sage: #a9c3a8; --orb-mist: #d3e0cd; --orb-ring: #7fa88c; --orb-gold: #c7a866; --orb-glow: #86bf9c; }
+.remi-orb-connecting { position: absolute; right: 20%; bottom: 16%; width: 13px; height: 13px; border: 2px solid #c7a866; border-right-color: transparent; border-radius: 50%; opacity: 0; pointer-events: none; }
+.remi-call[data-state="connecting"] .remi-orb-connecting { opacity: 1; animation: remi-connect-spin .9s linear infinite; }
+@keyframes remi-connect-spin { to { transform: rotate(360deg); } }
 .call-remi-button, .voice-call-secondary, .voice-call-end, .use-transcript-button { min-height: 38px; padding: 0 12px; border-radius: 9px; font-size: 11px; font-weight: 750; }
 .call-remi-button { border: 1px solid var(--forest); background: var(--forest); color: white; }
 .call-remi-button:hover:not(:disabled) { background: var(--forest-deep); }
@@ -271,4 +277,5 @@ h2 { margin: 0; color: var(--forest-deep); font-size: 20px; line-height: 1.25; l
 }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { scroll-behavior: auto !important; transition-duration: .01ms !important; }
+  .remi-call[data-state="connecting"] .remi-orb-connecting { animation: none; border-right-color: #c7a866; }
 }

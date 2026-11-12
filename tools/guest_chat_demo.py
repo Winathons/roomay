@@ -812,6 +812,7 @@ def make_server(demo=None, port=PORT_DEFAULT, *, enable_local_qa=False,
                 "/voice_intake.js": ("voice_intake.js", "text/javascript; charset=utf-8"),
                 "/app.js": ("app.js", "text/javascript; charset=utf-8"),
                 "/vapi_call.js": ("vapi_call.js", "text/javascript; charset=utf-8"),
+                "/roomay-orb.js": ("roomay-orb.js", "text/javascript; charset=utf-8"),
             }
             if vapi_config is not None:
                 paths["/vapi_sdk.js"] = ("vapi_sdk.js", "text/javascript; charset=utf-8")

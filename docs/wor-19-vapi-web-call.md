@@ -13,6 +13,12 @@ hotel writer, or production endpoint. The synthetic stay remains isolated in
 - Connecting, listening, speaking, ended, unavailable, and sanitized error
   states are shown. The guest can mute the microphone, interrupt the assistant,
   and end the call.
+- The Claude-provided Roomay Orb custom element is visual only. `connecting`,
+  `ready`, `muted`, ended, unavailable and error map to its idle animation;
+  only a connected listening state or Vapi assistant speech activity maps to
+  listening or speaking. Muting never starts a second audio stream. A static
+  CSS orb remains behind the component if canvas/custom-element rendering is
+  unavailable, and the live textual status remains accessible.
 - The call is limited to 180 seconds and at most three starts per example
   session. The server allows one active call claim per session. These local
   guards reduce accidental usage; they are not account-wide billing controls.
@@ -37,6 +43,10 @@ npm run build:vapi
 Pop-Location
 ```
 
+The orb runtime is served locally as `/roomay-orb.js`. Only the 18-KB JavaScript
+component is included; the kit's GIF, MP4, preview HTML and alternate Lottie
+assets are not shipped by the local page.
+
 Use a Vapi **public** API key (or a restricted public JWT), the existing test
 assistant ID, and confirm in the Vapi dashboard that this saved test assistant
 actually uses YarnGPT voice `remi` before setting the voice assertion. Never
@@ -58,6 +68,12 @@ the test assistant settings. The local server remains bound to loopback. The
 Vapi public key should also be restricted in the Vapi dashboard to the local
 origin (`http://127.0.0.1:8765`) and only this test assistant. The restriction
 is a dashboard setting and is not verified by this code.
+
+For an animation-only local preview without provider configuration, run the
+server with `--enable-local-qa` but omit `--enable-vapi-web-call`; select Guest
+and open My Stay. The orb and fallback chat render while Call Remi remains
+unavailable. The configured command above enables a call only after the guest
+clicks **Call Remi**.
 
 These startup settings are explicit operator assertions. Verify the test
 assistant's saved Remi voice and LLM provider/model pair in the Vapi dashboard

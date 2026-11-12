@@ -23,7 +23,7 @@ class Element {
 
 function harness({ configStatus = 200, startError = null, sdk = true, configGate = null } = {}) {
   const ids = ['remi-call', 'call-remi', 'end-remi', 'mute-remi', 'remi-call-status',
-    'remi-call-captions', 'use-call-transcript'];
+    'remi-call-captions', 'use-call-transcript', 'remi-orb'];
   const elements = Object.fromEntries(ids.map(id => [id, new Element(id)]));
   const calls = [];
   const timers = [];
@@ -66,10 +66,15 @@ function harness({ configStatus = 200, startError = null, sdk = true, configGate
   context.globalThis = context;
   vm.runInNewContext(source, context);
   const imported = [];
+  const orbStates = [];
   const call = context.RoomayVapiCall.attach({
     windowRef, documentRef, onTranscript: text => imported.push(text),
+    onState: next => {
+      elements['remi-orb'].state = context.RoomayVapiCall.orbStateForCallState(next);
+      orbStates.push({ call: next, orb: elements['remi-orb'].state });
+    },
   });
-  return { elements, calls, timers, listeners, clientRef, imported, call };
+  return { elements, calls, timers, listeners, clientRef, imported, orbStates, call };
 }
 
 const tick = () => new Promise(resolve => setImmediate(resolve));
@@ -97,14 +102,26 @@ test('does not start a provider call until the guest presses Call Remi', async (
 
 test('shows listening, speaking, interruption, captions, mute and end states', async () => {
   const h = harness();
+  assert.equal(h.elements['remi-orb'].state, 'idle');
   h.elements['call-remi'].emit('click'); await tick();
+  assert.equal(h.elements['remi-orb'].state, 'idle');
+  assert.equal(h.orbStates.at(-1).call, 'connecting');
   const client = h.clientRef.value;
   client.emit('call-start');
+  assert.equal(h.elements['remi-orb'].state, 'listening');
   assert.match(h.elements['remi-call-status'].textContent, /Connected.*Listening/);
   assert.equal(h.timers[0].duration, 180000);
   client.emit('message', { type: 'assistant.speechStarted' });
+  assert.equal(h.elements['remi-orb'].state, 'speaking');
   assert.match(h.elements['remi-call-status'].textContent, /Remi is speaking/);
+  h.elements['mute-remi'].emit('click');
+  assert.equal(h.elements['remi-orb'].state, 'speaking');
+  assert.match(h.elements['remi-call-status'].textContent, /Microphone muted/);
+  h.elements['mute-remi'].emit('click');
+  assert.equal(h.elements['remi-orb'].state, 'speaking');
+  assert.match(h.elements['remi-call-status'].textContent, /Microphone on. Remi is speaking/);
   client.emit('message', { type: 'user-interrupted' });
+  assert.equal(h.elements['remi-orb'].state, 'listening');
   assert.match(h.elements['remi-call-status'].textContent, /interrupted/);
   client.emit('message', { type: 'transcript', role: 'user', transcriptType: 'final', transcript: 'Bring two towels' });
   client.emit('message', { type: 'transcript', role: 'assistant', transcriptType: 'final', transcript: 'I can listen.' });
@@ -113,11 +130,18 @@ test('shows listening, speaking, interruption, captions, mute and end states', a
   assert.deepEqual(h.imported, ['Bring two towels']);
   h.elements['mute-remi'].emit('click');
   assert.equal(client.isMuted(), true);
+  assert.equal(h.elements['remi-orb'].state, 'idle');
   assert.equal(h.elements['mute-remi'].textContent, 'Unmute microphone');
+  h.elements['mute-remi'].emit('click');
+  assert.equal(client.isMuted(), false);
+  assert.equal(h.elements['remi-orb'].state, 'listening');
   h.elements['end-remi'].emit('click');
   assert.equal(client.stopped, 1);
   await tick();
   assert.match(h.elements['remi-call-status'].textContent, /Call ended/);
+  assert.equal(h.elements['remi-orb'].state, 'idle');
+  assert.equal(h.elements['mute-remi'].textContent, 'Mute microphone');
+  assert.equal(h.elements['mute-remi'].attributes['aria-pressed'], 'false');
   assert.equal(h.calls.filter(call => call.url === '/api/voice/release').length, 1);
 });
 
@@ -150,6 +174,20 @@ test('ending while configuration is pending prevents a later provider call', asy
   assert.equal(h.clientRef.value, null);
   assert.equal(h.calls.some(call => call.url === '/api/voice/claim'), false);
   assert.match(h.elements['remi-call-status'].textContent, /setup stopped/);
+  assert.equal(h.elements['remi-orb'].state, 'idle');
+});
+
+test('only actual assistant output maps to speaking and every failure maps back to idle', async () => {
+  const h = harness();
+  assert.equal(h.elements['remi-orb'].state, 'idle');
+  h.elements['call-remi'].emit('click'); await tick();
+  const client = h.clientRef.value;
+  client.emit('call-start');
+  client.emit('message', { type: 'transcript', role: 'user', transcriptType: 'final', transcript: 'My AC is broken' });
+  assert.equal(h.elements['remi-orb'].state, 'listening');
+  client.emit('call-start-failed', { error: 'NotAllowedError' });
+  assert.equal(h.elements['remi-orb'].state, 'idle');
+  assert.match(h.elements['remi-call-status'].textContent, /Microphone access was not granted/);
 });
 
 test('microphone denial is sanitized and returns to the typed fallback', async () => {

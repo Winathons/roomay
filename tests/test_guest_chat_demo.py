@@ -397,6 +397,8 @@ class GuestChatDemoHttpTests(unittest.TestCase):
         self.assertIn('id="call-remi"', text)
         self.assertIn('id="end-remi"', text)
         self.assertIn('id="mute-remi"', text)
+        self.assertIn('id="remi-orb"', text)
+        self.assertIn('src="/roomay-orb.js"', text)
         self.assertIn("Vapi may process or retain call metadata", text)
         self.assertIn("Provider privacy terms apply", text)
         status, headers, app_js = self.dispatch("/app.js")
@@ -410,6 +412,13 @@ class GuestChatDemoHttpTests(unittest.TestCase):
         self.assertIn('const mode = localAvailable', voice_source)
         self.assertIn('selectedMode = mode', voice_source)
         self.assertIn('recognition.processLocally = mode === "on-device"', voice_source)
+        status, headers, orb = self.dispatch("/roomay-orb.js")
+        self.assertEqual(status, 200)
+        self.assertIn("text/javascript", headers["Content-Type"])
+        self.assertIn("customElements.define('roomay-orb'", orb.decode("utf-8"))
+        self.assertIn("prefers-reduced-motion", orb.decode("utf-8"))
+        self.assertNotIn("getUserMedia", orb.decode("utf-8"))
+        self.assertNotIn("preview/", html.decode("utf-8"))
 
     def test_voice_calls_are_off_by_default_and_sdk_is_not_loaded(self):
         status, _, html = self.dispatch("/stay")

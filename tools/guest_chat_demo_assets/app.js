@@ -265,7 +265,9 @@
     vapiCall = globalThis.RoomayVapiCall.attach({
       windowRef: globalThis, documentRef: document,
       onState(next) {
-        vapiCallBusy = ["connecting", "listening", "speaking"].includes(next);
+        vapiCallBusy = ["connecting", "listening", "speaking", "muted"].includes(next);
+        const orb = document.getElementById("remi-orb");
+        if (orb) orb.state = globalThis.RoomayVapiCall.orbStateForCallState(next);
         updateComposerControls();
       },
       onTranscript(text) {

@@ -16,6 +16,10 @@
     "Do not ask for passwords, stay PINs, payment details, or sensitive personal information.",
   ].join(" ");
 
+  function orbStateForCallState(callState) {
+    return callState === "listening" || callState === "speaking" ? callState : "idle";
+  }
+
   function attach({ windowRef, documentRef, onTranscript, onState }) {
     const root = documentRef.getElementById("remi-call");
     const startButton = documentRef.getElementById("call-remi");
@@ -32,6 +36,8 @@
     let latestUserTranscript = "";
     let releasePending = false;
     let startAttempt = 0;
+    let microphoneMuted = false;
+    let assistantSpeaking = false;
 
     const setState = (next, copy) => {
       state = next;
@@ -103,6 +109,12 @@
       const wasConnecting = state === "connecting";
       active = false;
       busy = false;
+      microphoneMuted = false;
+      assistantSpeaking = false;
+      if (muteButton) {
+        muteButton.textContent = "Mute microphone";
+        muteButton.setAttribute("aria-pressed", "false");
+      }
       const current = client;
       client = null;
       if (current) Promise.resolve(current.stop()).catch(() => {});
@@ -113,19 +125,25 @@
     function onMessage(message) {
       if (!message || typeof message !== "object") return;
       if (message.type === "assistant.speechStarted") {
+        assistantSpeaking = true;
         setState("speaking", "Remi is speaking. You can interrupt at any time.");
         return;
       }
       if (message.type === "speech-update") {
         const role = message.role || message.speaker;
         if (role === "assistant" && message.status === "started") {
+          assistantSpeaking = true;
           setState("speaking", "Remi is speaking. You can interrupt at any time.");
         } else if (role === "assistant" && message.status === "stopped") {
-          setState("listening", "Listening. Speak whenever you’re ready.");
+          assistantSpeaking = false;
+          setState(microphoneMuted ? "muted" : "listening", microphoneMuted
+            ? "Microphone muted. Unmute when you’re ready to talk."
+            : "Listening. Speak whenever you’re ready.");
         }
         return;
       }
       if (message.type === "user-interrupted") {
+        assistantSpeaking = false;
         setState("listening", "Listening. Remi was interrupted and is ready to hear you.");
         return;
       }
@@ -166,6 +184,8 @@
         vapi.on("call-start", () => {
           busy = false;
           active = true;
+          microphoneMuted = false;
+          assistantSpeaking = false;
           setState("listening", "Connected to Remi. Listening. You can interrupt while Remi speaks.");
           const seconds = Math.min(Number(config.maxDurationSeconds) || MAX_SECONDS, MAX_SECONDS);
           timer = windowRef.setTimeout(() => finish("The 3-minute call limit was reached. The call has ended."), seconds * 1000);
@@ -241,10 +261,19 @@
     if (muteButton) muteButton.addEventListener("click", () => {
       if (!client || !active || typeof client.setMuted !== "function") return;
       const muted = !client.isMuted();
-      client.setMuted(muted);
-      muteButton.textContent = muted ? "Unmute microphone" : "Mute microphone";
-      muteButton.setAttribute("aria-pressed", muted ? "true" : "false");
-      if (status) status.textContent = muted ? "Microphone muted. Remi cannot hear you." : "Microphone on. Listening.";
+      try {
+        client.setMuted(muted);
+        microphoneMuted = muted;
+        muteButton.textContent = muted ? "Unmute microphone" : "Mute microphone";
+        muteButton.setAttribute("aria-pressed", muted ? "true" : "false");
+        const next = assistantSpeaking ? "speaking" : muted ? "muted" : "listening";
+        const copy = muted ? "Microphone muted. Remi cannot hear you."
+          : assistantSpeaking ? "Microphone on. Remi is speaking. You can interrupt at any time."
+            : "Microphone on. Listening.";
+        setState(next, copy);
+      } catch (_) {
+        setState("error", "The microphone control could not be changed. You can end the call or continue with typed chat.");
+      }
     });
     if (useTranscript) useTranscript.addEventListener("click", () => {
       if (!latestUserTranscript) return;
@@ -267,5 +296,5 @@
     return { start, finish, get state() { return state; } };
   }
 
-  globalThis.RoomayVapiCall = Object.freeze({ attach });
+  globalThis.RoomayVapiCall = Object.freeze({ attach, orbStateForCallState });
 })();

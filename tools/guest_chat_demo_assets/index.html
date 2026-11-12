@@ -6,6 +6,7 @@
   <meta name="color-scheme" content="light">
   <title>My Stay | ROOMAY</title>
   <link rel="stylesheet" href="/app.css">
+  <script src="/roomay-orb.js" defer></script>
   <!-- optional-vapi-sdk -->
   <script src="/voice_intake.js" defer></script>
   <script src="/vapi_call.js" defer></script>
@@ -53,6 +54,11 @@
                 <button id="mute-remi" class="voice-call-secondary" type="button" hidden aria-pressed="false">Mute microphone</button>
                 <button id="end-remi" class="voice-call-end" type="button" hidden>End call</button>
               </div>
+            </div>
+            <div class="remi-orb-stage" aria-hidden="true">
+              <span class="remi-orb-fallback"></span>
+              <roomay-orb id="remi-orb" state="idle" aria-hidden="true"></roomay-orb>
+              <span class="remi-orb-connecting"></span>
             </div>
             <p id="remi-call-status" class="remi-call-status" role="status" aria-live="polite">Voice conversation is unavailable until this local test is explicitly configured.</p>
             <div id="remi-call-captions" class="remi-call-captions" role="log" aria-live="polite" aria-relevant="additions text" hidden></div>
