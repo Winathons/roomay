@@ -137,7 +137,13 @@ class HotelRules(unittest.TestCase):
         block["status"] = "released"
         self.assertEqual(self.eligible(), ())
         block.update(status="active", start="2026-11-04", end="2026-11-06")
+        # A scheduled end date does not certify repair. Active blocks remain
+        # unsafe until an authorized human explicitly releases them.
+        self.assertEqual(self.eligible(), ("maintenance_block",))
+        block["status"] = "released"
         self.assertEqual(self.eligible(), ())
+        block.update(status="active", start="2026-11-08", end="2026-11-10")
+        self.assertEqual(self.eligible(), ())  # booking ends before block starts
 
     def test_overdue_stay_still_occupies_room(self):
         self.walk_in.update(status="pending_confirmation", arrival="2026-12-01", departure="2026-12-02")
