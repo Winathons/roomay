@@ -1,7 +1,9 @@
-"""Roomay guest service API and department inbox.
+"""Inactive standalone guest-service prototype and department inbox.
 
-Workpeg is read-only for hotel data. New service requests/audit are written
-atomically to PostgreSQL as the sole writer for this workflow.
+For isolated testing only, request/audit writes are atomic in PostgreSQL.
+These records are NOT Workpeg's authoritative request/audit store and are not
+visible in the existing native receptionist queue. The production entrypoint
+is disabled by default and its hotel snapshot reader fails closed.
 """
 from datetime import datetime, timedelta, timezone
 import hashlib
