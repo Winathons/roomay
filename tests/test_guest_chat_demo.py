@@ -406,7 +406,7 @@ class GuestChatDemoHttpTests(unittest.TestCase):
         self.assertIn('id="remi-orb"', text)
         self.assertIn('src="/roomay-orb.js"', text)
         self.assertIn("Vapi may process or retain call metadata", text)
-        self.assertIn("Provider privacy terms apply", text)
+        self.assertIn("provider's privacy terms apply", text)
         status, headers, app_js = self.dispatch("/app.js")
         self.assertEqual(status, 200)
         self.assertIn("text/javascript", headers["Content-Type"])
