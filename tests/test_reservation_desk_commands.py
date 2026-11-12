@@ -179,11 +179,10 @@ class ReservationDeskTests(TestCase):
             ({"serialization_guard_held": False}, "authoritative_serialization_unavailable"),
             ({"authoritative_now": None}, "authoritative_clock_unavailable"),
         ):
-            with self.subTest(changes=changes), self.assertRaisesRegex(
-                ReservationRejected, expected
-            ):
-                self.confirmation(context=replace(self.context, **changes))
-                self.cancellation(context=replace(self.context, **changes))
+            for operation in (self.confirmation, self.cancellation):
+                with self.subTest(changes=changes, operation=operation.__name__):
+                    with self.assertRaisesRegex(ReservationRejected, expected):
+                        operation(context=replace(self.context, **changes))
 
     def test_invalid_timezone_and_elapsed_booking_fail_closed(self):
         with self.assertRaisesRegex(ReservationRejected, "authoritative_hotel_timezone_required"):
@@ -196,7 +195,13 @@ class ReservationDeskTests(TestCase):
             self.confirmation(past)
         # UTC+03 clock date is 7 Nov, hotel +01 local date still 6 Nov.
         clock = replace(self.context, authoritative_now="2026-11-07T00:30:00+03:00")
-        self.assertEqual(self.confirmation(context=clock).action, "confirm_reservation")
+        recent_review = replace(
+            self.review, reviewed_at="2026-11-07T00:25:00+03:00",
+        )
+        self.assertEqual(
+            self.confirmation(context=clock, review=recent_review).action,
+            "confirm_reservation",
+        )
 
     def test_cancel_pending_requires_non_pii_reason_code_and_no_occupancy(self):
         before = deepcopy(self.hotel)
