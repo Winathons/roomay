@@ -2,14 +2,21 @@
 
 ## Product boundary
 
-This branch introduces a real HTTPS application backend for guest service
-requests and the department inbox. **PostgreSQL is the single source of truth
-for requests and their audit history created through this backend.** Workpeg is
-read-only for hotel rooms, guests, reservations, stays and registered
-occupants. There is no automatic copy, write-through, or dual-writer to the
-existing Workpeg request tables. Historical Workpeg request rows therefore do
-not appear in this new inbox. An owner-reviewed migration is required before
-any existing Workpeg request history is moved or treated as authoritative.
+This branch introduces a **dormant, standalone FastAPI/PostgreSQL prototype**
+of guest service requests and a department inbox. PostgreSQL is the
+**transactional writer for records created inside this prototype only**; it
+has **NOT** been approved as the hotel's operational single source of truth.
+
+The current Workpeg Reception UI instead reads Workpeg request and audit tables.
+There is **no automatic copy, write-through, synchronization, or shared staff
+inbox** between them. No hotel records can be loaded by this backend until
+Workpeg supplies a supported and authorized invocation/read path.
+Hotel-dependent routes deliberately respond with sanitized 503 errors. Do not
+describe a PostgreSQL request as delivered to staff in Workpeg, enable
+guest-facing operations, migrate existing history, or deploy this backend
+until the owner formally approves one authoritative request/audit path and
+the corresponding secure staff projection. See
+[WOR-62 request authority options](wor-62-pr37-source-of-truth.md).
 
 The existing Workpeg tables and Room 205 records are not changed. The previous
 standalone Tables reader and its owner-run verification command have been
@@ -231,7 +238,29 @@ Before an owner-authorized real development test:
 6. Confirm an unauthorized staff account is denied and that neither guest nor
    staff projections expose protected identity or audit fields.
 
-The existing owner-only Workpeg request/audit tables remain untouched and are
-not this backend's source of truth. Decide and review their future migration
-or deprecation before representing the system as a single unified Workpeg
-database. Do not grant broader Workpeg permissions to make this backend run.
+Existing owner-only Workpeg request/audit tables remain untouched and are
+the **current Reception projection**, but the team has **not yet approved**
+the hotel's definitive future authoritative store. Review the two safe
+integration choices in
+[WOR-62 request authority options](wor-62-pr37-source-of-truth.md);
+do not deprecate or bypass Workpeg tables, create competing writers, or
+broaden permissions (`700`) to make the prototype operate.
+
+### Current GitHub verification (12 November 2026)
+
+PR #37 has been reconciled with protected `main`, preserving all existing
+hotel safety rules, main-only workflow triggers, compiled UI/release gate,
+and voice smoke checks. GitHub Actions now starts a temporary **PostgreSQL 16**
+service on its isolated runner at `127.0.0.1:55432` and runs migrations,
+transactions, concurrency and restart-style DB readback integration via
+`tests/test_backend_postgres.py` within `python -m unittest discover -s tests -v`.
+A hardcoded ephemeral test-only database password is **not** a hosted secret.
+For a local replica, use the documented Compose database and set
+`ROOMAY_TEST_DATABASE_URL` to its **loopback** connection; tests refuse a
+nonlocal host, wrong port, database name, and non-16 server.
+
+**Passing CI proves PostgreSQL behavior in an isolated test service, not a
+registered Workpeg OIDC client, real staff role authorizations, a hotel-data
+bridge, Workpeg writes, guest-to-staff delivery, or public release readiness.**
+The PR remains draft until these integration contracts are approved and
+hosted acceptance is obtained.
