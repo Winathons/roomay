@@ -2,7 +2,7 @@ import os
 from unittest import TestCase
 from unittest.mock import patch
 
-from backend.config import Settings
+from backend.config import Settings, require_experimental_backend_opt_in
 
 
 class BackendConfigurationTests(TestCase):
@@ -69,6 +69,36 @@ class BackendConfigurationTests(TestCase):
                     RuntimeError, "oidc_callback_must_match_public_origin|public_base_url_must_be_https_origin",
                 ):
                     self.valid(**changes).validate()
+
+    def test_standalone_backend_is_disabled_by_default(self):
+        for values in ({}, {"ROOMAY_ENABLE_STANDALONE_PROTOTYPE": ""},
+                       {"ROOMAY_ENABLE_STANDALONE_PROTOTYPE": "true"},
+                       {"ROOMAY_ENABLE_STANDALONE_PROTOTYPE": "production"}):
+            with self.subTest(values=values):
+                with self.assertRaisesRegex(
+                    RuntimeError, "standalone_guest_backend_disabled_pending_workpeg_integration"
+                ):
+                    require_experimental_backend_opt_in(values)
+        # This acknowledges a test-only local prototype, NOT Workpeg authorization.
+        require_experimental_backend_opt_in(
+            {"ROOMAY_ENABLE_STANDALONE_PROTOTYPE": "local-only"}
+        )
+
+    def test_default_asgi_module_import_is_blocked_before_db_setup(self):
+        # No environment values or DB credentials should be required to refuse
+        # startup: the operational safety gate must run first.
+        import subprocess
+        import sys
+        with patch.dict(os.environ, {}, clear=True):
+            result = subprocess.run(
+                [sys.executable, "-c", "import backend.main"],
+                capture_output=True, text=True, timeout=10,
+            )
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn(
+            "standalone_guest_backend_disabled_pending_workpeg_integration",
+            result.stderr,
+        )
 
     def test_business_and_hotel_bindings_must_be_canonical_uuids(self):
         with self.assertRaisesRegex(RuntimeError, "workpeg_business_and_hotel_binding_invalid"):
