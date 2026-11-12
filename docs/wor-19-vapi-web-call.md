@@ -7,9 +7,16 @@ hotel writer, or production endpoint. The synthetic stay remains isolated in
 
 ## What the local feature does
 
-- The guest clicks **Call Remi** to request microphone access and start one
-  real-time Vapi web call. There is no call, microphone request, or provider
-  request on page load.
+- The chat header shows a small **Call Remi** button. The orb is not displayed
+  or animated in the normal My Stay conversation panel. Clicking this button
+  explicitly opens a centered accessible voice-call dialog; when the Vapi test
+  assistant is configured, the same click also initiates the call. If Vapi is
+  unconfigured, opening the dialog previews the orb without starting audio.
+  The dialog contains the orb, elapsed call time (starts on confirmed
+  `call-start`), visible call status, captions, Mute, End Call and Close.
+  Closing by the button, Escape or backdrop ends/cancels an active or pending
+  call, and late provider events cannot restart it. The orb animation is paused
+  while the dialog is hidden. No provider request starts on page load.
 - Connecting, listening, speaking, ended, unavailable, and sanitized error
   states are shown. The guest can mute the microphone, interrupt the assistant,
   and end the call.
@@ -71,8 +78,10 @@ is a dashboard setting and is not verified by this code.
 
 For an animation-only local preview without provider configuration, run the
 server with `--enable-local-qa` but omit `--enable-vapi-web-call`; select Guest
-and open My Stay. The orb and fallback chat render while Call Remi remains
-unavailable. The configured command above enables a call only after the guest
+and open My Stay. The orb is hidden until you click **Call Remi** in the chat
+heading, then a visual-only dialog opens with a disabled provider connection
+and the unchanged typed fallback. Close it with the × button, Escape or the
+backdrop. The configured command above enables a call only after the guest
 clicks **Call Remi**.
 
 These startup settings are explicit operator assertions. Verify the test
