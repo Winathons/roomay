@@ -6,11 +6,23 @@ actions. The owner-only Workpeg table policy `700` remains unchanged.
 
 ## Trusted authority boundaries
 
-The release-facing `ui/hotel_data.py` uses an authenticated Workpeg browser
-session and server-scoped table helpers. The separate guest API in draft PR
-#37 has **unverified OIDC registration and unsupported developer PK server
-read access** (WOR-61). Its PostgreSQL request/audit workflow is not
-synchronized with the Workpeg receptionist (WOR-62).
+The release-facing `ui/hotel_data.py` uses authenticated Workpeg UI
+table helpers for a **read-only** Reception view. The standalone FastAPI and
+PostgreSQL prototype was **merged into main as inactive infrastructure**
+([PR #37](https://github.com/Winathons/roomay/pull/37)); its normal ASGI
+entrypoint refuses startup, the unsupported external developer-`WORKPEG_PK`
+reader was removed, and the default hotel-data reader returns sanitized 503.
+A deliberate `ROOMAY_ENABLE_STANDALONE_PROTOTYPE=local-only` setting is
+for isolated development only. Real staff OIDC registration and the supported
+external Workpeg access path remain unverified.
+
+The owner approved **Workpeg Tables as the sole authoritative operational
+service-request/audit store** in
+[WOR-62](wor-62-pr37-source-of-truth.md). The PostgreSQL prototype's
+request/audit records are not synchronized with Workpeg Reception and must
+never be described as received by actual hotel staff. Hosted vendor
+acceptance is consolidated in
+[WOR-69](https://linear.app/workpeg/issue/WOR-69).
 
 The `domain/access_control.py` `AccessContext` and
 `domain/staff_actions.py` ports are **pure, offline contracts**, not tokens,
@@ -97,22 +109,31 @@ authorization attestation.
 
 ## Actual acceptance still blocked
 
-1. **WOR-61:** Workpeg confirms supported staff OIDC client/claims and
-   authenticated backend bridge. Developer `WORKPEG_PK` is not a Tables API
-   credential.
-2. **WOR-62:** Owner approves the authoritative request/audit writer and
-   guest-to-staff consistency architecture.
-3. **WOR-28/29:** Authorized owner tests a real restricted/non-owner
-   Workpeg staff session, wrong business and department access, then records
-   redacted 401/403 and allowed-role outcomes. Keep the 700 policy until
-   approved permissions are explicitly verified.
-4. **WOR-11/12/14/65:** Demonstrate committed hotel writes and audit actor,
-   source, timestamp, reason, privacy projection and idempotent/reconciled
-   reload in independent sessions.
-5. **Privacy review:** Owner approves the actual data practices and notice
-   before public deployment or any real calls/transcripts.
+1. **WOR-69:** The vendor-supported external guest/Vapi → Workpeg
+   Function or Tables invocation, registered staff OIDC client/callback and
+   replay-safe canonical request/audit writer are not yet verified. Workpeg
+   membership claims are not a standalone Tables credential. WOR-61/62
+   completed **investigation and design phases** only.
+2. **WOR-28/29:** The owner previously verified an authenticated owner read
+   of the fictional hotel snapshot and a separate ordinary Member's
+   table-list result `200 []` under owner-only `700` rights. That is
+   **limited, positive denial evidence**, *not* proof of all direct-table,
+   role, cross-business or hosted write permission paths. Remaining
+   authorization and supported native write tests must be performed with
+   authorized sessions without broadening permissions as a shortcut.
+3. **WOR-11/12/13/20 and WOR-14/65:** Workpeg-native hotel actions still
+   require an actual trusted writer with serialization/idempotency and a
+   committed actor/time audit followed by independent-session readback.
+   Existing offline `persisted=False` plans never constitute booking,
+   checkout, maintenance clearance or staff request delivery.
+4. **Privacy review:** The owner must approve actual data processors, speech
+   and text storage/retention, guest notice and lawful handling before any
+   live calls/transcripts or public deployment.
 
-**Definition of Done:** real staff identity and permission enforcement,
-permitted/denied cross-role and cross-hotel tests, committed audit integrity
-and owner-reviewed privacy behavior are verified. Offline green checks and
-a merged PR alone cannot close WOR-22.
+**Completion boundary:** the **offline** policy, least-privilege projections,
+negative regressions and proposed privacy notice are already delivered.
+WOR-22's **hosted acceptance remains Backlog** until authenticated Workpeg
+staff rights, committed audit integrity, separate-role denial and the
+owner-reviewed privacy behavior can be verified. Keep the live gates under
+WOR-28/29/69 and the appropriate staff workflow implementation issues;
+offline CI does not authorize a deployment or mark hosted verification complete.
