@@ -762,15 +762,18 @@ def make_server(demo=None, port=PORT_DEFAULT, *, enable_local_qa=False):
         def _workspace_denied(self, status):
             message = ("This workspace is not available for this session. "
                        "Use the correct signed-in hotel workspace.")
+            recovery = ("<p><a href=\"/__qa/\">Return to the internal workspace selector</a> "
+                        "to choose a local test role.</p>" if enable_local_qa else "")
+            home_path = "/__qa/" if enable_local_qa else "/stay"
             content = ("<!doctype html><html lang=\"en\"><meta charset=\"utf-8\">"
                        "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">"
                        "<title>Workspace unavailable | ROOMAY</title>"
                        "<link rel=\"stylesheet\" href=\"/app.css\"><body><main class=\"page-shell\">"
-                       "<header class=\"topbar\"><a class=\"brand\" href=\"/stay\">"
+                       f"<header class=\"topbar\"><a class=\"brand\" href=\"{home_path}\">"
                        "<span class=\"brand-mark\" aria-hidden=\"true\">R</span>"
                        "<span class=\"brand-name\">roomay<span class=\"brand-period\">.</span></span>"
                        "</a></header><section class=\"empty-panel\" role=\"alert\"><h1>Workspace unavailable</h1>"
-                       f"<p>{message}</p></section></main></body></html>")
+                       f"<p>{message}</p>{recovery}</section></main></body></html>")
             self._send(status, content, content_type="text/html; charset=utf-8")
 
         def _json_body(self):

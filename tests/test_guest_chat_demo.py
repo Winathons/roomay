@@ -375,6 +375,7 @@ class GuestChatDemoHttpTests(unittest.TestCase):
         status, _, html = self.dispatch("/__qa/")
         self.assertEqual(status, 200)
         self.assertIn("does not sign you in", html.decode("utf-8"))
+        self.assertIn('class="brand" href="/__qa/"', html.decode("utf-8"))
         self.assertNotIn("/__qa/", self.dispatch("/stay")[2].decode("utf-8"))
         server = make_server(port=0)
         try:
@@ -382,8 +383,57 @@ class GuestChatDemoHttpTests(unittest.TestCase):
             # The default non-QA server does not register the role selection route.
             connection = self.dispatch("/__qa/", server=server)
             self.assertEqual(connection[0], 404)
+            status, session_headers, _ = self.dispatch(
+                "/api/session", method="POST", body=b"{}", server=server)
+            self.assertEqual(status, 200)
+            cookie = session_headers["Set-Cookie"].split(";", 1)[0]
+            status, _, denied = self.dispatch("/staff/housekeeping", cookie=cookie, server=server)
+            self.assertEqual(status, 403)
+            self.assertNotIn("/__qa/", denied.decode("utf-8"))
+            self.assertIn('href="/stay"', denied.decode("utf-8"))
         finally:
             server.server_close()
+
+    def test_local_role_mismatch_recovers_without_losing_resolved_status(self):
+        status, headers, body = self.dispatch("/api/session", method="POST", body=b"{}")
+        self.assertEqual(status, 200)
+        cookie = headers["Set-Cookie"].split(";", 1)[0]
+
+        def act(path, payload):
+            status, _, result = self.dispatch(
+                path, method="POST", body=json.dumps(payload).encode(), cookie=cookie)
+            self.assertEqual(status, 200, result.decode())
+            return json.loads(result)
+
+        proposal = act("/api/message", {"text": "Extra towels for room 205, please."})
+        act("/api/confirm", {"revision": proposal["chat"]["pending"]["revision"]})
+        act("/api/qa/select", {"role": "reception"})
+        reception = act("/api/session", {})
+        request_id = reception["requests"][0]["request_id"]
+        act("/api/assign", {"request_id": request_id})
+        act("/api/qa/select", {"role": "housekeeping"})
+        for action in ("acknowledge", "start", "resolve"):
+            act("/api/staff-action", {"action": action, "request_id": request_id})
+
+        # Opening the guest route in the wrong test role remains denied, but
+        # gives local QA a recovery path. Selecting Guest reuses the same
+        # server-side session, so the completed request and audit stay intact.
+        status, _, denied = self.dispatch("/stay", cookie=cookie)
+        self.assertEqual(status, 403)
+        self.assertIn("/__qa/", denied.decode("utf-8"))
+        status, _, qa_page = self.dispatch("/__qa/", cookie=cookie)
+        self.assertEqual(status, 200)
+        self.assertIn("does not sign you in", qa_page.decode("utf-8"))
+        act("/api/qa/select", {"role": "guest"})
+        status, _, guest_page = self.dispatch("/stay", cookie=cookie)
+        self.assertEqual(status, 200)
+        status, _, refreshed = self.dispatch(
+            "/api/session", method="POST", body=b"{}", cookie=cookie)
+        self.assertEqual(status, 200)
+        restored = json.loads(refreshed)
+        self.assertEqual(restored["workspace"], "guest")
+        self.assertEqual(restored["requests"][0]["status"], "resolved")
+        self.assertIn('data-workspace="guest"', guest_page.decode("utf-8"))
 
     def test_browser_session_stays_server_side_and_never_returns_internal_contract(self):
         status, headers, body = self.dispatch("/api/session", method="POST", body=b"{}")
