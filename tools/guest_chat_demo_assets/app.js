@@ -252,6 +252,9 @@
     voice = globalThis.RoomayVoiceIntake.attachVoiceIntake({
       windowRef: globalThis, button: voiceButton, cancelButton: voiceCancelButton, input, status: voiceStatus,
       remoteConsent: voiceRemoteConsent,
+      consentDialog: document.getElementById("voice-remote-dialog"),
+      consentAllow: document.getElementById("voice-remote-allow"),
+      consentCancel: document.getElementById("voice-remote-cancel"),
       onDraft(value) { voiceDraft = value; if (voiceCancelButton) voiceCancelButton.hidden = !value; updateComposerControls(); },
       onListening(value) { voiceListening = value; updateComposerControls(); },
     });
