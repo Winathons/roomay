@@ -47,9 +47,19 @@ _EMERGENCY_TERMS = re.compile(
     r"\b(emergency|fire|fire don start|smoke|medical emergency|someone is hurt|someone is injured|electric shock|sparking|gas smell|(?:person|somebody|i)\s+dey\s+bleed|someone is bleeding)\b",
     re.I,
 )
-_PIDGIN_MARKERS = re.compile(
-    r"\b(?:abeg|dey|wetin|una|make\s+i|i\s+wan|i\s+no|no\s+be|e\s+don|dem\s+don|we\s+don|"
-    r"(?:i|you|e|una)\s+fit|wahala|sef|sha|how\s+far|na)\b",
+# A lone loanword (for example "abeg") does not establish a Pidgin
+# conversation. Prefer English for English-framed requests and only localize
+# clearly Pidgin-dominant grammar in this stateless intent tool. The Vapi
+# assistant remains responsible for longer-running language preference.
+_ENGLISH_REQUEST_FRAMING = re.compile(
+    r"\b(?:please|could\s+you|would\s+you|can\s+you|may\s+i|"
+    r"i\s+(?:would\s+like|need|am\s+looking)|do\s+you|is\s+there)\b",
+    re.I,
+)
+_PIDGIN_GRAMMAR = re.compile(
+    r"\b(?:wetin|i\s+wan|make\s+i|no\s+dey|no\s+be|una\s+(?:get|dey|fit)|"
+    r"(?:i|you|e|we|dem)\s+(?:dey|don|fit)|"
+    r"dey\s+(?:leak|cool|bleed|work|available))\b",
     re.I,
 )
 
@@ -177,7 +187,11 @@ def route_caller_intent(utterance):
 
 
 def _response_language(text):
-    return "nigerian_pidgin" if _PIDGIN_MARKERS.search(text) else "english"
+    # English-first fallback: this tool sees only one utterance, not the full
+    # call's preference history. Avoid forcing a Pidgin reply for code-switches.
+    if _ENGLISH_REQUEST_FRAMING.search(text):
+        return "english"
+    return "nigerian_pidgin" if _PIDGIN_GRAMMAR.search(text) else "english"
 
 
 def _localized_error(utterance, english, pidgin):
