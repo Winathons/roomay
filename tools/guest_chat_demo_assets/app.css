@@ -92,10 +92,19 @@ h2 { margin: 0; color: var(--forest-deep); font-size: 20px; line-height: 1.25; l
 .composer textarea { display: block; width: 100%; min-height: 54px; resize: vertical; border: 0; outline: 0; background: transparent; color: #24382e; font-size: 13px; line-height: 1.5; }
 .composer textarea::placeholder { color: #99a49d; }
 .voice-tools { display: flex; align-items: flex-start; gap: 10px; padding: 10px 0 13px; border-top: 1px solid #f0f2ef; }
+.voice-controls { display: flex; flex: 0 0 auto; align-items: center; flex-wrap: wrap; gap: 6px; }
 .voice-button { min-height: 36px; flex: 0 0 auto; padding: 0 12px; border: 1px solid #cbd9ce; border-radius: 9px; background: #f7faf7; color: var(--forest); font-size: 11px; font-weight: 720; }
 .voice-button:hover:not(:disabled) { background: var(--sage); }
+.voice-button:focus-visible, .voice-remote-choice input:focus-visible { outline: 3px solid #8cae95; outline-offset: 2px; }
+.voice-button:disabled { cursor: not-allowed; opacity: .64; }
+.voice-cancel { min-height: 36px; padding: 0 9px; border: 1px solid #d7e0d9; border-radius: 9px; background: white; color: #52675a; font-size: 10px; font-weight: 680; }
+.voice-cancel:hover:not(:disabled) { background: #f4f7f3; }
+.voice-cancel:focus-visible { outline: 3px solid #8cae95; outline-offset: 2px; }
 .voice-copy { min-width: 0; }
 .voice-copy p { margin: 2px 0 0; color: var(--quiet); font-size: 10px; line-height: 1.45; }
+.voice-copy .voice-remote-choice { display: flex; align-items: flex-start; gap: 6px; margin-top: 7px; color: #40554a; font-size: 10px; line-height: 1.4; }
+.voice-remote-choice input { flex: 0 0 auto; margin: 1px 0 0; accent-color: var(--forest); }
+.voice-copy #voice-remote-help { max-width: 540px; }
 .voice-copy .voice-status { color: #4d6558; font-weight: 650; }
 .composer-footer { display: flex; align-items: center; justify-content: space-between; gap: 12px; color: var(--quiet); font-size: 10px; }
 .send-button { min-height: 39px; display: inline-flex; align-items: center; gap: 12px; padding: 0 14px; border: 1px solid var(--forest); border-radius: 10px; background: var(--forest); color: white; font-size: 12px; font-weight: 740; }

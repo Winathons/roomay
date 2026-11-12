@@ -336,6 +336,8 @@ class GuestChatDemoHttpTests(unittest.TestCase):
         self.assertIn('src="/voice_intake.js"', text)
         self.assertIn("aria-live=\"polite\"", text)
         self.assertIn("id=\"voice-button\"", text)
+        self.assertIn("id=\"voice-remote-consent\"", text)
+        self.assertIn("Provider privacy terms apply", text)
         status, headers, app_js = self.dispatch("/app.js")
         self.assertEqual(status, 200)
         self.assertIn("text/javascript", headers["Content-Type"])
@@ -343,7 +345,7 @@ class GuestChatDemoHttpTests(unittest.TestCase):
         status, headers, voice_js = self.dispatch("/voice_intake.js")
         self.assertEqual(status, 200)
         self.assertIn("text/javascript", headers["Content-Type"])
-        self.assertIn("processLocally = true", voice_js.decode("utf-8"))
+        self.assertIn("processLocally = !remoteMode", voice_js.decode("utf-8"))
 
     def test_staff_routes_require_matching_server_session_and_show_separate_pages(self):
         status, _, _ = self.dispatch("/staff/reception")

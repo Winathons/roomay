@@ -32,11 +32,15 @@ function voiceHarness(Recognition = class {}) {
   const button = new Element('voice-button');
   const input = new Element('guest-message');
   const status = new Element('voice-status');
+  const cancelButton = new Element('voice-cancel');
+  cancelButton.hidden = true;
+  const remoteConsent = new Element('voice-remote-consent');
+  remoteConsent.checked = false;
   const windowRef = Recognition ? { SpeechRecognition: Recognition } : {};
   const api = {};
   vm.runInNewContext(voiceSource, { globalThis: api });
-  const voice = api.RoomayVoiceIntake.attachVoiceIntake({ windowRef, button, input, status });
-  return { button, input, status, voice };
+  const voice = api.RoomayVoiceIntake.attachVoiceIntake({ windowRef, button, cancelButton, input, status, remoteConsent });
+  return { button, cancelButton, input, status, remoteConsent, voice };
 }
 
 class MockRecognition {
@@ -62,13 +66,21 @@ test('unsupported browsers keep typed input available', () => {
   assert.equal(h.input.value.length > 0, true);
 });
 
-test('cloud-only recognizers are rejected instead of sending audio to a service', () => {
-  class RemoteOnly { constructor() { this.startCalls = 0; } start() { this.startCalls += 1; } stop() {} }
+test('browser speech service stays off until the guest opts in', async () => {
+  class RemoteOnly { constructor() { this.startCalls = 0; RemoteOnly.latest = this; } start() { this.startCalls += 1; } stop() {} }
   const h = voiceHarness(RemoteOnly);
+  await h.voice.ready;
   assert.equal(h.voice.supported, false);
   assert.equal(h.button.disabled, true);
+  assert.equal(RemoteOnly.latest?.startCalls || 0, 0);
+  assert.match(h.status.textContent, /opt in to your browser’s speech service/i);
+  h.remoteConsent.checked = true;
+  h.remoteConsent.emit('change');
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(h.button.disabled, false);
   h.button.emit('click');
-  assert.equal(h.status.textContent.includes('Private on-device'), true);
+  assert.equal(RemoteOnly.latest.startCalls, 1);
+  assert.match(h.status.textContent, /browser’s speech service/i);
 });
 
 test('microphone start waits for verified local en-NG dictation and a direct button gesture', async () => {
@@ -83,10 +95,87 @@ test('microphone start waits for verified local en-NG dictation and a direct but
   assert.equal(MockRecognition.availabilityOptions.processLocally, true);
   assert.equal(MockRecognition.availabilityOptions.quality, 'dictation');
   assert.equal(h.button.disabled, false);
+  assert.equal(h.remoteConsent.checked, false, 'remote provider consent defaults off');
   h.button.emit('click');
   assert.equal(recognition.startCalls, 1);
   assert.equal(h.button.attributes['aria-pressed'], 'true');
   assert.match(h.status.textContent, /Listening on this device/);
+});
+
+test('explicit remote consent selects browser recognition and discloses provider processing', async () => {
+  const h = voiceHarness(MockRecognition);
+  await h.voice.ready;
+  h.remoteConsent.checked = true;
+  h.remoteConsent.emit('change');
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(h.button.disabled, false);
+  h.button.emit('click');
+  assert.equal(MockRecognition.latest.processLocally, false);
+  assert.equal(MockRecognition.latest.startCalls, 1);
+  assert.match(h.status.textContent, /audio may be sent to its provider/i);
+});
+
+test('microphone stays disabled until the opted-in remote availability check completes', async () => {
+  const oldAvailable = MockRecognition.available;
+  let resolveRemote;
+  MockRecognition.available = options => options.processLocally
+    ? Promise.resolve('available')
+    : new Promise(resolve => { resolveRemote = resolve; });
+  const h = voiceHarness(MockRecognition);
+  await h.voice.ready;
+  h.remoteConsent.checked = true;
+  h.remoteConsent.emit('change');
+  assert.equal(h.button.disabled, true);
+  h.button.emit('click');
+  assert.equal(MockRecognition.latest.startCalls, 0);
+  resolveRemote('available');
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(h.button.disabled, false);
+  h.button.emit('click');
+  assert.equal(MockRecognition.latest.processLocally, false);
+  MockRecognition.available = oldAvailable;
+});
+
+test('browser provider unavailable after opt-in keeps typed input and does not start recognition', async () => {
+  const oldAvailable = MockRecognition.availabilityResult;
+  MockRecognition.availabilityResult = 'unavailable';
+  const h = voiceHarness(MockRecognition);
+  await h.voice.ready;
+  h.remoteConsent.checked = true;
+  h.remoteConsent.emit('change');
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(h.button.disabled, true);
+  assert.match(h.status.textContent, /browser speech service is unavailable/i);
+  h.button.emit('click');
+  assert.equal(MockRecognition.latest.startCalls, 0);
+  MockRecognition.availabilityResult = oldAvailable;
+});
+
+test('guest can stop recognition and keep its partial transcript for review', async () => {
+  const h = voiceHarness(MockRecognition);
+  await h.voice.ready;
+  h.button.emit('click');
+  const recognition = MockRecognition.latest;
+  recognition.onresult({ results: [{ isFinal: false, 0: { transcript: 'bring towels please' } }] });
+  h.button.emit('click');
+  assert.equal(recognition.stopCalls, 1);
+  recognition.onend();
+  assert.equal(h.input.value, 'bring towels please');
+  assert.equal(h.voice.voiceDraft, true);
+  assert.match(h.status.textContent, /transcript ready to review/i);
+});
+
+test('discarding a voice draft restores the typed text that preceded recording', async () => {
+  const h = voiceHarness(MockRecognition);
+  h.input.value = 'The AC in my room is not cooling.';
+  await h.voice.ready;
+  h.button.emit('click');
+  MockRecognition.latest.onresult({ results: [{ isFinal: true, 0: { transcript: 'please check it before dinner' } }] });
+  MockRecognition.latest.onend();
+  assert.equal(h.input.value, 'The AC in my room is not cooling. please check it before dinner');
+  h.voice.discardDraft();
+  assert.equal(h.input.value, 'The AC in my room is not cooling.');
+  assert.equal(h.voice.voiceDraft, false);
 });
 
 test('denied microphone access reports a safe typed fallback', async () => {
@@ -126,13 +215,13 @@ test('missing or failed availability API fails closed to typed input', async () 
   const missing = voiceHarness(NoAvailability);
   await missing.voice.ready;
   assert.equal(missing.button.disabled, true);
-  assert.match(missing.status.textContent, /cannot verify.*Type your message/i);
+  assert.match(missing.status.textContent, /cannot be verified.*opt in to your browser/i);
 
   MockRecognition.availabilityError = true;
   const failed = voiceHarness(MockRecognition);
   await failed.voice.ready;
   assert.equal(failed.button.disabled, true);
-  assert.match(failed.status.textContent, /could not be verified.*Type your message/i);
+  assert.match(failed.status.textContent, /could not be verified.*Typed input is always available/i);
   MockRecognition.availabilityError = false;
 });
 
@@ -206,9 +295,10 @@ test('overlong transcript is shown for editing rather than silently truncated', 
 });
 
 function makeAppHarness({ Recognition = MockRecognition } = {}) {
-  const ids = ['messages', 'chat-form', 'guest-message', 'send-button', 'voice-button',
-    'voice-status', 'confirmation', 'feedback'];
+  const ids = ['messages', 'chat-form', 'guest-message', 'send-button', 'voice-button', 'voice-cancel',
+    'voice-status', 'voice-remote-consent', 'confirmation', 'feedback'];
   const elements = Object.fromEntries(ids.map(id => [id, new Element(id)]));
+  elements['voice-cancel'].hidden = true;
   const calls = [];
   let releaseMessage;
   const payload = (value) => ({ ok: true, status: 200, json: async () => value });
@@ -251,6 +341,21 @@ test('edited transcript is explicitly sent once through the existing typed-intak
   await new Promise(resolve => setTimeout(resolve, 0));
   assert.equal(h.elements['guest-message'].value, '');
   assert.equal(h.elements['messages'].children.length, 2);
+});
+
+test('composer discard control cancels the recognized addition without sending it', async () => {
+  const h = makeAppHarness();
+  await new Promise(resolve => setTimeout(resolve, 0));
+  await new Promise(resolve => setTimeout(resolve, 0));
+  h.elements['guest-message'].value = 'My AC is not cooling.';
+  h.elements['voice-button'].emit('click');
+  h.recognition.onresult({ results: [{ isFinal: true, 0: { transcript: 'Please check it.' } }] });
+  h.recognition.onend();
+  assert.equal(h.elements['voice-cancel'].hidden, false);
+  h.elements['voice-cancel'].emit('click');
+  assert.equal(h.elements['guest-message'].value, 'My AC is not cooling.');
+  assert.equal(h.elements['voice-cancel'].hidden, true);
+  assert.equal(h.calls.filter(call => call.url === '/api/message').length, 0);
 });
 
 test('malformed overlong recognized content is blocked before request intake', async () => {

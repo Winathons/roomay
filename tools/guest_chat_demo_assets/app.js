@@ -8,7 +8,9 @@
   const input = document.getElementById("guest-message");
   const sendButton = document.getElementById("send-button");
   const voiceButton = document.getElementById("voice-button");
+  const voiceCancelButton = document.getElementById("voice-cancel");
   const voiceStatus = document.getElementById("voice-status");
+  const voiceRemoteConsent = document.getElementById("voice-remote-consent");
   const confirmation = document.getElementById("confirmation");
   let busy = false;
   let voiceDraft = false;
@@ -243,13 +245,23 @@
 
   if (workspace === "guest" && globalThis.RoomayVoiceIntake && voiceButton && voiceStatus) {
     voice = globalThis.RoomayVoiceIntake.attachVoiceIntake({
-      windowRef: globalThis, button: voiceButton, input, status: voiceStatus,
-      onDraft(value) { voiceDraft = value; updateComposerControls(); },
+      windowRef: globalThis, button: voiceButton, cancelButton: voiceCancelButton, input, status: voiceStatus,
+      remoteConsent: voiceRemoteConsent,
+      onDraft(value) { voiceDraft = value; if (voiceCancelButton) voiceCancelButton.hidden = !value; updateComposerControls(); },
       onListening(value) { voiceListening = value; updateComposerControls(); },
     });
   } else if (workspace === "guest" && voiceButton && voiceStatus) {
     voiceButton.disabled = true;
+    if (voiceCancelButton) voiceCancelButton.disabled = true;
     voiceStatus.textContent = "Voice input is unavailable. Type your request instead.";
+  }
+
+  if (voiceCancelButton && input) {
+    voiceCancelButton.addEventListener("click", () => {
+      if (busy || voiceListening || !voice) return;
+      voice.discardDraft();
+      input.focus();
+    });
   }
 
   async function act(path, body) {
