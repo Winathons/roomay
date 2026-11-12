@@ -2,12 +2,12 @@
 
 This is the Phase A integration boundary for Roomay's real hotel data. The
 owner reports that the Roomay AI development business has an existing
-`roomay_hotel_v1/room_types` table at permission `700`, and has verified table
-creation, direct GET/listing, fictional row create/update/read-back, and
-persistence after independent browser reload. This hosted evidence is owner
-reported; Codex made no live Workpeg calls. The other eight canonical tables,
-staff permission behavior, and production integration remain unverified. The
-WOR-59 planner does not modify or recreate the existing table or row.
+all nine canonical Workpeg tables at permission `700`, and has verified the
+fictional Room 205 hotel/request workflow persists and appears through the
+read-only receptionist. This hosted evidence is owner reported; Codex made no
+live Workpeg calls. Non-owner staff permission behavior, guest access, writes
+from the application and production integration remain unverified. Do not
+modify or recreate the existing tables or records.
 
 The historical `Unknown peg namespace 'roomay'` and `room_types` missing
 observations are superseded by the owner's later development verification.
@@ -131,3 +131,4 @@ references outside domain records, and validates cross-table relationships
 before rendering. It imports no fixture or demo module and keeps physical stays
 distinct from reservations. See `docs/wor-34.md` for UI states, authorization
 limits, and remaining live acceptance steps.
+

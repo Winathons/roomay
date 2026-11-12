@@ -21,20 +21,19 @@ All feature tasks start unassigned. Before changing code:
 
 ## Branch strategy
 
-- **main:** stable demo/release version; GitHub default branch.
-- **staging:** shared integration branch; all feature PRs target here.
-- **WOR-<id>-short-feature:** personal feature branch based on an updated `staging`.
+- **main:** shared integration and release-candidate branch; GitHub default branch.
+- **WOR-<id>-short-feature:** personal feature branch based on the latest `origin/main`.
 
 ```powershell
 git fetch origin
-git switch staging
-git pull --ff-only origin staging
+git switch main
+git pull --ff-only origin main
 git switch -c WOR-8-hotel-schema
 ```
 
-On a first checkout of staging, use `git switch --track origin/staging` if the local branch does not exist.
+On a first checkout, use `git switch --track origin/main` if the local branch does not exist.
 
-Commit and push only work related to the Linear issue. Open a PR **into staging**, with the issue ID in the PR title/body. Do not push directly to staging or main; do not force-push shared branches. After integrated checks, promotion into main happens through a separate reviewed `staging` → `main` release PR.
+Commit and push only work related to the Linear issue. Open a PR **into main**, with the issue ID in the PR title/body. Do not push directly to main; do not force-push shared branches.
 
 ## PR requirements
 
@@ -56,5 +55,6 @@ Commit and push only work related to the Linear issue. Open a PR **into staging*
 ## Links
 
 - [Project board](https://linear.app/workpeg/project/roomay-workpeg-hospitality-hackathon-7b7a7ce4b3b9)
-- [Staging and Codex instructions](docs/staging.md)
+- [Main-branch and Codex instructions](docs/staging.md)
 - [Workpeg SDK](https://developers.workpeg.com/docs/latest/)
+

@@ -1,9 +1,10 @@
 # WOR-34 receptionist application
 
-> The historical namespace rejection described in this document was later
-> resolved in the Roomay AI development business. The owner reports verified
-> persistence for the existing `room_types` table; the remaining table schemas
-> and staff permissions are separate open gates. This route remains read-only.
+> The historical namespace rejection was resolved. The owner reports that all
+> nine canonical tables and the fictional Room 205 workflow are available to
+> the read-only Reception route in the Roomay AI development business. This
+> remains owner-observed evidence; non-owner staff permissions and writes are
+> separate open gates.
 
 WOR-34 replaces the release demo with an authenticated, business-scoped,
 read-only receptionist route:
@@ -12,7 +13,7 @@ read-only receptionist route:
 /b/<business_id>/reception
 ```
 
-The route uses the Workpeg 0.149.1 `Authenticated` widget, the router's
+The route uses the Workpeg 0.152.0 `Authenticated` widget, the router's
 `route.business_id`, and the documented `workpeg.get_tables()` and
 `workpeg.get_rows()` helpers. It loads all pages for the exact nine-table WOR-29
 contract. It does not call create, add, update, or delete helpers.
@@ -79,31 +80,24 @@ be designed and persisted before Roomay claims a complete room-change history.
 WOR-34 preserves the original request context but does not invent that missing
 audit trail or enable room-change writes.
 
-## Still requires authorized live validation
+## Current hosted evidence and remaining acceptance
 
-The current Tables response is still:
+The old `HTTP 400 Unknown peg namespace 'roomay'` observation is superseded.
+The owner reports the approved Peg is installed for testing in the Roomay AI
+development business and that the Reception page loads the existing fictional
+hotel snapshot. Codex did not make a live Workpeg call as part of this change.
+See [WOR-25 tester and release handoff](wor-25-release.md) for the current
+access steps and the important distinction between the installed Peg and the
+SDK's local `--fake-cloud` development-table isolation.
 
-```text
-HTTP 400
-Unknown peg namespace 'roomay'
-```
-
-No live Workpeg call, `--fake-cloud`, token, publication, installation, or data
-write was performed for this change. After WOR-28 resolves the namespace:
-
-1. Confirm the reviewed Peg release is installed in the exact Roomay
-   development business; approval alone is not installation.
-2. Sign in as an authorized owner and open the receptionist route for that
-   business UUID.
-3. With synthetic development-business records only, verify all nine tables,
-   pagination, reload persistence, empty inventory, a denied second role, and a
-   network interruption. Redact business identifiers and guest data in evidence.
-4. Verify the business timezone contract before treating browser-local "Today"
-   as the hotel's authoritative operating date.
-5. Keep booking, assignment, check-in, and service-request writes disabled until
-   a trusted concurrency-safe writer and WOR-14 authorization enforcement are
-   implemented and tested.
+Still unverified: non-owner staff access, any department permission, guest
+identity/session authorization, mutation, committed request/audit writes, and
+business-local authoritative operating dates. Keep booking, assignment,
+check-in/out, and service-request writes disabled until the trusted
+authorization and concurrency-safe persistence work is implemented and
+accepted. A build or mocked test is not hosted acceptance.
 
 WOR-34 must remain In Progress until the authenticated live acceptance criteria
 pass. A successful offline build or mocked browser test is not proof of hosted
 Workpeg persistence.
+
