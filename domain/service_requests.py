@@ -170,7 +170,8 @@ def _trusted_actor(actor, hotel_id, staff_directory):
 def _active_stay(snapshot, stay_id, room_id, guest_id):
     indexes = validate_snapshot(snapshot)
     stay = indexes["stays"].get(stay_id)
-    if not stay or stay["status"] != "checked_in" or stay["room_id"] != room_id:
+    if (not stay or stay["status"] != "checked_in"
+            or (room_id is not None and stay["room_id"] != room_id)):
         raise RequestError("inactive_or_wrong_stay")
     occupants = [row for row in snapshot["stay_guests"]
                  if row["stay_id"] == stay_id and row["guest_id"] == guest_id
@@ -535,7 +536,10 @@ def request_view(request, actor, staff_directory, *, snapshot=None):
             raise AuthorizationError("cross_guest_access")
         if snapshot is None:
             raise AuthorizationError("active_stay_required")
-        _active_stay(snapshot, request["stay_id"], request["room_id"], request["guest_id"])
+        # Historical tickets remain tied to their original physical room.
+        # The guest may still view their own ticket after an authorized move,
+        # but creation and guest reopening still require the *current* room.
+        _active_stay(snapshot, request["stay_id"], None, request["guest_id"])
         return {key: deepcopy(request[key]) for key in (
             "category", "description", "urgency", "status", "created_at",
             "updated_at",
