@@ -1,12 +1,14 @@
 "use strict";
 
 // Optional browser speech input for the loopback-only WOR-57 example journey.
-// Prefer on-device dictation. Remote browser recognition requires a separate,
-// unchecked consent control and is never selected automatically.
+// Prefer verified on-device dictation. Browser-managed recognition requires
+// explicit just-in-time consent; microphone permission alone is not consent
+// for third-party speech processing.
 (() => {
   const MAX_TRANSCRIPT_CHARS = 1000;
 
-  function attachVoiceIntake({ windowRef, button, cancelButton, input, status, remoteConsent, onDraft, onListening }) {
+  function attachVoiceIntake({ windowRef, button, cancelButton, input, status, remoteConsent,
+    consentDialog, consentAllow, consentCancel, onDraft, onListening }) {
     const Recognition = windowRef.SpeechRecognition || windowRef.webkitSpeechRecognition;
     let recognition = null;
     let listening = false;
@@ -24,11 +26,26 @@
     // Track the selected processing mode explicitly. Older implementations
     // may omit processLocally even when an opted-in browser service is used.
     let selectedMode = null;
+    let awaitingConsent = false;
+
+    const showConsent = () => {
+      awaitingConsent = true;
+      if (consentDialog) consentDialog.hidden = false;
+      consentAllow?.focus?.();
+      setStatus("Browser speech processing needs your approval before microphone capture.");
+    };
+    const hideConsent = () => {
+      awaitingConsent = false;
+      if (consentDialog) consentDialog.hidden = true;
+      button.focus?.();
+    };
 
     const remoteApproved = () => Boolean(remoteConsent && remoteConsent.checked);
     const updateButton = () => {
       available = localAvailable || (remoteApproved() && remoteAvailable);
-      button.disabled = busy || remoteChecking || !(localAvailable || (remoteApproved() && remoteAvailable));
+      // The mic remains a discoverable action even without a local language
+      // pack. A remote-only browser gets an explicit consent dialog on click.
+      button.disabled = busy || remoteChecking;
       if (cancelButton) cancelButton.disabled = busy || listening;
     };
     const controller = (supported, ready = Promise.resolve()) => ({
@@ -65,7 +82,8 @@
       if (cancelButton) cancelButton.disabled = value || busy;
       if (remoteConsent) remoteConsent.disabled = value || busy;
       button.setAttribute("aria-pressed", value ? "true" : "false");
-      button.textContent = value ? "Stop listening" : "Start voice input";
+      button.setAttribute("aria-label", value ? "Stop dictation" : "Dictate a message");
+      button.setAttribute("title", value ? "Stop dictation" : "Dictate a message");
       if (typeof onListening === "function") onListening(value);
     };
     const setDraft = (value) => {
@@ -137,13 +155,13 @@
         if (result === "available") {
           localAvailable = true;
           available = true;
-          setStatus("On-device en-NG dictation is available. Press Use voice to allow microphone access.");
+          setStatus("Dictation is ready. Press the microphone to begin.");
         } else {
           const reason = result === "error" ? messagesForLocal.unknown : (messagesForLocal[result] || messagesForLocal.unknown);
-          setStatus(`${reason} Typed input is always available. You may opt in to your browser’s speech service below.`);
+          setStatus(`${reason} Press the microphone for an optional browser speech service, or type a message.`);
         }
       } else {
-        setStatus("On-device dictation cannot be verified in this browser. Typed input works; you may opt in to your browser’s speech service below.");
+        setStatus("Press the microphone to review browser speech processing, or type a message.");
       }
       button.setAttribute("aria-busy", "false");
       if (remoteConsent) remoteConsent.disabled = false;
@@ -274,46 +292,77 @@
       }
     };
 
+    function beginRecognition(mode) {
+      // This is invoked synchronously from a genuine user gesture (mic click
+      // for verified on-device, explicit consent click for browser-managed).
+      if (!mode || listening || busy) return;
+      transcript = "";
+      lastError = "";
+      baseText = input.value.trim();
+      baseWasVoiceDraft = voiceDraft;
+      selectedMode = mode;
+      try {
+        if ("processLocally" in recognition) recognition.processLocally = mode === "on-device";
+        setStatus(mode === "browser-managed"
+          ? "Starting your browser's speech service. Your browser may send audio to its provider."
+          : "Starting on-device dictation…");
+        recognition.start();
+      } catch (_error) {
+        stopWithFallback("Could not start voice input. Check microphone access or type your message instead.");
+      }
+    }
+
+    if (consentAllow) consentAllow.addEventListener("click", () => {
+      if (!awaitingConsent || busy) return;
+      hideConsent();
+      if (remoteConsent) remoteConsent.checked = true;
+      // Never select browser speech before this explicit affirmative click.
+      // Let recognition.start() report unavailability; don't await a
+      // separate asynchronous provider check and lose the user gesture.
+      remoteAvailable = true;
+      updateButton();
+      beginRecognition("browser-managed");
+    });
+    if (consentCancel) consentCancel.addEventListener("click", () => {
+      if (!awaitingConsent) return;
+      hideConsent();
+      setStatus("Voice processing cancelled. You can type your message.");
+    });
+    if (consentDialog) {
+      consentDialog.addEventListener("click", (event) => {
+        if (event.target === consentDialog) {
+          hideConsent();
+          setStatus("Voice processing cancelled. You can type your message.");
+        }
+      });
+      windowRef.addEventListener?.("keydown", (event) => {
+        if (event.key === "Escape" && awaitingConsent) {
+          event.preventDefault?.();
+          hideConsent();
+          setStatus("Voice processing cancelled. You can type your message.");
+        }
+      });
+    }
+
     button.addEventListener("click", () => {
       if (button.disabled) return;
       if (listening) {
-        setStatus("Stopping voice input and keeping any words recognized so far for review…");
-        try {
-          recognition.stop();
-        } catch (_error) {
+        setStatus("Stopping dictation and keeping recognized words for review…");
+        try { recognition.stop(); }
+        catch (_error) {
           stopWithFallback("Voice input stopped. Review any transcript or type your message instead.");
         }
         return;
       }
-      // start() is called synchronously from this direct user click so that
-      // microphone permission is never requested on page load or navigation.
-      transcript = "";
-      lastError = "";
-      // Every existing draft is preserved. New recognition is appended so a
-      // second recording cannot silently replace guest edits.
-      baseText = input.value.trim();
-      baseWasVoiceDraft = voiceDraft;
-      // Prefer verified local en-NG even when remote-service consent is on.
-      // Browser-managed recognition is only a fallback when local is absent.
-      const mode = localAvailable
-        ? "on-device"
-        : (remoteApproved() && remoteAvailable ? "browser-managed" : null);
-      if (!mode) {
-        setStatus("Voice input is unavailable with your current settings. Type your message instead.");
-        updateButton();
-        return;
-      }
-      selectedMode = mode;
-      try {
-        if ("processLocally" in recognition) recognition.processLocally = mode === "on-device";
-        if (mode === "browser-managed") {
-          setStatus("Listening with your browser’s speech service. Audio may be sent to its provider; you can stop at any time.");
-        } else {
-          setStatus("Starting verified on-device en-NG recognition…");
-        }
-        recognition.start();
-      } catch (_error) {
-        stopWithFallback("Could not start voice input. Check microphone access or type your message instead.");
+      if (awaitingConsent) return;
+      if (localAvailable) {
+        beginRecognition("on-device");
+      } else if (remoteApproved() && remoteAvailable) {
+        beginRecognition("browser-managed");
+      } else if (consentDialog && consentAllow && consentCancel) {
+        showConsent();
+      } else {
+        setStatus("Browser speech needs explicit processing consent. Please type a message instead.");
       }
     });
 
