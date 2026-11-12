@@ -75,3 +75,33 @@ jobs:
       # Rebuild a fresh artifact; do not trust a previously generated ui/dist.
       - name: Block dev routes, privileged CRUD and secrets in release bundle (WOR-33)
         run: python -m unittest discover -s tests -p 'test_release_candidate.py' -v
+
+      # Function package is inactive: verify the actual container, not only
+      # the source-level contract, without Workpeg credentials or live calls.
+      # --network=none prohibits Dockerfile RUN networking; Docker still pulls
+      # the pinned, published base image before executing build instructions.
+      - name: Build inactive Workpeg Function with no build-step network (WOR-71)
+        run: docker build --network=none --pull --progress=plain -t roomay-function-smoke:ci ./function
+
+      - name: Verify packaged Function refuses synthetic invocations (WOR-71)
+        run: |
+          docker run --rm --network none --entrypoint python roomay-function-smoke:ci -c '
+          import inspect
+          from app.main import main
+
+          assert tuple(inspect.signature(main).parameters) == ("context", "payload")
+          cases = [
+              ({}, {}),
+              ({"actor": "agent", "business": "synthetic"}, {"status": "confirmed"}),
+              ({"business": "synthetic", "token": "placeholder-not-a-secret"},
+               {"request": "fictional"}),
+          ]
+          for context, payload in cases:
+              try:
+                  main(context, payload)
+              except RuntimeError as exc:
+                  assert str(exc) == "roomay_function_not_configured"
+              else:
+                  raise AssertionError("Function unexpectedly accepted an invocation")
+          print("PASS: packaged Function entrypoint is fail-closed")
+          '
