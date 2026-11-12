@@ -104,7 +104,7 @@ class PulseTests(TestCase):
                          {row["request_id"] for row in self.reports[:3]})
         self.assertIn("not a confirmed shared cause", suggestion.explanation)
         self.assertFalse(suggestion.persisted)
-        self.assertFalse(any(row["category"] in {"room_service", "extra_towels"}
+        self.assertFalse(any(row.category in {"room_service", "extra_towels"}
                              for row in pulse.suggestions))
         # Never expose customer names, messages or their raw description in
         # aggregated manager view.
