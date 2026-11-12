@@ -22,12 +22,16 @@ class Element {
 }
 
 function harness({ configStatus = 200, startError = null, sdk = true, configGate = null } = {}) {
-  const ids = ['remi-call', 'call-remi', 'end-remi', 'mute-remi', 'remi-call-status',
+  const ids = ['remi-call', 'remi-call-overlay', 'call-remi', 'call-remi-label',
+    'close-remi', 'remi-call-duration', 'end-remi', 'mute-remi', 'remi-call-status',
     'remi-call-captions', 'use-call-transcript', 'remi-orb'];
   const elements = Object.fromEntries(ids.map(id => [id, new Element(id)]));
+  elements['remi-call-overlay'].hidden = true;
   const calls = [];
   const timers = [];
+  const intervals = [];
   const listeners = {};
+  const documentListeners = {};
   const clientRef = { value: null };
   const fetch = async (url, options) => {
     calls.push({ url, options });
@@ -55,12 +59,15 @@ function harness({ configStatus = 200, startError = null, sdk = true, configGate
     RoomayVapiSDK: sdk ? { Vapi: FakeVapi } : undefined,
     setTimeout(fn, duration) { timers.push({ fn, duration }); return timers.length; },
     clearTimeout() {},
+    setInterval(fn, duration) { intervals.push({ fn, duration }); return intervals.length; },
+    clearInterval() {},
     addEventListener(name, fn) { (listeners[name] ||= []).push(fn); },
   };
   const documentRef = {
     getElementById: id => elements[id],
     createElement: () => new Element(),
     createTextNode: text => ({ textContent: text }),
+    addEventListener(name, fn) { (documentListeners[name] ||= []).push(fn); },
   };
   const context = { globalThis: null, windowRef, documentRef };
   context.globalThis = context;
@@ -74,7 +81,7 @@ function harness({ configStatus = 200, startError = null, sdk = true, configGate
       orbStates.push({ call: next, orb: elements['remi-orb'].state });
     },
   });
-  return { elements, calls, timers, listeners, clientRef, imported, orbStates, call };
+  return { elements, calls, timers, intervals, listeners, documentListeners, clientRef, imported, orbStates, call };
 }
 
 const tick = () => new Promise(resolve => setImmediate(resolve));
@@ -83,8 +90,10 @@ test('does not start a provider call until the guest presses Call Remi', async (
   const h = harness();
   assert.equal(h.calls.length, 0);
   assert.equal(h.clientRef.value, null);
+  assert.equal(h.elements['remi-call-overlay'].hidden, true);
   assert.equal(h.elements['call-remi'].disabled, false);
   h.elements['call-remi'].emit('click');
+  assert.equal(h.elements['remi-call-overlay'].hidden, false);
   await tick();
   assert.deepEqual(h.calls.map(call => call.url), ['/api/voice/config', '/api/voice/claim']);
   assert.equal(h.clientRef.value.startArgs[0], 'assistant-test-id');
@@ -111,6 +120,8 @@ test('shows listening, speaking, interruption, captions, mute and end states', a
   assert.equal(h.elements['remi-orb'].state, 'listening');
   assert.match(h.elements['remi-call-status'].textContent, /Connected.*Listening/);
   assert.equal(h.timers[0].duration, 180000);
+  assert.equal(h.intervals[0].duration, 1000);
+  assert.equal(h.elements['remi-call-duration'].textContent, '00:00');
   client.emit('message', { type: 'assistant.speechStarted' });
   assert.equal(h.elements['remi-orb'].state, 'speaking');
   assert.match(h.elements['remi-call-status'].textContent, /Remi is speaking/);
@@ -139,18 +150,52 @@ test('shows listening, speaking, interruption, captions, mute and end states', a
   assert.equal(client.stopped, 1);
   await tick();
   assert.match(h.elements['remi-call-status'].textContent, /Call ended/);
+  assert.equal(h.elements['remi-call-overlay'].hidden, true);
   assert.equal(h.elements['remi-orb'].state, 'idle');
   assert.equal(h.elements['mute-remi'].textContent, 'Mute microphone');
   assert.equal(h.elements['mute-remi'].attributes['aria-pressed'], 'false');
   assert.equal(h.calls.filter(call => call.url === '/api/voice/release').length, 1);
 });
 
-test('unsupported local SDK leaves typed request path and no provider call active', () => {
+test('unsupported local SDK still allows opening the visual preview without a call', () => {
   const h = harness({ sdk: false });
-  assert.equal(h.elements['call-remi'].disabled, true);
-  assert.match(h.elements['remi-call-status'].textContent, /Typed chat remains available/);
+  assert.equal(h.elements['call-remi'].disabled, false);
+  assert.equal(h.elements['remi-call-overlay'].hidden, true);
   h.elements['call-remi'].emit('click');
+  assert.equal(h.elements['remi-call-overlay'].hidden, false);
+  assert.match(h.elements['remi-call-status'].textContent, /Typed chat remains available/);
   assert.equal(h.calls.length, 0);
+  h.elements['close-remi'].emit('click');
+  assert.equal(h.elements['remi-call-overlay'].hidden, true);
+});
+
+test('closing the call dialog ends active audio and keeps late events ignored', async () => {
+  const h = harness();
+  h.elements['call-remi'].emit('click'); await tick();
+  const client = h.clientRef.value;
+  client.emit('call-start');
+  client.emit('speech-start');
+  assert.equal(h.elements['remi-orb'].state, 'speaking');
+  h.elements['close-remi'].emit('click');
+  assert.equal(h.elements['remi-call-overlay'].hidden, true);
+  assert.equal(client.stopped, 1);
+  client.emit('speech-start');
+  assert.equal(h.elements['remi-orb'].state, 'idle');
+});
+
+test('Escape cancels pending setup before provider initiation', async () => {
+  let resolveConfig;
+  const gate = new Promise(resolve => { resolveConfig = resolve; });
+  const h = harness({ configGate: gate });
+  h.elements['call-remi'].emit('click');
+  await tick();
+  assert.equal(h.elements['remi-call-overlay'].hidden, false);
+  for (const fn of h.documentListeners.keydown || []) fn({ key: 'Escape', preventDefault() {} });
+  assert.equal(h.elements['remi-call-overlay'].hidden, true);
+  resolveConfig();
+  await tick();
+  assert.equal(h.clientRef.value, null);
+  assert.equal(h.calls.some(x => x.url === '/api/voice/claim'), false);
 });
 
 test('unconfigured voice route fails safely without leaving a call claim', async () => {
