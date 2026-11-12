@@ -56,19 +56,30 @@
           <form id="chat-form" class="composer">
             <label class="sr-only" for="guest-message">Your request or reviewed voice transcript</label>
             <textarea id="guest-message" name="message" rows="2" maxlength="1000" placeholder="What would make your stay more comfortable?" autocomplete="off" required></textarea>
-            <div class="voice-tools" aria-label="Optional voice input">
-              <div class="voice-controls">
-                <button id="voice-button" class="voice-button" type="button" disabled aria-pressed="false" aria-describedby="voice-help voice-status">Use voice</button>
-                <button id="voice-cancel" class="voice-cancel" type="button" hidden>Discard voice text</button>
-              </div>
-              <div class="voice-copy"><p id="voice-help">On-device dictation is used when available. Audio is not recorded or stored by ROOMAY.</p>
-                <label class="voice-remote-choice"><input id="voice-remote-consent" type="checkbox" aria-describedby="voice-remote-help"> Use my browser’s speech service if needed</label>
-                <p id="voice-remote-help">Only enable this if you agree: your browser may send audio to its speech provider. Provider privacy terms apply. ROOMAY does not receive or store the audio.</p>
-                <p id="voice-status" class="voice-status" role="status" aria-live="polite">Checking on-device dictation…</p></div>
+            <div class="voice-tools voice-tools-compact" aria-label="Voice dictation">
+              <button id="voice-button" class="voice-button voice-icon-button" type="button" disabled aria-label="Dictate a message" title="Dictate a message" aria-pressed="false" aria-describedby="voice-status">
+                <svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">
+                  <rect x="9" y="2" width="6" height="12" rx="3"></rect>
+                  <path d="M5 10v2a7 7 0 0 0 14 0v-2M12 19v3m-4 0h8"></path>
+                </svg>
+              </button>
+              <button id="voice-cancel" class="voice-cancel" type="button" hidden>Discard dictated text</button>
+              <span id="voice-status" class="sr-only" role="status" aria-live="polite">Checking voice availability…</span>
+              <input id="voice-remote-consent" type="checkbox" hidden aria-hidden="true" tabindex="-1">
             </div>
             <div class="composer-footer"><span id="send-help">Review your message before sending · Shift + Enter for a new line</span>
               <button id="send-button" class="send-button" type="submit"><span>Send</span><span aria-hidden="true">↗</span></button></div>
           </form>
+          <div id="voice-remote-dialog" class="voice-consent-overlay" hidden>
+            <section class="voice-consent-card" role="dialog" aria-modal="true" aria-labelledby="voice-consent-title" aria-describedby="voice-consent-description">
+              <h3 id="voice-consent-title">Use your microphone</h3>
+              <p id="voice-consent-description">On-device speech recognition isn't available here. Your browser may send your audio to its speech provider to turn it into text. The provider's privacy terms apply. ROOMAY doesn't store raw microphone audio, and you can edit your words before sending.</p>
+              <div class="voice-consent-actions">
+                <button id="voice-remote-cancel" type="button" class="voice-consent-cancel">Not now</button>
+                <button id="voice-remote-allow" type="button" class="voice-consent-allow">Continue with browser speech</button>
+              </div>
+            </section>
+          </div>
           <p id="feedback" class="feedback" role="status" aria-live="polite"></p>
         </section>
 
