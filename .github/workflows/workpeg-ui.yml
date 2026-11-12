@@ -57,7 +57,7 @@ jobs:
           node-version: "24"
 
       - name: Python syntax check
-        run: python -m compileall -q ui function domain tests backend migrations
+        run: python -m compileall -q ui function domain tests backend migrations public_intake
 
       - name: Offline rules and real PostgreSQL 16 backend integration
         run: python -m unittest discover -s tests -v
