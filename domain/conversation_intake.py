@@ -24,7 +24,6 @@ _ROOM_NUMBER = re.compile(r"^[A-Za-z0-9][A-Za-z0-9-]{0,19}$")
 _ROOM_IN_TEXT = re.compile(
     r"\b(?:room|rm)(?:\s+(?:number|no\.?))?\s*#?\s*([A-Za-z0-9][A-Za-z0-9-]{0,19})\b", re.I,
 )
-_ROOM_FILLER = {"a", "and", "dey", "has", "have", "is", "the", "to"}
 _EMERGENCY_TERMS = (
     "emergency", "fire", "smoke", "medical emergency", "someone is hurt",
     "someone is injured", "electric shock", "sparking", "gas smell",
@@ -68,9 +67,31 @@ def _clean_text(value):
     return text
 
 
+def _room_numbers(text):
+    # Recognize clear numeric/alphanumeric identifiers only. Letter-only room
+    # labels are resolved later against the trusted snapshot's actual inventory.
+    return [value for value in _ROOM_IN_TEXT.findall(text)
+            if any(character.isdigit() for character in value)]
+
+
+def _explicit_room_references(text, rooms):
+    """Return explicit room labels, resolving letter-only labels by inventory.
+
+    Arbitrary prose after "room" is not a room claim. Letter-only identifiers
+    count only when the trusted hotel snapshot contains that exact room label.
+    """
+    known_letter_labels = {
+        room["number"].casefold() for room in rooms
+        if isinstance(room.get("number"), str)
+        and not any(character.isdigit() for character in room["number"])
+    }
+    return [value for value in _ROOM_IN_TEXT.findall(text)
+            if any(character.isdigit() for character in value)
+            or value.casefold() in known_letter_labels]
+
+
 def _room_number(text):
-    found = [value for value in _ROOM_IN_TEXT.findall(text)
-             if value.lower() not in _ROOM_FILLER]
+    found = _room_numbers(text)
     if len(found) == 1:
         return found[0]
     return None
@@ -214,7 +235,7 @@ def _safe_handoff(message, intent=None, failure_code=None):
                    failure_code=failure_code)
 
 
-def _verify_guest_scope(access_context, scope, intent):
+def _verify_guest_scope(access_context, scope):
     if not isinstance(access_context, AccessContext) or not isinstance(scope, ConversationScope):
         raise AccessDenied("authorization_context_missing")
     if access_context.role != "guest" or not access_context.guest_id:
@@ -242,8 +263,10 @@ def _verify_guest_scope(access_context, scope, intent):
     )
     rooms = [room for room in scope.snapshot["rooms"]
              if room["entity_id"] == scope.room_id]
-    if len(rooms) != 1 or rooms[0]["number"] != intent["room_number"]:
+    if len(rooms) != 1:
         raise AccessDenied("guest_scope_denied")
+    authoritative_room_number = rooms[0]["number"]
+    return authoritative_room_number
 
 
 def handle_conversation_turn(
@@ -294,22 +317,36 @@ def handle_conversation_turn(
             "I can connect you with Reception for room information. No availability or booking has been confirmed.",
             intent, "room_enquiry_handoff",
         )
-    if intent["room_number"] is None:
-        return _result(
-            "needs_clarification", "Which room are you contacting us about?",
-            intent=intent, clarification="room_number",
+    try:
+        authoritative_room_number = _verify_guest_scope(access_context, scope)
+    except AccessDenied as exc:
+        return _safe_handoff(
+            "I couldn't verify an active stay for this request. Please contact Reception.",
+            intent, "stay_verification_required",
         )
+    except (KeyError, TypeError, AttributeError):
+        return _safe_handoff(
+            "I couldn't verify an active stay for this request. Please contact Reception.",
+            intent, "stay_verification_required",
+        )
+    explicit_rooms = _explicit_room_references(original, scope.snapshot["rooms"])
+    if len(explicit_rooms) > 1:
+        return _safe_handoff(
+            "I couldn't match that room reference to your verified stay. Please contact Reception for assistance.",
+            intent, "ambiguous_room_reference",
+        )
+    if explicit_rooms and explicit_rooms[0] != authoritative_room_number:
+        return _safe_handoff(
+            "That room doesn't match the stay I can verify. Please contact Reception for assistance.",
+            intent, "guest_room_mismatch",
+        )
+    # The room ID and number come only from the trusted active stay. A spoken
+    # or typed room number is a consistency check, never authentication.
+    intent = {**intent, "room_number": authoritative_room_number}
     if intent["intent"] == "unknown" and len(original.split()) <= 3:
         return _result(
             "needs_clarification", "Could you briefly describe what is happening?",
             intent=intent, clarification="problem_description",
-        )
-    try:
-        _verify_guest_scope(access_context, scope, intent)
-    except (AccessDenied, KeyError, TypeError, AttributeError):
-        return _safe_handoff(
-            "I couldn't verify an active stay for this request. Please contact Reception.",
-            intent, "stay_verification_required",
         )
     if type(confirmed) is not bool:
         return _result("unavailable", "Please confirm the request with Reception.",

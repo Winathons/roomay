@@ -477,7 +477,8 @@ class GuestChatDemo:
         if not match:
             return text.strip()
         room = match.group(1)
-        if not _ROOM_TOKEN.fullmatch(room):
+        if (not _ROOM_TOKEN.fullmatch(room)
+                or not any(character.isdigit() for character in room)):
             return text.strip()
         return "room " + room
 
@@ -518,7 +519,8 @@ class GuestChatDemo:
             # Do not claim that a guest has been authenticated by a room number.
             if session.clarification is None:
                 standalone_room = _ROOM_RESPONSE.fullmatch(text)
-                if standalone_room is not None:
+                if (standalone_room is not None
+                        and any(character.isdigit() for character in standalone_room.group(1))):
                     session.clarification = {
                         "kind": "problem_description",
                         "text": "room " + standalone_room.group(1),
