@@ -320,6 +320,94 @@ class StaffActionGatewayTests(unittest.TestCase):
         with self.assertRaisesRegex(StaffActionError, "unreconciled_request_audit"):
             self.gateway.prepare("session", next_command)
 
+    def test_acknowledgement_requires_assigned_department_and_current_committed_history(self):
+        """The gateway prepares acknowledgement only from a trusted, current inbox state."""
+        assignment = self.gateway.prepare("session", action_command(
+            self.request, "assign", "ack-setup", assignee_id="housekeeper"))
+        assigned = assignment.plan["target_request"]
+        assignment_event = committed(assignment.plan["event"])
+        self.reader.value.update(
+            request=deepcopy(assigned), fingerprint="fp-assigned",
+            events=[self.creation_event, assignment_event],
+        )
+        command = action_command(assigned, "acknowledge", "ack-001")
+        command["expected_fingerprint"] = "fp-assigned"
+
+        # A different department cannot acknowledge housekeeping work.
+        maintenance_gateway = StaffActionGateway(
+            FakeIdentityResolver(actor_id="maintenance", department="maintenance"),
+            self.reader, lambda: "2026-11-06T12:02:00+01:00")
+        with self.assertRaisesRegex(
+                StaffActionError, "assigned_department_authority_required"):
+            maintenance_gateway.prepare("session", command)
+
+        # A pending predecessor makes the entire history uncertain.
+        self.reader.value["events"][1]["commit_state"] = "pending"
+        housekeeping_gateway = StaffActionGateway(
+            FakeIdentityResolver(actor_id="housekeeper", department="housekeeping"),
+            self.reader, lambda: "2026-11-06T12:02:00+01:00")
+        with self.assertRaisesRegex(StaffActionError, "unreconciled_request_audit"):
+            housekeeping_gateway.prepare("session", command)
+
+        # Even a valid, committed history cannot authorize a stale snapshot.
+        self.reader.value["events"][1] = committed(assignment_event)
+        stale = dict(command, expected_version=command["expected_version"] + 1)
+        with self.assertRaisesRegex(StaffActionError, "stale_request_snapshot"):
+            housekeeping_gateway.prepare("session", stale)
+        stale = dict(command, expected_fingerprint="fp-obsolete")
+        with self.assertRaisesRegex(StaffActionError, "stale_request_snapshot"):
+            housekeeping_gateway.prepare("session", stale)
+
+        prepared = housekeeping_gateway.prepare("session", command)
+        self.assertEqual(prepared.state, "prepared")
+        self.assertEqual(prepared.target_status, "acknowledged")
+        self.assertFalse(prepared.persisted)
+        self.assertEqual(prepared.plan["target_request"]["status"], "acknowledged")
+        self.assertEqual(prepared.plan["event"]["from_status"], "assigned")
+        self.assertEqual(prepared.plan["event"]["to_status"], "acknowledged")
+
+    def test_acknowledgement_replay_and_uncertain_persistence_fail_closed(self):
+        assignment = self.gateway.prepare("session", action_command(
+            self.request, "assign", "ack-replay-setup", assignee_id="housekeeper"))
+        assigned = assignment.plan["target_request"]
+        self.reader.value.update(
+            request=deepcopy(assigned), fingerprint="fp-assigned",
+            events=[self.creation_event, committed(assignment.plan["event"])],
+        )
+        identity = FakeIdentityResolver(actor_id="housekeeper", department="housekeeping")
+        gateway = StaffActionGateway(
+            identity, self.reader, lambda: "2026-11-06T12:02:00+01:00")
+        command = action_command(assigned, "acknowledge", "ack-replay-001")
+        command["expected_fingerprint"] = "fp-assigned"
+        prepared = gateway.prepare("session", command)
+        self.assertEqual(prepared.state, "prepared")
+        self.assertFalse(prepared.persisted)
+
+        target = deepcopy(prepared.plan["target_request"])
+        pending_event = deepcopy(prepared.plan["event"])
+        # The persistence contract remains incomplete until the pending event,
+        # request row and committed event have all been read back consistently.
+        self.assertEqual(next_persistence_step(
+            prepared.plan, target, [pending_event]), "commit_event")
+        committed_event = committed(pending_event)
+        inconsistent_target = deepcopy(target)
+        inconsistent_target["status"] = "assigned"
+        self.assertEqual(next_persistence_step(
+            prepared.plan, inconsistent_target, [committed_event]),
+            "manual_reconciliation_committed_mismatch")
+
+        # Only a fresh read showing both the exact request and committed event
+        # makes this repeated delivery a verified duplicate.
+        self.reader.value.update(
+            request=target, fingerprint="fp-acknowledged",
+            events=[self.creation_event,
+                    committed(assignment.plan["event"]), committed_event],
+        )
+        repeated = gateway.prepare("session", command)
+        self.assertEqual(repeated.state, "verified_duplicate")
+        self.assertEqual(repeated.target_status, "acknowledged")
+        self.assertTrue(repeated.persisted)
+
     def test_pending_audit_request_commit_order_and_partial_failure_reconcile(self):
         plan = self.gateway.prepare("session", action_command(
             self.request, "assign", "sequence", assignee_id="housekeeper")).plan
