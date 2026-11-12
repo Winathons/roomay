@@ -67,3 +67,14 @@ class Settings:
         except (ValueError, TypeError, AttributeError):
             raise RuntimeError("workpeg_business_and_hotel_binding_invalid") from None
         return self
+
+
+def require_experimental_backend_opt_in(environ=None):
+    """Keep the unintegrated ASGI entrypoint dormant unless explicitly opted in.
+
+    This is an operational safety interlock, NOT authorization to deploy or
+    serve real guests; the only production hotel-data reader still fails 503.
+    """
+    values = os.environ if environ is None else environ
+    if values.get("ROOMAY_ENABLE_STANDALONE_PROTOTYPE") != "local-only":
+        raise RuntimeError("standalone_guest_backend_disabled_pending_workpeg_integration")
