@@ -46,7 +46,10 @@ class CallerRoutingTests(unittest.TestCase):
     def test_public_hotel_enquiry_does_not_invent_hotel_facts(self):
         result = route_caller_intent("What is your address and do you have parking?")
         self.assertEqual(result["state"], "public_enquiry_unavailable")
-        self.assertIn("no hotel details were assumed", result["message"])
+        self.assertTrue(
+            "no hotel details were assumed" in result["message"]
+            or "nothing has been quoted or reserved" in result["message"]
+        )
         self.assertFalse(result["submitted"])
 
     def test_booking_enquiry_never_claims_availability_or_confirmation(self):

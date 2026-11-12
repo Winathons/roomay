@@ -241,7 +241,7 @@
         if (input.value.length > MAX_TRANSCRIPT_CHARS) {
           setStatus("Transcript is longer than 1,000 characters. Edit it before sending.");
         } else {
-          setStatus("Transcript ready to review. Edit it if needed, then choose Send reviewed transcript.");
+          setStatus("Transcript ready to review. Edit it if needed, then choose Send message.");
         }
       }
     };
@@ -282,7 +282,7 @@
         } else if (value.length > MAX_TRANSCRIPT_CHARS) {
           setStatus("Transcript is longer than 1,000 characters. Edit it before sending.");
         } else {
-          setStatus("Transcript ready to review. Edit it if needed, then choose Send reviewed transcript.");
+          setStatus("Transcript ready to review. Edit it if needed, then choose Send message.");
         }
         input.focus();
       } else if (!lastError) {

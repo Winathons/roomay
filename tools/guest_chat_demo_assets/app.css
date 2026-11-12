@@ -113,11 +113,14 @@ roomay-orb { position: relative; display: block; width: 100%; height: 100%; --or
 .cancel-button { border: 1px solid #d7e0d9; background: white; color: #47584d; }
 .cancel-button:hover { background: #f4f7f3; }
 .composer { padding: 15px 20px 17px; border-top: 1px solid #edf1ed; background: white; }
-.composer textarea { display: block; width: 100%; min-height: 54px; resize: vertical; border: 0; outline: 0; background: transparent; color: #24382e; font-size: 13px; line-height: 1.5; }
+.composer-entry { display: flex; align-items: flex-end; gap: 8px; min-width: 0; padding: 7px; border: 1px solid #dce5dd; border-radius: 15px; background: #fbfcfa; transition: border-color .15s ease, box-shadow .15s ease; }
+.composer-entry:focus-within { border-color: #83a48c; box-shadow: 0 0 0 3px rgb(83 142 116 / 12%); }
+.composer textarea { display: block; flex: 1 1 auto; width: 100%; min-width: 0; min-height: 42px; max-height: 144px; padding: 10px 9px; resize: none; border: 0; outline: 0; background: transparent; color: #24382e; font-size: 13px; line-height: 1.5; }
 .composer textarea::placeholder { color: #99a49d; }
-.voice-tools { display: flex; align-items: flex-start; gap: 10px; padding: 10px 0 13px; border-top: 1px solid #f0f2ef; }
+.composer-tools { display: flex; align-items: center; justify-content: space-between; gap: 10px; min-height: 27px; padding: 4px 3px 0; color: var(--quiet); font-size: 10px; }
+.voice-tools { display: flex; align-items: center; gap: 8px; }
 .voice-controls { display: flex; flex: 0 0 auto; align-items: center; flex-wrap: wrap; gap: 6px; }
-.voice-button { min-height: 36px; flex: 0 0 auto; padding: 0 12px; border: 1px solid #cbd9ce; border-radius: 9px; background: #f7faf7; color: var(--forest); font-size: 11px; font-weight: 720; }
+.voice-button { display: inline-grid; place-items: center; width: 42px; min-height: 42px; flex: 0 0 auto; padding: 0; border: 1px solid #cbd9ce; border-radius: 12px; background: #f7faf7; color: var(--forest); font-size: 11px; font-weight: 720; }
 .voice-button:hover:not(:disabled) { background: var(--sage); }
 .voice-button:focus-visible, .voice-remote-choice input:focus-visible { outline: 3px solid #8cae95; outline-offset: 2px; }
 .voice-button:disabled { cursor: not-allowed; opacity: .64; }
@@ -130,9 +133,14 @@ roomay-orb { position: relative; display: block; width: 100%; height: 100%; --or
 .voice-remote-choice input { flex: 0 0 auto; margin: 1px 0 0; accent-color: var(--forest); }
 .voice-copy #voice-remote-help { max-width: 540px; }
 .voice-copy .voice-status { color: #4d6558; font-weight: 650; }
-.composer-footer { display: flex; align-items: center; justify-content: space-between; gap: 12px; color: var(--quiet); font-size: 10px; }
-.send-button { min-height: 39px; display: inline-flex; align-items: center; gap: 12px; padding: 0 14px; border: 1px solid var(--forest); border-radius: 10px; background: var(--forest); color: white; font-size: 12px; font-weight: 740; }
+.send-button { min-height: 42px; display: inline-flex; flex: 0 0 auto; align-items: center; gap: 8px; padding: 0 13px; border: 1px solid var(--forest); border-radius: 12px; background: var(--forest); color: white; font-size: 11px; font-weight: 740; }
 .send-button:hover:not(:disabled) { background: var(--forest-deep); }
+.send-button:disabled, .voice-button:disabled { cursor: not-allowed; opacity: .62; }
+.chat-ai-consent { margin-top: 8px; padding: 10px 11px; border-radius: 10px; background: #f5f8f4; color: #52675a; }
+.chat-ai-consent label { display: flex; align-items: flex-start; gap: 8px; color: #354c3e; font-size: 10px; font-weight: 720; }
+.chat-ai-consent input { flex: 0 0 auto; margin: 1px 0 0; accent-color: var(--forest); }
+.chat-ai-consent p { margin: 6px 0 0 22px; color: var(--quiet); font-size: 9px; line-height: 1.45; }
+.chat-ai-status { margin: 2px 3px 0; color: var(--quiet); font-size: 9px; line-height: 1.4; }
 .feedback, .workspace-feedback { min-height: 18px; margin: 0; padding: 0 20px 11px; color: var(--warning); font-size: 11px; line-height: 1.4; }
 .workspace-feedback { padding: 4px 0 0; }
 .guest-side { display: flex; flex-direction: column; gap: 14px; }
@@ -255,6 +263,12 @@ roomay-orb { position: relative; display: block; width: 100%; height: 100%; --or
   .message-row { max-width: 96%; }
   .chat-heading { padding: 16px; }
   .composer { padding: 13px; }
+  .composer-entry { gap: 5px; padding: 5px; }
+  .composer textarea { padding: 9px 6px; font-size: 12px; }
+  .voice-button { width: 40px; min-height: 40px; }
+  .send-button { min-height: 40px; gap: 6px; padding: 0 10px; font-size: 10px; }
+  .send-button svg { width: 14px; height: 14px; }
+  .composer-tools { align-items: flex-start; flex-direction: column; padding-top: 7px; }
   .confirmation-slot { padding: 0 12px; }
   .review-card { margin-left: 0; }
   .voice-tools { align-items: flex-start; gap: 8px; }

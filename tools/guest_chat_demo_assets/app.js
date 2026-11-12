@@ -12,6 +12,9 @@
   const voiceStatus = document.getElementById("voice-status");
   const voiceRemoteConsent = document.getElementById("voice-remote-consent");
   const confirmation = document.getElementById("confirmation");
+  const chatAiConsent = document.getElementById("chat-ai-consent");
+  const chatAiEnabled = document.getElementById("chat-ai-enabled");
+  const chatAiStatus = document.getElementById("chat-ai-status");
   let busy = false;
   let voiceDraft = false;
   let voiceListening = false;
@@ -98,6 +101,19 @@
     log.replaceChildren(...chat.messages.map(makeMessage));
     log.scrollTop = log.scrollHeight;
     renderConfirmation(chat);
+    const ai = chat.ai_chat || { available: false, consented: false, status: "disabled" };
+    if (chatAiConsent) chatAiConsent.hidden = !ai.available;
+    if (chatAiEnabled) chatAiEnabled.checked = ai.consented === true;
+    if (chatAiStatus) {
+      chatAiStatus.textContent = ai.status === "unavailable"
+        ? "Remi’s chat service is temporarily unavailable. You can still use the request review flow."
+        : ai.available
+          ? (ai.consented
+            ? "Remi AI is on for ordinary conversation. Service requests and hotel-information questions stay in ROOMAY’s local flow."
+            : "Remi AI is available. Turn it on only if you want messages sent to Vapi.")
+          : "Remi text AI is not enabled in this local session. You can still chat about service needs and review requests.";
+    }
+    if (ai.status === "unavailable") setFeedback("Remi couldn’t reply just now. No hotel action was taken.");
     updateComposerControls();
   }
 
@@ -241,8 +257,8 @@
     if (!sendButton || !input) return;
     sendButton.disabled = busy || voiceListening;
     input.disabled = busy || voiceListening;
-    sendButton.querySelector("span").textContent = busy ? "One moment" : voiceDraft ? "Send reviewed transcript" : "Send request";
-    sendButton.setAttribute("aria-label", busy ? "Sending request" : voiceDraft ? "Send reviewed transcript" : "Send request");
+    sendButton.querySelector("span").textContent = busy ? "Sending…" : "Send message";
+    sendButton.setAttribute("aria-label", busy ? "Sending message" : "Send message");
     if (voiceButton && voice) voice.setBusy(vapiCallBusy);
     const callButton = document.getElementById("call-remi");
     if (callButton && !callButton.hidden && !vapiCallBusy) callButton.disabled = busy || voiceListening;
@@ -277,7 +293,7 @@
         if (typeof text !== "string" || !text.trim()) return;
         input.value = text.trim().slice(0, 1000);
         input.dispatchEvent(new Event("input", { bubbles: true }));
-        setFeedback("Transcript added to the editable request field. Review it, then send to Roomay’s validated intake. No request has been submitted yet.");
+        setFeedback("Transcript added to your message. Review it before sending; any service request will still need your confirmation.");
         // Do not move keyboard focus behind the open modal; the guest can
         // close/end the call before editing the imported transcript.
         if (document.getElementById("remi-call-overlay")?.hidden) input.focus();
@@ -297,7 +313,9 @@
     if (busy) return false;
     busy = true;
     updateComposerControls();
-    setFeedback("Updating request status…");
+    setFeedback(path === "/api/message"
+      ? (chatAiEnabled?.checked ? "Remi is thinking…" : "Sending message…")
+      : "Updating request status…");
     try {
       render(await post(path, body));
       if (workspace !== "guest") setFeedback("Status updated for this example session.");
@@ -325,11 +343,38 @@
       if (await act("/api/message", { text })) {
         input.value = "";
         if (voice) voice.clearDraft();
+        if (input.style) input.style.height = "auto";
         input.focus();
       }
     });
     input.addEventListener("keydown", (event) => {
       if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); form.requestSubmit(); }
+    });
+    input.addEventListener("input", () => {
+      if (input.style) {
+        input.style.height = "auto";
+        input.style.height = `${Math.min(input.scrollHeight, 144)}px`;
+      }
+    });
+  }
+
+  if (chatAiEnabled) {
+    chatAiEnabled.addEventListener("change", async () => {
+      const requested = chatAiEnabled.checked;
+      chatAiEnabled.disabled = true;
+      setFeedback(requested ? "Enabling Remi AI for this conversation…" : "Turning Remi AI off…");
+      try {
+        render(await post("/api/chat/consent", { enabled: requested }));
+      } catch (error) {
+        chatAiEnabled.checked = !requested;
+        setFeedback(error.status === 401
+          ? "Your session has expired. Open the local workspace again."
+          : error.status === 403
+            ? "This chat is available only in the Guest workspace."
+            : "Remi AI could not be changed. Your previous setting is still in effect.");
+      } finally {
+        chatAiEnabled.disabled = false;
+      }
     });
   }
 
