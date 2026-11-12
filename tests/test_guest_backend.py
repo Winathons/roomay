@@ -3,7 +3,7 @@
 SQLite here is test-only. Production configuration and migrations require
 PostgreSQL; Workpeg is represented by an in-memory read-only snapshot port.
 """
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 import inspect
 import json
 from http.cookies import SimpleCookie
@@ -24,6 +24,7 @@ from workpeg.auth import SignInStart, WorkpegIdentity
 from backend.app import (
     GUEST_HTML, STAFF_HTML, PrepareBody, ConfirmBody, create_app, _digest,
 )
+from backend.hotel_data import UnavailableHotelSnapshotReader
 from backend.models import (
     Base, GuestInvitation, GuestSession, HotelBinding, OperationalAudit,
     OperationalRequest, PendingRequest, StaffBinding, StaffSession,
@@ -473,6 +474,92 @@ class GuestBackendTests(TestCase):
         response = guest.get("/guest/requests")
         self.assertEqual(response.status_code, 503)
         self.assertEqual(response.json(), {"detail": "hotel_records_unavailable"})
+        guest.close()
+
+    def test_unauthorized_expired_and_wrong_business_staff_sessions_fail_before_hotel_read(self):
+        anonymous = LocalClient(self.app, base_url=self.origin)
+        denied = anonymous.get("/staff/active-stays")
+        self.assertEqual(denied.status_code, 401)
+        self.assertEqual(self.reader.businesses, [])
+
+        expired = LocalClient(self.app, base_url=self.origin)
+        expired_token = "expired-staff-session-token"
+        with self.sessions.begin() as db:
+            db.add(StaffSession(
+                token_hash=_digest(expired_token), workpeg_subject="wp-subject-reception",
+                business_id=BUSINESS_ID, workpeg_role="member",
+                created_at=AT - timedelta(minutes=20), expires_at=AT - timedelta(seconds=1)))
+        expired.cookies["roomay_staff"] = expired_token
+        expired_response = expired.get("/staff/active-stays")
+        self.assertEqual(expired_response.status_code, 401)
+        self.assertEqual(expired_response.json(), {"detail": "staff_session_expired"})
+        self.assertEqual(self.reader.businesses, [])
+
+        wrong_business = LocalClient(self.app, base_url=self.origin)
+        wrong_business_token = "wrong-business-staff-session-token"
+        with self.sessions.begin() as db:
+            db.add(StaffSession(
+                token_hash=_digest(wrong_business_token), workpeg_subject="wp-subject-reception",
+                business_id=uid("other-business-session"), workpeg_role="member",
+                created_at=AT, expires_at=AT + timedelta(minutes=5)))
+        wrong_business.cookies["roomay_staff"] = wrong_business_token
+        mismatch = wrong_business.get("/staff/active-stays")
+        self.assertEqual(mismatch.status_code, 403)
+        self.assertEqual(mismatch.json(), {"detail": "staff_business_denied"})
+        self.assertEqual(self.reader.businesses, [])
+        anonymous.close()
+        expired.close()
+        wrong_business.close()
+
+    def test_expired_guest_session_is_denied_before_hotel_read(self):
+        guest = LocalClient(self.app, base_url=self.origin)
+        token = "expired-guest-session-token"
+        with self.sessions.begin() as db:
+            db.add(GuestSession(
+                token_hash=_digest(token), business_id=BUSINESS_ID, hotel_id=HOTEL_ID,
+                guest_id=GUEST_ID, stay_id=STAY_ID, room_id=ROOM_ID,
+                created_at=AT - timedelta(minutes=31), expires_at=AT - timedelta(seconds=1)))
+        guest.cookies["roomay_guest"] = token
+        denied = guest.get("/guest/requests")
+        self.assertEqual(denied.status_code, 401)
+        self.assertEqual(denied.json(), {"detail": "guest_session_expired"})
+        self.assertEqual(self.reader.businesses, [])
+        guest.close()
+
+    def test_unconfigured_hotel_integration_fails_closed_without_leaking_data(self):
+        app = create_app(session_factory=self.sessions,
+                         hotel_reader=UnavailableHotelSnapshotReader(),
+                         settings=self.settings, clock=lambda: AT,
+                         workpeg_auth=self.auth)
+        anonymous = LocalClient(app, base_url=self.origin)
+        self.assertEqual(anonymous.get("/staff/active-stays").status_code, 401)
+
+        staff = LocalClient(app, base_url=self.origin)
+        self.assertEqual(self.staff_login(staff, "reception-code").status_code, 303)
+        unavailable = staff.get("/staff/active-stays")
+        self.assertEqual(unavailable.status_code, 503)
+        self.assertEqual(unavailable.json(), {"detail": "hotel_records_unavailable"})
+
+        guest_token = "guest-session-without-hotel-integration"
+        with self.sessions.begin() as db:
+            db.add(GuestSession(
+                token_hash=_digest(guest_token), business_id=BUSINESS_ID,
+                hotel_id=HOTEL_ID, guest_id=GUEST_ID, stay_id=STAY_ID,
+                room_id=ROOM_ID, created_at=AT,
+                expires_at=AT + timedelta(minutes=30)))
+        guest = LocalClient(app, base_url=self.origin)
+        guest.cookies["roomay_guest"] = guest_token
+        refused = self.origin_post(guest, "/guest/requests/prepare", json={
+            "category": "extra_towels", "description": "Please bring towels",
+            "urgency": "normal", "idempotency_key": str(uuid4()),
+        })
+        self.assertEqual(refused.status_code, 503)
+        self.assertEqual(refused.json(), {"detail": "hotel_records_unavailable"})
+        with self.sessions() as db:
+            self.assertIsNone(db.scalar(select(PendingRequest)))
+            self.assertIsNone(db.scalar(select(OperationalRequest)))
+        anonymous.close()
+        staff.close()
         guest.close()
 
     def test_invitation_is_one_time_revocable_and_active_stay_scoped(self):

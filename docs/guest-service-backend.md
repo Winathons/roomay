@@ -11,12 +11,16 @@ existing Workpeg request tables. Historical Workpeg request rows therefore do
 not appear in this new inbox. An owner-reviewed migration is required before
 any existing Workpeg request history is moved or treated as authoritative.
 
-The existing Workpeg tables and Room 205 records are not changed. `WORKPEG_PK`
-is used only by the server-side snapshot reader. The reader requires all seven
-hotel tables to be readable, exact-contract compatible, permission `700`, and
-owned by the configured Roomay Peg ID. Any mismatch, inaccessible table,
-malformed page, or invalid snapshot fails closed. It does not fall back to
-fixtures.
+The existing Workpeg tables and Room 205 records are not changed. The previous
+standalone Tables reader and its owner-run verification command have been
+removed. Although the general Tables documentation describes developer-token
+access for a Peg's own tables, Roomay's owner-recorded Workpeg support reply for
+this integration says that `WORKPEG_PK` is not an authorized credential for
+this independent backend; the owner reported HTTP 401 on the first read. Until
+Workpeg confirms and Roomay approves a supported bridge, the production hotel
+snapshot port is unavailable. Hotel-dependent routes return a sanitized 503
+and never fall back to synthetic or cached records. Existing table permissions
+remain owner-only (`700`).
 
 The canonical room and reservation rows do not currently contain a hotel ID.
 The backend therefore enforces one configured hotel binding per Workpeg
@@ -27,12 +31,13 @@ The selected Workpeg business ID is pinned in server configuration and must
 match the OIDC callback membership exactly. The application does not accept a
 business selector from the browser.
 
-Workpeg documentation permits `WORKPEG_PK` backend access only for Peg-owned
-tables in businesses where the Peg is installed. The nine tables' actual `peg`
-metadata and installed-business reachability have not been inspected by this
-code change, and no Workpeg API was called. As a result, the Workpeg read path
-must still be verified by the owner in the development business before a real
-guest session can work.
+Workpeg OIDC establishes staff identity and selected business membership; it
+does not grant standalone Tables access. A Workpeg-submitted Function receives
+an invocation-scoped `context["token"]` and `context["business"]`, but no
+authenticated external invocation boundary is confirmed. Do not cache or
+transport that token into this persistent backend, accept caller-supplied
+context, or substitute OIDC tokens for a Tables credential. No Workpeg API is
+called by this backend until an approved bridge is implemented.
 
 ## Identity and access
 
@@ -122,35 +127,25 @@ retention, access monitoring and departmental staff training remain required.
 
 ## Local development
 
-Requirements: Docker Desktop running, Python 3.10+, and an owner-configured
-Workpeg OIDC client plus a server-only `WORKPEG_PK` for the approved Roomay
-Peg, exact development business UUID and canonical Peg UUID from Workpeg table
-metadata. The UUID is normalized to lowercase before comparison. Do not place secrets in browser code, Git, shell history, test fixtures or
-logs. The Workpeg key must come from an approved secret manager and must never
-be generated or pasted into a tracked `.env` file.
+Requirements: Docker Desktop running, Python 3.10+, an owner-configured
+Workpeg OIDC client, exact development business and hotel UUIDs, and a local
+HTTPS origin. `WORKPEG_PK` and a Peg UUID are not backend runtime settings.
+No standalone hotel-data bridge is currently configured, so hotel-dependent
+routes stay unavailable. Keep any confidential-client secret outside Git,
+browser code, shell history, test fixtures and logs.
 
 1. Copy `.env.example` to ignored `.env`, set a strong random local database
    password, and set `ROOMAY_DATABASE_URL` to the same password. URL-encode
    password characters such as `@`, `:` or `/` inside the DSN.
 2. Start only the loopback-bound local database: `docker compose up -d roomay-db`.
 3. Install dependencies with `python -m pip install -r server-requirements.txt`.
-4. Load backend environment variables from a local secret manager; configure
-   OIDC callback and public base URLs to use HTTPS. `ROOMAY_COOKIE_SECURE=true`
-   is required outside isolated tests. Before OIDC setup, the server-side hotel read path can be checked without
-   starting the application or opening a session. Inject `WORKPEG_PK`,
-   `ROOMAY_WORKPEG_PEG_ID`, and `ROOMAY_WORKPEG_BUSINESS_ID` from the approved
-   secret/configuration source, then run
-   `python -m backend.verify_workpeg_readonly`. This makes only Workpeg GET
-   requests, validates all seven canonical hotel table schemas, Peg ownership,
-   permission `700`, pagination and snapshot relationships, and prints only
-   sanitized pass/fail, aliases and row counts. It never prints row contents,
-   IDs or credentials. A successful read proves this Peg can access those
-   tables in that business; separately confirm the installation in the
-   Workpeg business dashboard. Missing configuration fails before any request.
-   If it fails, rerun with `--diagnostic` to opt in to the failing stage,
-   canonical alias, HTTP status or safe status category, and stable allowlisted
-   error code. Normal mode keeps its generic failure response; diagnostics do
-   not include response bodies or arbitrary exception details.
+4. Have the owner choose the actual local HTTPS host and port and provide the
+   OIDC client registration outcome. Set `ROOMAY_PUBLIC_BASE_URL` to that
+   browser-visible origin and set `ROOMAY_OIDC_REDIRECT_URI` to the exact
+   registered URI `<ROOMAY_PUBLIC_BASE_URL>/auth/workpeg/callback`. Keep
+   `ROOMAY_COOKIE_SECURE=true`. The public Workpeg docs describe OIDC and SDK
+   flow, not the owner-specific registration procedure. Do not submit example
+   or placeholder callback URLs. See [WOR-61 local authentication](wor-61-local-auth.md).
 5. Apply the explicit schema migration with `alembic upgrade head`.
 6. Run behind a trusted HTTPS reverse proxy using
    `uvicorn backend.main:app --host 127.0.0.1 --port 8080 --no-access-log`.
@@ -208,22 +203,23 @@ and host configuration review.
 
 ## Verification status and go-live gates
 
-Offline tests use synthetic hotel data, a mock OIDC identity result and an
-isolated SQLite database. They verify route policy, guest-session scope,
-idempotency, persistence across DB sessions, committed audit history,
-department routing, privacy projection and failed-write rollback. They do not
-verify Workpeg, an actual Workpeg OIDC client registration, PostgreSQL,
+Offline tests use synthetic hotel data through a test-only reader, a mock OIDC
+identity result and isolated SQLite/PostgreSQL schemas. They verify route
+policy, guest-session scope, idempotency, persistence across DB sessions,
+committed audit history, department routing, privacy projection and
+failed-write rollback. They also verify that the production default hotel-data
+port returns unavailable without creating guest requests. Tests do not verify
+Workpeg, an actual OIDC client registration, an authorized hotel-data bridge,
 production deployment or message delivery.
 
 Before an owner-authorized real development test:
 
-1. Verify the Roomay Peg is installed in the exact development business and
-   inspect `peg`, namespace, name and permission metadata for each required
-   hotel table. This code requires Peg-owned tables; it will refuse peg-less
-   tables rather than broadening permissions.
-2. Configure OIDC redirect URI, client identity, approved server-side
-   credentials and secret manager. Confirm staff membership claims in the
-   provider's test account.
+1. Obtain Workpeg's supported, authenticated external invocation mechanism,
+   including caller identity/business authorization, replay and expiry rules.
+   Do not use `WORKPEG_PK` or export an invocation-scoped Function token.
+2. Register the exact owner-selected OIDC callback and confirm staff
+   membership claims in the provider's test account. OIDC does not authorize
+   hotel-table reads.
 3. Run PostgreSQL migrations and concurrency/rollback integration tests on
    the same Postgres major version selected for deployment.
 4. Map one staff subject to Reception and one to Housekeeping; test cross-
