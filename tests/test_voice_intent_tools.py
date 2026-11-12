@@ -60,7 +60,7 @@ class CallerRoutingTests(unittest.TestCase):
     def test_existing_guest_request_is_routed_but_requires_verified_stay(self):
         for phrase, department, language in (
             ("Please bring extra towels to room 205", "housekeeping", "english"),
-            ("Abeg, bring extra towels to room 205", "housekeeping", "nigerian_pidgin"),
+            ("Abeg, bring extra towels to room 205", "housekeeping", "english"),
             ("My air conditioning is not cooling in room 205", "maintenance", "english"),
             ("Abeg, my AC no dey cool for room 205", "maintenance", "nigerian_pidgin"),
             ("Water dey leak in room 205", "maintenance", "nigerian_pidgin"),
@@ -117,9 +117,9 @@ class CallerRoutingTests(unittest.TestCase):
         maintenance = route_caller_intent("My AC no dey cool for room 205")
         self.assertEqual(housekeeping["department"], "housekeeping")
         self.assertEqual(maintenance["department"], "maintenance")
-        for result in (housekeeping, maintenance):
+        for result, language in ((housekeeping, "english"), (maintenance, "nigerian_pidgin")):
             self.assertEqual(result["state"], "guest_verification_required")
-            self.assertEqual(result["response_language"], "nigerian_pidgin")
+            self.assertEqual(result["response_language"], language)
             self.assertTrue(result["verification_required"])
             self.assertFalse(result["submitted"])
             self.assertFalse(result["persisted"])
@@ -141,7 +141,7 @@ class CallerRoutingTests(unittest.TestCase):
     def test_english_pidgin_and_code_switching_follow_current_utterance(self):
         turns = (
             ("Could you tell me about parking at the hotel?", "english"),
-            ("Please, abeg, una get room for tonight?", "nigerian_pidgin"),
+            ("Please, abeg, una get room for tonight?", "english"),
             ("Could you check room availability, please?", "english"),
             ("Abeg, I wan ask about booking", "nigerian_pidgin"),
         )
@@ -152,11 +152,38 @@ class CallerRoutingTests(unittest.TestCase):
                 self.assertFalse(result["submitted"])
                 self.assertFalse(result["persisted"])
 
+    def test_isolated_pidgin_expression_does_not_override_english_request(self):
+        for utterance in (
+            "Please, abeg, can you bring extra towels to my room?",
+            "Abeg, I need extra towels in my room",
+            "Could you please check availability, abeg?",
+            "Please, abeg, una get room for tonight?",
+        ):
+            with self.subTest(utterance=utterance):
+                outcome = route_caller_intent(utterance)
+                self.assertEqual(outcome["response_language"], "english")
+                self.assertFalse(outcome["submitted"])
+                self.assertFalse(outcome["persisted"])
+
+    def test_clearly_pidgin_grammar_still_supported_without_claimed_hotel_action(self):
+        for utterance in (
+            "Abeg, una get room for tonight?",
+            "Abeg, I wan book room tomorrow",
+            "My AC no dey cool for room 205",
+            "Water dey leak in room 205",
+            "Abeg, make I talk to receptionist",
+        ):
+            with self.subTest(utterance=utterance):
+                outcome = route_caller_intent(utterance)
+                self.assertEqual(outcome["response_language"], "nigerian_pidgin")
+                self.assertFalse(outcome["submitted"])
+                self.assertFalse(outcome["persisted"])
+
     def test_representative_pidgin_enquiries_preserve_routing_and_safety(self):
         examples = (
             ("Abeg, una get room for tonight?", "public_enquiry_unavailable", "reception", False),
             ("Wetin be room price if I wan lodge tomorrow?", "booking_enquiry", "reception", False),
-            ("Abeg bring extra towels to my room", "guest_verification_required", "housekeeping", False),
+            ("Abeg, I wan make una bring extra towels to my room", "guest_verification_required", "housekeeping", False),
             ("AC no dey cool for my room", "guest_verification_required", "maintenance", False),
             ("Abeg, make I talk to receptionist", "human_handoff", None, True),
             ("Fire don start, person dey bleed, abeg help", "human_handoff", None, True),
@@ -187,10 +214,10 @@ class CallerRoutingTests(unittest.TestCase):
                 self.assertFalse(result["submitted"])
                 self.assertFalse(result["persisted"])
 
-    def test_pidgin_clarification_is_brief_and_preserves_the_four_intent_options(self):
+    def test_mixed_english_clarification_does_not_force_pidgin(self):
         result = route_caller_intent("Abeg, I need help")
         self.assertEqual(result["state"], "needs_clarification")
-        self.assertEqual(result["response_language"], "nigerian_pidgin")
+        self.assertEqual(result["response_language"], "english")
         self.assertIn("hotel information", result["message"])
         self.assertIn("new booking", result["message"])
         self.assertIn("existing stay", result["message"])
@@ -290,7 +317,7 @@ class VapiToolBoundaryTests(unittest.TestCase):
         self.assertEqual(response["status"], 200)
         item = json.loads(response["body"])["results"][0]
         self.assertEqual(set(item), {"toolCallId", "error"})
-        self.assertIn("Abeg", item["error"])
+        self.assertIn("invalid arguments", item["error"])
         self.assertNotIn("result", item)
 
     def test_rate_limit_and_request_size_are_enforced(self):
