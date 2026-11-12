@@ -371,7 +371,22 @@ def project_service_request(
             record_hotel_id=request.get("hotel_id"),
             sensitive=request.get("sensitive", False),
         )
-        fields = tuple(request.keys())
+        if actor.role == "receptionist":
+            # Reception needs stay/guest references for verified service follow-up,
+            # but not the internal idempotency or audit linkage used by writers.
+            # The writer must consume canonical records, not this UI projection.
+            fields = (
+                "request_id", "stay_id", "room_id", "guest_id",
+                "category", "category_detail", "department", "description",
+                "urgency", "status", "assigned_staff_id", "triage_required",
+                "sensitive", "created_at", "updated_at", "received_at",
+                "acknowledge_by", "due_at", "assigned_at", "acknowledged_at",
+                "in_progress_at", "resolved_at", "version",
+            )
+        else:
+            # Owner/manager administrative views retain the full validated
+            # record under their separate trusted-role authorization boundary.
+            fields = tuple(request.keys())
     return {key: deepcopy(request[key]) for key in fields if key in request}
 
 
