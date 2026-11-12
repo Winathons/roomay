@@ -68,6 +68,24 @@ h2 { margin: 0; color: var(--forest-deep); font-size: 20px; line-height: 1.25; l
 .assistant-avatar { display: grid; place-items: center; flex: 0 0 42px; height: 42px; border-radius: 14px; background: var(--forest); color: white; font-size: 17px; font-weight: 800; }
 .chat-heading h2 { font-size: 16px; }
 .chat-heading p { margin: 4px 0 0; color: var(--muted); font-size: 11px; line-height: 1.45; }
+.remi-call { margin: 14px 18px 0; padding: 15px; border: 1px solid #dce8df; border-radius: 14px; background: #f5f9f5; }
+.remi-call-top { display: flex; align-items: center; justify-content: space-between; gap: 14px; }
+.remi-call-top .section-kicker { margin-bottom: 4px; }
+.remi-call-top h3 { margin: 0; color: var(--forest-deep); font-size: 15px; line-height: 1.3; }
+.remi-call-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 7px; }
+.call-remi-button, .voice-call-secondary, .voice-call-end, .use-transcript-button { min-height: 38px; padding: 0 12px; border-radius: 9px; font-size: 11px; font-weight: 750; }
+.call-remi-button { border: 1px solid var(--forest); background: var(--forest); color: white; }
+.call-remi-button:hover:not(:disabled) { background: var(--forest-deep); }
+.voice-call-secondary, .use-transcript-button { border: 1px solid #c8d8cc; background: white; color: var(--forest); }
+.voice-call-end { border: 1px solid #a84940; background: #fff; color: #963e36; }
+.remi-call-status { margin: 10px 0 0; color: #53665b; font-size: 11px; line-height: 1.5; }
+.remi-call[data-state="connecting"] .remi-call-status, .remi-call[data-state="speaking"] .remi-call-status { color: var(--forest); font-weight: 750; }
+.remi-call[data-state="error"] .remi-call-status { color: var(--danger); }
+.remi-call-captions { display: grid; gap: 6px; max-height: 160px; overflow-y: auto; margin-top: 10px; padding: 10px; border-radius: 10px; background: white; }
+.call-caption { margin: 0; color: #42564a; font-size: 11px; line-height: 1.45; white-space: pre-wrap; overflow-wrap: anywhere; }
+.call-caption strong { color: var(--forest); }
+.use-transcript-button { margin-top: 9px; }
+.remi-call-disclosure { margin: 9px 0 0; color: #78867e; font-size: 9px; line-height: 1.45; }
 .messages { display: flex; flex-direction: column; gap: 12px; min-height: 315px; max-height: 440px; overflow-y: auto; padding: 20px 22px; background: #fbfcfa; }
 .message-row { display: flex; align-items: flex-end; gap: 8px; max-width: 88%; }
 .message-row.guest { align-self: flex-end; flex-direction: row-reverse; }
@@ -204,6 +222,10 @@ h2 { margin: 0; color: var(--forest-deep); font-size: 20px; line-height: 1.25; l
   .stay-summary { padding: 18px; }
   .stay-facts { grid-template-columns: repeat(2,minmax(0,1fr)); gap: 15px; }
   .guest-grid { grid-template-columns: 1fr; }
+  .remi-call { margin: 12px 12px 0; padding: 13px; }
+  .remi-call-top { align-items: flex-start; flex-direction: column; }
+  .remi-call-actions { justify-content: flex-start; }
+  .remi-call-actions button { min-height: 42px; }
   .guest-side { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); }
   .safety-note { grid-column: 1 / -1; }
   .staff-layout { display: block; }

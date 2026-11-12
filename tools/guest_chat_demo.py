@@ -10,6 +10,7 @@ from http.cookies import SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import argparse
 import json
+import os
 import re
 import secrets
 import threading
@@ -36,6 +37,8 @@ SESSION_TTL_SECONDS = 20 * 60
 MAX_SESSIONS = 32
 MAX_BODY_BYTES = 4096
 MAX_GUEST_TEXT_CHARS = 1000
+MAX_VAPI_CALL_SECONDS = 180
+MAX_VAPI_CALLS_PER_SESSION = 3
 # Synthetic hotel calendar uses Nigeria's current fixed UTC+01:00 offset.
 DEMO_TIMEZONE = timezone(timedelta(hours=1), name="Africa/Lagos")
 SAMPLE_PROPERTY_NAME = "The Linden House"
@@ -83,6 +86,8 @@ class DemoSession:
     pending_at: str | None = None
     demo_requests: list = field(default_factory=list)
     demo_audit: list = field(default_factory=list)
+    vapi_calls_started: int = 0
+    vapi_call_started_at: float | None = None
     active_role: str = "guest"
     last_activity: float = field(default_factory=time.monotonic)
     lock: object = field(default_factory=threading.RLock)
@@ -181,6 +186,32 @@ class GuestChatDemo:
         self.clock = clock
         self._sessions = {}
         self._lock = threading.RLock()
+
+    def claim_vapi_call(self, session_id, *, max_duration=MAX_VAPI_CALL_SECONDS):
+        session = self._get_session(session_id)
+        with session.lock:
+            if session.active_role != "guest":
+                raise DemoError("demo_guest_role_required", 403)
+            now = self.clock()
+            if session.vapi_call_started_at is not None:
+                # Recover a stale browser tab only after the bounded call window.
+                if now - session.vapi_call_started_at <= max_duration + 15:
+                    raise DemoError("voice_call_already_active", 409)
+                session.vapi_call_started_at = None
+            if session.vapi_calls_started >= MAX_VAPI_CALLS_PER_SESSION:
+                raise DemoError("voice_demo_limit_reached", 429)
+            session.vapi_call_started_at = now
+            session.vapi_calls_started += 1
+            return {"call_limit": MAX_VAPI_CALL_SECONDS,
+                    "calls_remaining": MAX_VAPI_CALLS_PER_SESSION - session.vapi_calls_started}
+
+    def release_vapi_call(self, session_id):
+        session = self._get_session(session_id)
+        with session.lock:
+            if session.active_role != "guest":
+                raise DemoError("demo_guest_role_required", 403)
+            session.vapi_call_started_at = None
+            return {"released": True}
 
     def _expire_sessions(self):
         now = self.clock()
@@ -650,8 +681,35 @@ def _decode_cookie(value):
     return morsel.value if morsel else None
 
 
-def make_server(demo=None, port=PORT_DEFAULT, *, enable_local_qa=False):
+def _vapi_web_config(environ, *, enabled):
+    """Return only a public-key browser configuration; never read a private key."""
+    if not enabled:
+        return None
+    env = os.environ if environ is None else environ
+    public_key = env.get("ROOMAY_VAPI_PUBLIC_KEY", "")
+    assistant_id = env.get("ROOMAY_VAPI_TEST_ASSISTANT_ID", "")
+    voice = env.get("ROOMAY_VAPI_TEST_ASSISTANT_VOICE", "").strip().lower()
+    model_provider = env.get("ROOMAY_VAPI_TEST_LLM_PROVIDER", "").strip().lower()
+    model_name = env.get("ROOMAY_VAPI_TEST_LLM_MODEL", "").strip()
+    if (not isinstance(public_key, str) or not 16 <= len(public_key) <= 512
+            or not re.fullmatch(r"[A-Za-z0-9_.-]+", public_key)
+            or not isinstance(assistant_id, str)
+            or not re.fullmatch(r"[A-Za-z0-9_-]{1,128}", assistant_id)
+            or voice != "remi"
+            or model_provider not in {"openai", "anthropic", "google", "azure-openai"}
+            or not re.fullmatch(r"[A-Za-z0-9._-]{1,80}", model_name)):
+        return None
+    return {"public_key": public_key, "assistant_id": assistant_id,
+            "voice_label": "Remi", "model_provider": model_provider,
+            "model_name": model_name, "max_duration_seconds": MAX_VAPI_CALL_SECONDS}
+
+
+def make_server(demo=None, port=PORT_DEFAULT, *, enable_local_qa=False,
+                enable_vapi_web_call=False, vapi_environment=None):
     demo = demo or GuestChatDemo()
+    if enable_vapi_web_call and not enable_local_qa:
+        raise ValueError("vapi_web_call_requires_local_qa")
+    vapi_config = _vapi_web_config(vapi_environment, enabled=enable_vapi_web_call)
     assets = Path(__file__).with_name("guest_chat_demo_assets")
     allowed_hosts = {"127.0.0.1", "localhost"}
 
@@ -743,12 +801,20 @@ def make_server(demo=None, port=PORT_DEFAULT, *, enable_local_qa=False):
                     content = (assets / name).read_text(encoding="utf-8")
                 except OSError:
                     return self._send(500, {"error": "workspace_unavailable"})
+                if name == "index.html" and vapi_config is not None:
+                    content = content.replace(
+                        "<!-- optional-vapi-sdk -->",
+                        '<script src="/vapi_sdk.js" defer></script>',
+                    )
                 return self._send(200, content, content_type="text/html; charset=utf-8")
             paths = {
                 "/app.css": ("app.css", "text/css; charset=utf-8"),
                 "/voice_intake.js": ("voice_intake.js", "text/javascript; charset=utf-8"),
                 "/app.js": ("app.js", "text/javascript; charset=utf-8"),
+                "/vapi_call.js": ("vapi_call.js", "text/javascript; charset=utf-8"),
             }
+            if vapi_config is not None:
+                paths["/vapi_sdk.js"] = ("vapi_sdk.js", "text/javascript; charset=utf-8")
             if enable_local_qa:
                 paths["/qa.js"] = ("qa.js", "text/javascript; charset=utf-8")
             asset = paths.get(self.path)
@@ -803,12 +869,39 @@ def make_server(demo=None, port=PORT_DEFAULT, *, enable_local_qa=False):
                 return self._send(403, {"error": "same_origin_required"})
             allowed_api = {"/api/session", "/api/message", "/api/confirm", "/api/cancel",
                            "/api/assign", "/api/staff-action"}
+            if vapi_config is not None:
+                allowed_api.update({"/api/voice/config", "/api/voice/claim", "/api/voice/release"})
             if enable_local_qa:
                 allowed_api.add("/api/qa/select")
             if self.path not in allowed_api:
                 return self._send(404, {"error": "not_found"})
             try:
                 body = self._json_body()
+                if self.path == "/api/voice/config":
+                    if body:
+                        raise DemoError("invalid_request")
+                    session_id = _decode_cookie(self.headers.get("Cookie", ""))
+                    if demo.session_role(session_id) != "guest":
+                        raise DemoError("demo_guest_role_required", 403)
+                    return self._send(200, {
+                        "enabled": True,
+                        "publicKey": vapi_config["public_key"],
+                        "assistantId": vapi_config["assistant_id"],
+                        "assistantLabel": "Remi",
+                        "modelProvider": vapi_config["model_provider"],
+                        "modelName": vapi_config["model_name"],
+                        "maxDurationSeconds": vapi_config["max_duration_seconds"],
+                    })
+                if self.path == "/api/voice/claim":
+                    if body:
+                        raise DemoError("invalid_request")
+                    session_id = _decode_cookie(self.headers.get("Cookie", ""))
+                    return self._send(200, demo.claim_vapi_call(session_id))
+                if self.path == "/api/voice/release":
+                    if body:
+                        raise DemoError("invalid_request")
+                    session_id = _decode_cookie(self.headers.get("Cookie", ""))
+                    return self._send(200, demo.release_vapi_call(session_id))
                 if self.path == "/api/session":
                     if body:
                         raise DemoError("invalid_request")
@@ -881,6 +974,7 @@ def make_server(demo=None, port=PORT_DEFAULT, *, enable_local_qa=False):
     server = ThreadingHTTPServer((LOOPBACK, port), Handler)
     server.daemon_threads = True
     server.enable_local_qa = enable_local_qa
+    server.enable_vapi_web_call = vapi_config is not None
     return server
 
 
@@ -889,11 +983,16 @@ def main(argv=None):
     parser.add_argument("--port", type=int, default=PORT_DEFAULT)
     parser.add_argument("--enable-local-qa", action="store_true",
                         help="Enable the loopback-only role selection page for internal acceptance testing.")
+    parser.add_argument("--enable-vapi-web-call", action="store_true",
+                        help="Enable on-click Vapi calls in local QA; requires Vapi public-key, test-assistant and Remi voice env settings.")
     args = parser.parse_args(argv)
-    server = make_server(port=args.port, enable_local_qa=args.enable_local_qa)
+    server = make_server(port=args.port, enable_local_qa=args.enable_local_qa,
+                         enable_vapi_web_call=args.enable_vapi_web_call)
     print(f"Roomay local example journey listening at http://{LOOPBACK}:{server.server_port}/stay")
     if args.enable_local_qa:
         print(f"Internal test role selection: http://{LOOPBACK}:{server.server_port}/__qa/")
+    if args.enable_vapi_web_call:
+        print("Vapi browser calls: enabled only when local public-key/test-assistant/Remi settings validate; no call starts automatically.")
     print("Example records and request states are process-local; no hotel systems are contacted. Press Ctrl+C to stop.")
     try:
         server.serve_forever()

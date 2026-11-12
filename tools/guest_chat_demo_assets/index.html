@@ -6,7 +6,9 @@
   <meta name="color-scheme" content="light">
   <title>My Stay | ROOMAY</title>
   <link rel="stylesheet" href="/app.css">
+  <!-- optional-vapi-sdk -->
   <script src="/voice_intake.js" defer></script>
+  <script src="/vapi_call.js" defer></script>
   <script src="/app.js" defer></script>
 </head>
 <body data-workspace="guest">
@@ -43,6 +45,20 @@
             <div class="assistant-avatar" aria-hidden="true">R</div>
             <div><h2 id="request-heading">How can we help you?</h2><p>Describe what you need during your stay.</p></div>
           </div>
+          <section class="remi-call" aria-labelledby="remi-call-heading">
+            <div class="remi-call-top">
+              <div><p class="section-kicker">VOICE CONVERSATION</p><h3 id="remi-call-heading">Talk with Remi</h3></div>
+              <div class="remi-call-actions">
+                <button id="call-remi" class="call-remi-button" type="button" aria-describedby="remi-call-status remi-call-disclosure">Call Remi</button>
+                <button id="mute-remi" class="voice-call-secondary" type="button" hidden aria-pressed="false">Mute microphone</button>
+                <button id="end-remi" class="voice-call-end" type="button" hidden>End call</button>
+              </div>
+            </div>
+            <p id="remi-call-status" class="remi-call-status" role="status" aria-live="polite">Voice conversation is unavailable until this local test is explicitly configured.</p>
+            <div id="remi-call-captions" class="remi-call-captions" role="log" aria-live="polite" aria-relevant="additions text" hidden></div>
+            <button id="use-call-transcript" class="use-transcript-button" type="button" hidden>Use my latest transcript in the request chat</button>
+            <p id="remi-call-disclosure" class="remi-call-disclosure">When enabled, live audio is sent to Vapi to run this conversation. ROOMAY does not record or store audio. Vapi may process or retain call metadata, speech transcripts and artifacts according to the selected assistant settings. Use test phrases only. A call does not submit a hotel request.</p>
+          </section>
           <div id="messages" class="messages" role="log" aria-live="polite" aria-relevant="additions text">
             <div class="loading-state">Loading your stay…</div>
           </div>

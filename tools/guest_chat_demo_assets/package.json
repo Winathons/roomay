@@ -1,0 +1,14 @@
+{
+  "name": "roomay-local-guest-voice",
+  "private": true,
+  "version": "1.0.0",
+  "scripts": {
+    "build:vapi": "esbuild vapi_sdk_entry.js --bundle --minify --legal-comments=inline --platform=browser --format=iife --target=es2022 --outfile=vapi_sdk.js"
+  },
+  "dependencies": {
+    "@vapi-ai/web": "3.1.0"
+  },
+  "devDependencies": {
+    "esbuild": "0.25.12"
+  }
+}
