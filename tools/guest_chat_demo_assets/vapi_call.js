@@ -22,7 +22,11 @@
 
   function attach({ windowRef, documentRef, onTranscript, onState }) {
     const root = documentRef.getElementById("remi-call");
+    const overlay = documentRef.getElementById("remi-call-overlay");
     const startButton = documentRef.getElementById("call-remi");
+    const startLabel = documentRef.getElementById("call-remi-label");
+    const closeButton = documentRef.getElementById("close-remi");
+    const duration = documentRef.getElementById("remi-call-duration");
     const endButton = documentRef.getElementById("end-remi");
     const muteButton = documentRef.getElementById("mute-remi");
     const status = documentRef.getElementById("remi-call-status");
@@ -38,6 +42,42 @@
     let startAttempt = 0;
     let microphoneMuted = false;
     let assistantSpeaking = false;
+    let dialogOpen = false;
+    let elapsedInterval = null;
+    let connectedAt = null;
+
+    const updateElapsed = () => {
+      if (!duration || connectedAt === null) return;
+      const total = Math.max(0, Math.floor((Date.now() - connectedAt) / 1000));
+      duration.textContent = String(Math.floor(total / 60)).padStart(2, "0") + ":" + String(total % 60).padStart(2, "0");
+    };
+    const stopElapsed = () => {
+      if (elapsedInterval !== null) windowRef.clearInterval?.(elapsedInterval);
+      elapsedInterval = null;
+      connectedAt = null;
+    };
+    const startElapsed = () => {
+      stopElapsed();
+      if (duration) duration.textContent = "00:00";
+      connectedAt = Date.now();
+      if (typeof windowRef.setInterval === "function") elapsedInterval = windowRef.setInterval(updateElapsed, 1000);
+    };
+    const openDialog = () => {
+      if (!overlay || dialogOpen) return;
+      dialogOpen = true;
+      overlay.hidden = false;
+      documentRef.body?.classList?.add("remi-modal-open");
+      documentRef.getElementById("remi-orb")?.removeAttribute?.("paused");
+      closeButton?.focus?.();
+    };
+    const closeDialog = () => {
+      if (active || busy || client) finish();
+      dialogOpen = false;
+      if (overlay) overlay.hidden = true;
+      documentRef.getElementById("remi-orb")?.setAttribute?.("paused", "");
+      documentRef.body?.classList?.remove("remi-modal-open");
+      startButton?.focus?.();
+    };
 
     const setState = (next, copy) => {
       state = next;
@@ -46,9 +86,10 @@
       if (typeof onState === "function") onState(next);
       const connecting = next === "connecting";
       if (startButton) {
-        startButton.disabled = connecting || active || busy || next === "unavailable";
-        startButton.hidden = active;
-        startButton.textContent = connecting ? "Connecting…" : "Call Remi";
+        startButton.disabled = connecting || active || busy;
+        startButton.hidden = false;
+        if (startLabel) startLabel.textContent = connecting ? "Connecting…" : "Call Remi";
+        else startButton.textContent = connecting ? "Connecting…" : "Call Remi";
       }
       if (endButton) endButton.hidden = !active && !connecting;
       if (muteButton) muteButton.hidden = !active;
@@ -106,6 +147,7 @@
       startAttempt += 1;
       if (timer !== null) windowRef.clearTimeout(timer);
       timer = null;
+      stopElapsed();
       const wasConnecting = state === "connecting";
       active = false;
       busy = false;
@@ -189,6 +231,7 @@
           microphoneMuted = false;
           assistantSpeaking = false;
           setState("listening", "Connected to Remi. Listening. You can interrupt while Remi speaks.");
+          startElapsed();
           const seconds = Math.min(Number(config.maxDurationSeconds) || MAX_SECONDS, MAX_SECONDS);
           timer = windowRef.setTimeout(() => finish("The 3-minute call limit was reached. The call has ended."), seconds * 1000);
         });
@@ -216,6 +259,7 @@
           active = false;
           assistantSpeaking = false;
           client = null;
+          stopElapsed();
           setState("error", safeFailure(event));
           releaseClaim();
         });
@@ -258,6 +302,7 @@
         active = false;
         if (timer !== null) windowRef.clearTimeout(timer);
         timer = null;
+        stopElapsed();
         client = null;
         releaseClaim();
         if (error?.code === "voice_demo_limit_reached") {
@@ -272,8 +317,35 @@
       }
     }
 
-    if (startButton) startButton.addEventListener("click", start);
-    if (endButton) endButton.addEventListener("click", () => finish());
+    if (startButton) startButton.addEventListener("click", () => {
+      if (startButton.disabled) return;
+      openDialog();
+      start();
+    });
+    if (endButton) endButton.addEventListener("click", () => { finish(); closeDialog(); });
+    if (closeButton) closeButton.addEventListener("click", closeDialog);
+    if (overlay) overlay.addEventListener("click", (event) => {
+      if (event.target === overlay) closeDialog();
+    });
+    documentRef.addEventListener?.("keydown", (event) => {
+      if (!dialogOpen) return;
+      if (event.key === "Escape") {
+        event.preventDefault?.();
+        closeDialog();
+      } else if (event.key === "Tab") {
+        const controls = [closeButton, muteButton, endButton, useTranscript]
+          .filter(element => element && !element.hidden && !element.disabled);
+        if (!controls.length) return;
+        const first = controls[0], last = controls[controls.length - 1];
+        if (event.shiftKey && documentRef.activeElement === first) {
+          event.preventDefault?.();
+          last.focus?.();
+        } else if (!event.shiftKey && documentRef.activeElement === last) {
+          event.preventDefault?.();
+          first.focus?.();
+        }
+      }
+    });
     if (muteButton) muteButton.addEventListener("click", () => {
       if (!client || !active || typeof client.setMuted !== "function") return;
       const muted = !client.isMuted();
@@ -298,10 +370,7 @@
       useTranscript.hidden = true;
     });
     windowRef.addEventListener?.("pagehide", () => {
-      if (client) {
-        Promise.resolve(client.stop()).catch(() => {});
-        releaseClaim();
-      }
+      if (client || busy) finish();
     });
 
     if (!windowRef.RoomayVapiSDK) {
@@ -309,7 +378,7 @@
     } else {
       setState("ready", "Ready when you are. Call starts only after you press the button.");
     }
-    return { start, finish, get state() { return state; } };
+    return { start, finish, closeDialog, get state() { return state; } };
   }
 
   globalThis.RoomayVapiCall = Object.freeze({ attach, orbStateForCallState });
