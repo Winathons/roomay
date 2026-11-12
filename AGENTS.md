@@ -8,10 +8,9 @@
 - Read `README.md`, `CONTRIBUTING.md`, `docs/staging.md`, and relevant Linear issue before modifying code.
 
 ## Git workflow
-- Default/stable branch: `main`. Shared integration branch: **`staging`**.
-- Feature branch from up-to-date `staging`: `WOR-<number>-short-feature`.
-- All new feature PRs target **`staging`**, not `main`. Promote staging to main only through a deliberately reviewed release PR.
-- Do not commit directly to `main` or `staging`, force push, amend other people's commits, merge PRs, change repository settings or delete branches unless the user explicitly authorizes the action.
+- The shared integration branch is now **`main`**. The former `staging` branch was removed after the WOR-68 migration.
+- Feature branches start from the latest `origin/main`, named `WOR-<number>-short-feature`; all new PRs target **`main`**.
+- Do not commit directly to `main`, force push, amend other people's commits, merge PRs, change repository settings or delete branches unless the user explicitly authorizes the action.
 - Team issues start unassigned. A developer claims the Linear issue and sets In Progress before making code changes. Do not claim a teammate's work automatically.
 - Keep changes limited to the issue's acceptance criteria; stop and document uncertainty instead of guessing platform behavior.
 
@@ -20,7 +19,7 @@
 - Primary operational data belongs to **Workpeg business-scoped tables**, with Workpeg authenticated staff sessions and role permissions.
 - Prefer native `workpeg.*` UI helpers and manifest-declared AI table actions over custom functions. Add backend code only when the supported platform cannot meet a verified requirement.
 - Do not assume `localhost:8081` establishes Workpeg authentication or remote data persistence. **WOR-28** verifies actual table create/read/update across refresh in the isolated development business before WOR-29 and WOR-34 integrate live hotel workflows. Workpeg developers confirmed staff-session Peg UI helpers can run locally with `--fake-cloud` without a published release; Functions/custom save hooks have different deployment requirements.
-- No production customer data during engineering. `--fake-cloud` uses a real Workpeg origin and real service APIs: authorize it only for the isolated Roomay AI development business. From Windows set `WORKPEG_BIND_HOST=127.0.0.1` and use a locally trusted mkcert HTTPS certificate. Its name does not make the API simulated.
+- No production customer data during engineering. `--fake-cloud` uses a real Workpeg origin and APIs: use only the isolated Roomay AI development business. With SDK 0.152.0 it binds to loopback itself and refuses whenever `WORKPEG_BIND_HOST` is set; do not set that variable, change its port from 443, or pass `--peg-namespace`. A locally trusted mkcert certificate and (on Windows) an Administrator terminal for the hosts-file edit may be needed. The current SDK also isolates dev-page tables under a per-business `dv-*` test namespace; see `docs/wor-25-release.md` before launch.
 - **Temporary synthetic fixtures are test-only.** Do not pass fictional hotel data off as operational records, and do not ship `/demo/reception` or the `/b/[business_id]/dev-smoke` diagnostic route in a hotel release. The product receptionist UI must read actual Workpeg rows; track the transition in WOR-34 and release gate WOR-33.
 - No Workpeg developer/admin keys in Git, browser JavaScript, screenshots, logs, PRs or public guest-facing code.
 - Public guest access, browser voice, WhatsApp and PBX/telephony are real product requirements requiring supported APIs, authenticated access, observability and end-to-end verification. Until implemented, do not display them as functioning or claim real payments/calls/AI inference.
@@ -48,3 +47,4 @@ On developer machines also use `workpeg doctor . --offline` (CI may not have Doc
 - Add unit tests and negative cases for new logic; prefer deterministic synthetic fixtures and mocked network responses in CI.
 - No network calls to real Workpeg tables, paid AI APIs, or live guest/customer endpoints from GitHub Actions.
 - PR descriptions must include issue ID, exact commands and results, screenshots for UI changes, security impacts and known limitations. Mark Linear Done only after acceptance criteria are demonstrated and code merged.
+
