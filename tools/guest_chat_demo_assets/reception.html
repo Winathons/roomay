@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="color-scheme" content="light">
+  <title>Reception Dashboard | ROOMAY</title><link rel="stylesheet" href="/app.css"><script src="/app.js" defer></script></head>
+<body data-workspace="reception">
+  <div class="staff-layout">
+    <aside class="staff-sidebar"><a class="brand" href="/staff/reception" aria-label="ROOMAY Reception Dashboard"><span class="brand-mark" aria-hidden="true">R</span><span class="brand-name">roomay<span class="brand-period">.</span></span></a>
+      <div class="staff-property"><span class="property-name">The Linden House</span><span class="property-kind">Example property</span></div>
+      <nav class="staff-nav" aria-label="Reception workspace"><a class="staff-nav-link active" href="#today" aria-current="page">Today</a><a class="staff-nav-link" href="#rooms">Rooms &amp; availability</a><a class="staff-nav-link" href="#arrivals">Arrivals &amp; departures</a><a class="staff-nav-link" href="#service-requests">Service requests</a></nav>
+      <div class="sidebar-note">Hotel-wide operations view</div>
+    </aside>
+    <main class="staff-main" id="today">
+      <header class="staff-topbar"><div><p class="eyebrow">RECEPTION</p><h1>Reception Dashboard</h1></div><div class="scope-chip"><span class="status-dot" aria-hidden="true"></span><span id="reception-property">The Linden House</span></div></header>
+      <p id="workspace-feedback" class="workspace-feedback" role="status" aria-live="polite"></p>
+      <section class="metrics-section" aria-labelledby="metrics-title"><div class="section-heading"><div><p class="section-kicker">TODAY</p><h2 id="metrics-title">Hotel overview</h2></div><span id="operational-date" class="muted-label"></span></div><div id="reception-metrics" class="metric-grid"></div></section>
+      <section class="staff-section" id="rooms" aria-labelledby="rooms-title"><div class="section-heading"><div><p class="section-kicker">INVENTORY</p><h2 id="rooms-title">Room overview</h2></div><span id="room-count" class="muted-label"></span></div><div id="room-board" class="room-board"></div></section>
+      <div class="staff-columns">
+        <section class="staff-section" id="arrivals" aria-labelledby="arrivals-title"><div class="section-heading"><div><p class="section-kicker">FRONT DESK</p><h2 id="arrivals-title">Arrivals &amp; departures</h2></div></div><div id="arrival-list" class="simple-list"></div><div id="departure-list" class="simple-list"></div>
+          <p class="unavailable-note">Check-in and check-out are unavailable until authorized hotel writes are connected.</p></section>
+        <section class="staff-section" aria-labelledby="inhouse-title"><div class="section-heading"><div><p class="section-kicker">CURRENT GUESTS</p><h2 id="inhouse-title">In house</h2></div></div><div id="in-house-list" class="simple-list"></div></section>
+      </div>
+      <section class="staff-section" id="service-requests" aria-labelledby="requests-title"><div class="section-heading"><div><p class="section-kicker">GUEST CARE</p><h2 id="requests-title">Service requests</h2></div><span class="muted-label">Reception can assign requests</span></div><div id="reception-requests" class="request-list"></div></section>
+      <p class="session-note">Example property · Changes in this workspace stay in the local example session and are not sent to hotel systems.</p>
+      <footer class="page-footer"><span>ROOMAY · Reception</span><span>The Linden House · Example property</span></footer>
+    </main>
+  </div>
+</body></html>

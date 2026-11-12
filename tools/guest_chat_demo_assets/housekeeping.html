@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="color-scheme" content="light">
+  <title>Housekeeping | ROOMAY</title><link rel="stylesheet" href="/app.css"><script src="/app.js" defer></script></head>
+<body data-workspace="housekeeping">
+  <div class="staff-layout housekeeping-layout">
+    <aside class="staff-sidebar"><a class="brand" href="/staff/housekeeping" aria-label="ROOMAY Housekeeping"><span class="brand-mark" aria-hidden="true">R</span><span class="brand-name">roomay<span class="brand-period">.</span></span></a>
+      <div class="staff-property"><span class="property-name">The Linden House</span><span class="property-kind">Example property</span></div>
+      <nav class="staff-nav" aria-label="Housekeeping workspace"><a class="staff-nav-link active" href="#work-queue" aria-current="page">My work</a><a class="staff-nav-link" href="#work-queue">Service requests</a></nav>
+      <div class="sidebar-note">Assigned Housekeeping work only</div>
+    </aside>
+    <main class="staff-main housekeeping-main" id="work-queue">
+      <header class="staff-topbar"><div><p class="eyebrow">HOUSEKEEPING</p><h1>My work</h1><p class="intro-copy">Assigned cleaning and guest-care tasks.</p></div><div class="scope-chip"><span class="status-dot" aria-hidden="true"></span><span id="housekeeping-property">The Linden House</span></div></header>
+      <p id="workspace-feedback" class="workspace-feedback" role="status" aria-live="polite"></p>
+      <section class="metrics-section"><div class="section-heading"><div><p class="section-kicker">WORK QUEUE</p><h2 id="queue-heading">Service requests</h2></div><span id="queue-count" class="muted-label"></span></div>
+        <div id="housekeeping-requests" class="housekeeping-queue"><div class="loading-state">Loading assigned work…</div></div>
+        <p id="housekeeping-empty" class="empty-panel" hidden>No assigned tasks right now. New work will appear here when it is assigned to Housekeeping.</p>
+      </section>
+      <p class="session-note">Example property · Status updates stay in this local example session and are not sent to hotel systems.</p>
+      <footer class="page-footer"><span>ROOMAY · Housekeeping</span><span>The Linden House · Example property</span></footer>
+    </main>
+  </div>
+</body></html>
