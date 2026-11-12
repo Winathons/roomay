@@ -13,35 +13,34 @@ hosted Workpeg. From the repository root, launch the existing loopback server:
 Open the printed `http://127.0.0.1:8765/` URL. The page remains labeled
 **OFFLINE DEMO — SYNTHETIC DATA — NO REQUEST SUBMITTED**.
 
-## Supported browser mechanism
+## Supported browser mechanism and privacy
 
 The Workpeg 0.152.0 UI compiler produces browser JavaScript, but the guest chat
 is a standalone static HTML/JavaScript preview served by
-`tools/guest_chat_demo.py`; it is not a Workpeg UI route. No microphone widget
-or new Workpeg API is assumed. Voice intake uses the browser Web Speech
-`SpeechRecognition` API only when it exposes `processLocally` and the static
-`SpeechRecognition.available()` method. Before enabling voice, the demo calls
-`available({langs: ["en-NG"], processLocally: true, quality: "dictation"})`.
-Only `"available"` enables the voice button. The API's `"downloadable"`,
-`"downloading"`, `"unavailable"`, unknown, and rejected results all leave typed
-input available. The demo never calls `install()` and never downloads a
-language pack. Recognition sets `processLocally = true` and `lang = "en-NG"`;
-there is no server-based recognition fallback.
+`tools/guest_chat_demo.py`; it is not a Workpeg UI route. Voice input uses the
+browser Web Speech `SpeechRecognition` API. Browser support is limited and
+varies by browser, operating system, microphone permission and installed
+language packs. The page feature-detects the API and always leaves typed input
+available.
 
-This privacy limit matters: MDN documents that the default recognition mode
-often sends audio to a server and that support is limited across browsers. Its
-on-device mode keeps both audio and transcript on the device. This demo refuses
-older/cloud-only recognition implementations and offers typed input instead.
-See [MDN SpeechRecognition](https://developer.mozilla.org/en-US/docs/Web/API/SpeechRecognition)
-and [MDN on-device speech recognition](https://developer.mozilla.org/en-US/docs/Web/API/Web_Speech_API/Using_the_Web_Speech_API#on-device_speech_recognition).
+On-device en-NG dictation is preferred whenever the browser exposes
+`processLocally` and `available()` reports an installed local pack. The page
+never downloads a pack. If local dictation is unavailable, the guest may
+explicitly check “Use my browser’s speech service if needed.” This choice is
+unchecked by default. It is checked before the microphone button can use a
+browser-managed remote speech service. The browser may transmit audio to its
+provider, and that provider's privacy terms and retention practices apply.
+ROOMAY does not receive or store the raw audio in either mode. The page shows
+this disclosure adjacent to the opt-in control.
 
-The static availability check does not request microphone access. Microphone
-access is requested only when the guest directly clicks “Start voice input.”
-A denied permission, unavailable device,
-missing language pack, browser policy refusal, interruption, or empty result
-shows a plain status message and leaves typed input available. Nothing in
-Roomay captures or stores a raw audio blob. The browser itself controls
-microphone access and on-device recognition.
+The availability check does not request microphone access. Recognition starts
+only from a direct click on the voice button, after the optional remote-service
+choice. A denied permission, unavailable provider or device, language issue,
+interruption, or empty result produces a status message and leaves typed input
+available. Recognized text is placed in the existing editable composer and is
+not submitted until the guest presses Send. See [MDN SpeechRecognition](https://developer.mozilla.org/en-US/docs/Web/API/SpeechRecognition),
+[MDN on-device recognition](https://developer.mozilla.org/en-US/docs/Web/API/Web_Speech_API/Using_the_Web_Speech_API#on-device_speech_recognition),
+and [MDN `processLocally`](https://developer.mozilla.org/en-US/docs/Web/API/SpeechRecognition/processLocally).
 
 ## Guest flow
 
@@ -49,7 +48,8 @@ microphone access and on-device recognition.
 2. The browser appends recognized text to the existing message field. This
    preserves typed content and edits if the guest starts another recording;
    it does not send that text automatically.
-3. The guest can edit the transcript and then press “Send reviewed transcript”
+3. The guest can edit the transcript, or choose “Discard voice text” to restore
+   the composer contents from before that recording, then press “Send reviewed transcript”
    (or use the existing keyboard submit behavior). Text is limited to 1,000
    characters and is passed to the existing WOR-57 handler, which calls the
    WOR-18 validated `handle_conversation_turn()` contract.
@@ -74,21 +74,25 @@ and keeps the submit busy guard against duplicate submissions.
 
 `tests/guest_voice_intake.cjs` executes the real browser controller and app
 script with mocked DOM, browser-recognition, and HTTP responses. Scenarios
-cover unsupported/cloud-only browser APIs, availability statuses and errors,
+cover unsupported browser APIs, availability statuses and errors,
 direct-gesture start, denied permission, interrupted and empty speech,
-overlong text, transcript editing and preservation across another recording,
-explicit send, duplicate submit suppression, and a privacy-limited request
-body. `tests/test_guest_chat_demo.py` verifies
+overlong text, transcript editing/discard and preservation across another
+recording, remote-service consent and provider availability, explicit send,
+duplicate submit suppression, and a privacy-limited request body.
+`tests/test_guest_chat_demo.py` verifies
 the static script, MIME type, CSP and accessible controls. No physical
 microphone, external service, Workpeg API, or production data is used by CI.
 
 ## What remains unverified
 
-- No real-browser or microphone test was performed by automated tests. A local
-  manual browser trial is still needed on a browser/OS with an already
-  installed on-device `en-NG` dictation pack, including permission-denial and
-  interruption checks. Browser support for `available()` and the `en-NG`
-  dictation pack varies by browser and operating system. See [MDN
+- No physical-microphone trial was performed here. The available desktop
+  browser routed loopback navigation to a proxy 404, so rendered-browser and
+  screenshot checks could not be completed. The mocked controller and direct
+  local HTTP checks passed. Before release, manually test a supported browser
+  with local `en-NG` dictation or choose the explicit browser-service opt-in;
+  verify permission denial, stop, interruption, transcript editing and discard.
+  Browser support and the `en-NG` pack vary by browser and operating system.
+  See [MDN
   SpeechRecognition.available()](https://developer.mozilla.org/en-US/docs/Web/API/SpeechRecognition/available_static)
   for the supported status values and options.
 - Pidgin/Nigerian-accent transcription quality has not been tested. The WOR-18

@@ -9,9 +9,12 @@ import unittest
 from pathlib import Path
 
 from domain.fixtures import uid
+from domain.staff_actions import _audit_history_is_consistent
 from tools.guest_chat_demo import (
     LOOPBACK, DemoError, GuestChatDemo, make_server,
 )
+
+ROOT = Path(__file__).resolve().parents[1]
 
 
 class GuestChatDemoFlowTests(unittest.TestCase):
@@ -72,8 +75,7 @@ class GuestChatDemoFlowTests(unittest.TestCase):
         revision = view["pending"]["revision"]
         prepared = self.demo.confirm(self.session_id, revision)
         self.assertEqual(prepared["state"], "prepared")
-        self.assertIn("not been sent to hotel staff or saved", prepared["messages"][-1]["text"])
-        self.assertIn("no ticket was created", prepared["messages"][-1]["text"])
+        self.assertIn("has not been sent to hotel staff", prepared["messages"][-1]["text"])
         self.assertFalse(prepared["submitted"])
         self.assertFalse(prepared["persisted"])
         session = self.demo._sessions[self.session_id]
@@ -90,21 +92,97 @@ class GuestChatDemoFlowTests(unittest.TestCase):
         self.assertEqual(view["pending"]["summary"]["department"], "Housekeeping")
         self.assertEqual(view["pending"]["summary"]["category"], "Extra Towels")
 
-    def test_missing_room_clarification_then_room_reply_prepares_only_after_confirm(self):
+    def test_synthetic_request_and_committed_audit_chain_reuse_canonical_domain(self):
+        view = self.send("Please bring extra towels to room 205.")
+        self.demo.confirm(self.session_id, view["pending"]["revision"])
+        self.demo.switch_role(self.session_id, "reception")
+        self.demo.assign_latest_to_housekeeping(self.session_id)
+        self.demo.switch_role(self.session_id, "housekeeping")
+        for action in ("acknowledge", "start", "resolve"):
+            self.demo.department_action(self.session_id, action)
+            session = self.demo._sessions[self.session_id]
+            self.assertTrue(_audit_history_is_consistent(
+                session.demo_requests[0], session.demo_audit))
+        guest = self.demo.switch_role(self.session_id, "guest")
+        self.assertEqual(guest["workspace"], "guest")
+        self.assertEqual(guest["requests"][0]["status"], "resolved")
+        self.assertNotIn("rooms", guest)
+        self.assertNotIn("metrics", guest)
+        self.assertNotIn("housekeeping", guest)
+        self.assertNotIn("request_id", json.dumps(guest))
+        self.assertNotIn("guest_id", json.dumps(guest))
+
+    def test_missing_room_uses_trusted_scope_and_prepares_only_after_confirm(self):
         first = self.send("The AC is not cooling.")
+        self.assertEqual(first["state"], "awaiting_confirmation")
+        self.assertIsNotNone(first["pending"])
+        self.assertNotIn("Which room", first["messages"][-1]["text"])
+        self.assertIn("not be sent or saved", first["messages"][-1]["text"])
+        confirmed = self.demo.confirm(self.session_id, first["pending"]["revision"])
+        request = self.demo._sessions[self.session_id].scope.existing_requests[0]
+        self.assertEqual(request["room_id"], uid("205"))
+        self.assertFalse(confirmed["submitted"])
+
+    def test_my_room_towels_and_ac_requests_use_verified_room_205(self):
+        for text in (
+            "Please bring two extra towels to my room.",
+            "Please send towels.",
+            "The AC is broken.",
+        ):
+            with self.subTest(text=text):
+                demo = GuestChatDemo()
+                session_id, _ = demo.create_session()
+                result = demo.send_message(session_id, text)
+                self.assertEqual(result["state"], "awaiting_confirmation")
+                self.assertNotIn("Which room", result["messages"][-1]["text"])
+                demo.confirm(session_id, result["pending"]["revision"])
+                self.assertEqual(
+                    demo._sessions[session_id].scope.existing_requests[0]["room_id"],
+                    uid("205"),
+                )
+
+    def test_ordinary_hotel_phrases_after_room_are_not_mismatch_claims(self):
+        for text in (
+            "Please send room service.",
+            "My room smells bad.",
+            "Can I get room cleaning?",
+        ):
+            with self.subTest(text=text):
+                demo = GuestChatDemo()
+                session_id, _ = demo.create_session()
+                result = demo.send_message(session_id, text)
+                self.assertNotEqual(result["state"], "handoff")
+                self.assertNotIn("doesn't match the stay", result["messages"][-1]["text"])
+                self.assertEqual(result["state"], "awaiting_confirmation")
+                self.assertEqual(result["pending"]["summary"]["department"], "Reception")
+
+    def test_room_120_claim_is_rejected_without_revealing_room_205(self):
+        first = self.send("Please bring two extra towels to my room.")
+        self.assertEqual(first["state"], "awaiting_confirmation")
+        mismatch = self.send("YES I am in room 120.")
+        self.assertEqual(mismatch["state"], "handoff")
+        self.assertIsNone(mismatch["pending"])
+        self.assertIn("doesn't match the stay I can verify", mismatch["messages"][-1]["text"])
+        self.assertIn("contact Reception", mismatch["messages"][-1]["text"])
+        self.assertNotIn("205", mismatch["messages"][-1]["text"])
+        self.assertNotIn("120", mismatch["messages"][-1]["text"])
+        self.assertFalse(self.demo._sessions[self.session_id].scope.existing_requests)
+
+    def test_answer_to_problem_clarification_keeps_context_and_does_not_repeat(self):
+        first = self.send("Help")
         self.assertEqual(first["state"], "needs_clarification")
-        self.assertIsNone(first["pending"])
-        self.assertIn("Which room", first["messages"][-1]["text"])
-        second = self.send("205")
+        self.assertIn("describe what is happening", first["messages"][-1]["text"])
+        second = self.send("The AC is broken")
         self.assertEqual(second["state"], "awaiting_confirmation")
-        self.assertIn("room 205", second["pending"]["summary"]["description"].lower())
-        self.assertFalse(second["submitted"])
+        self.assertEqual(second["pending"]["summary"]["department"], "Maintenance")
+        self.assertNotIn("Which room", second["messages"][-1]["text"])
+        self.assertNotIn("describe what is happening", second["messages"][-1]["text"])
 
     def test_guest_supplied_wrong_room_is_not_authentication(self):
         result = self.send("Please bring towels to room 204.")
         self.assertEqual(result["state"], "handoff")
         self.assertIsNone(result["pending"])
-        self.assertIn("couldn't verify an active stay", result["messages"][-1]["text"])
+        self.assertIn("doesn't match the stay I can verify", result["messages"][-1]["text"])
         self.assertFalse(self.demo._sessions[self.session_id].scope.existing_requests)
 
     def test_room_enquiry_hands_off_to_reception_without_booking_claim(self):
@@ -231,20 +309,23 @@ class GuestChatDemoHttpTests(unittest.TestCase):
         )
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("--port", result.stdout)
+        self.assertIn("--enable-local-qa", result.stdout)
 
     def setUp(self):
-        self.server = make_server(port=0)
+        self.server = make_server(port=0, enable_local_qa=True)
         self.origin = f"http://{LOOPBACK}:{self.server.server_port}"
 
     def tearDown(self):
         self.server.server_close()
 
     def dispatch(self, path, *, method="GET", body=None, cookie=None,
-                 origin=None, host=None):
-        headers = [f"Host: {host or f'{LOOPBACK}:{self.server.server_port}'}"]
+                 origin=None, host=None, server=None):
+        target = server or self.server
+        target_origin = f"http://{LOOPBACK}:{target.server_port}"
+        headers = [f"Host: {host or f'{LOOPBACK}:{target.server_port}'}"]
         if body is not None:
             headers.extend(("Content-Type: application/json",
-                            f"Origin: {origin or self.origin}",
+                            f"Origin: {origin or target_origin}",
                             f"Content-Length: {len(body)}"))
         if cookie:
             headers.append("Cookie: " + cookie)
@@ -277,10 +358,10 @@ class GuestChatDemoHttpTests(unittest.TestCase):
                 pass
 
         connection = MemoryConnection(request)
-        class MemoryHandler(self.server.RequestHandlerClass):
+        class MemoryHandler(target.RequestHandlerClass):
             wbufsize = 1
 
-        handler = MemoryHandler(connection, (LOOPBACK, self.server.server_port), self.server)
+        handler = MemoryHandler(connection, (LOOPBACK, target.server_port), target)
         output = connection.writer.buffer.getvalue().decode("iso-8859-1")
         head, _, response_body = output.partition("\r\n\r\n")
         lines = head.split("\r\n")
@@ -292,14 +373,27 @@ class GuestChatDemoHttpTests(unittest.TestCase):
                 response_headers[name.strip()] = value.strip()
         return status, response_headers, response_body.encode("iso-8859-1")
 
-    def test_static_browser_app_is_served_with_local_security_headers(self):
+    def test_separate_guest_page_has_no_staff_navigation_or_development_copy(self):
         self.assertEqual(self.server.server_address[0], LOOPBACK)
         status, headers, html = self.dispatch("/")
+        self.assertEqual(status, 302)
+        self.assertEqual(headers["Location"], "/stay")
+        status, headers, html = self.dispatch("/stay")
+        text = html.decode("utf-8")
         self.assertEqual(status, 200)
-        self.assertIn("OFFLINE DEMO — SYNTHETIC DATA — NO REQUEST SUBMITTED", html.decode("utf-8"))
+        self.assertIn("The Linden House", text)
+        self.assertIn("My Stay", text)
+        self.assertNotIn("/staff/reception", text)
+        self.assertNotIn("/staff/housekeeping", text)
+        self.assertNotIn("SYNTHETIC DEMO", text)
+        self.assertNotIn("FICTIONAL SESSION", text)
+        self.assertNotIn("DEMO VIEW", text)
         self.assertIn("default-src 'self'", headers["Content-Security-Policy"])
-        self.assertIn('src="/voice_intake.js"', html.decode("utf-8"))
-        self.assertIn("script-src 'self'", headers["Content-Security-Policy"])
+        self.assertIn('src="/voice_intake.js"', text)
+        self.assertIn("aria-live=\"polite\"", text)
+        self.assertIn("id=\"voice-button\"", text)
+        self.assertIn("id=\"voice-remote-consent\"", text)
+        self.assertIn("Provider privacy terms apply", text)
         status, headers, app_js = self.dispatch("/app.js")
         self.assertEqual(status, 200)
         self.assertIn("text/javascript", headers["Content-Type"])
@@ -307,9 +401,100 @@ class GuestChatDemoHttpTests(unittest.TestCase):
         status, headers, voice_js = self.dispatch("/voice_intake.js")
         self.assertEqual(status, 200)
         self.assertIn("text/javascript", headers["Content-Type"])
-        self.assertIn("processLocally = true", voice_js.decode("utf-8"))
-        self.assertIn("aria-live=\"polite\"", html.decode("utf-8"))
-        self.assertIn("id=\"voice-button\"", html.decode("utf-8"))
+        voice_source = voice_js.decode("utf-8")
+        self.assertIn('const mode = localAvailable', voice_source)
+        self.assertIn('selectedMode = mode', voice_source)
+        self.assertIn('recognition.processLocally = mode === "on-device"', voice_source)
+
+    def test_staff_routes_require_matching_server_session_and_show_separate_pages(self):
+        status, _, _ = self.dispatch("/staff/reception")
+        self.assertEqual(status, 401)
+        status, headers, _ = self.dispatch("/api/session", method="POST", body=b"{}")
+        self.assertEqual(status, 200)
+        guest_cookie = headers["Set-Cookie"].split(";", 1)[0]
+        status, _, body = self.dispatch("/staff/reception", cookie=guest_cookie)
+        self.assertEqual(status, 403)
+        self.assertNotIn("Room board", body.decode("utf-8"))
+
+        status, _, result = self.dispatch(
+            "/api/qa/select", method="POST", body=b'{"role":"reception"}', cookie=guest_cookie)
+        self.assertEqual(status, 200)
+        self.assertEqual(json.loads(result)["path"], "/staff/reception")
+        status, _, html = self.dispatch("/staff/reception", cookie=guest_cookie)
+        self.assertEqual(status, 200)
+        self.assertIn("Reception Dashboard", html.decode("utf-8"))
+        status, _, _ = self.dispatch("/staff/housekeeping", cookie=guest_cookie)
+        self.assertEqual(status, 403)
+
+        self.dispatch("/api/qa/select", method="POST", body=b'{"role":"housekeeping"}', cookie=guest_cookie)
+        status, _, html = self.dispatch("/staff/housekeeping", cookie=guest_cookie)
+        self.assertEqual(status, 200)
+        self.assertIn("Housekeeping", html.decode("utf-8"))
+        self.assertNotIn("href=\"/staff/reception\"", html.decode("utf-8"))
+
+    def test_internal_qa_switcher_is_opt_in_and_not_product_navigation(self):
+        status, _, html = self.dispatch("/__qa/")
+        self.assertEqual(status, 200)
+        self.assertIn("does not sign you in", html.decode("utf-8"))
+        self.assertIn('class="brand" href="/__qa/"', html.decode("utf-8"))
+        self.assertNotIn("/__qa/", self.dispatch("/stay")[2].decode("utf-8"))
+        server = make_server(port=0)
+        try:
+            self.assertFalse(getattr(server, "enable_local_qa", False))
+            # The default non-QA server does not register the role selection route.
+            connection = self.dispatch("/__qa/", server=server)
+            self.assertEqual(connection[0], 404)
+            status, session_headers, _ = self.dispatch(
+                "/api/session", method="POST", body=b"{}", server=server)
+            self.assertEqual(status, 200)
+            cookie = session_headers["Set-Cookie"].split(";", 1)[0]
+            status, _, denied = self.dispatch("/staff/housekeeping", cookie=cookie, server=server)
+            self.assertEqual(status, 403)
+            self.assertNotIn("/__qa/", denied.decode("utf-8"))
+            self.assertIn('href="/stay"', denied.decode("utf-8"))
+        finally:
+            server.server_close()
+
+    def test_local_role_mismatch_recovers_without_losing_resolved_status(self):
+        status, headers, body = self.dispatch("/api/session", method="POST", body=b"{}")
+        self.assertEqual(status, 200)
+        cookie = headers["Set-Cookie"].split(";", 1)[0]
+
+        def act(path, payload):
+            status, _, result = self.dispatch(
+                path, method="POST", body=json.dumps(payload).encode(), cookie=cookie)
+            self.assertEqual(status, 200, result.decode())
+            return json.loads(result)
+
+        proposal = act("/api/message", {"text": "Extra towels for room 205, please."})
+        act("/api/confirm", {"revision": proposal["chat"]["pending"]["revision"]})
+        act("/api/qa/select", {"role": "reception"})
+        reception = act("/api/session", {})
+        request_id = reception["requests"][0]["request_id"]
+        act("/api/assign", {"request_id": request_id})
+        act("/api/qa/select", {"role": "housekeeping"})
+        for action in ("acknowledge", "start", "resolve"):
+            act("/api/staff-action", {"action": action, "request_id": request_id})
+
+        # Opening the guest route in the wrong test role remains denied, but
+        # gives local QA a recovery path. Selecting Guest reuses the same
+        # server-side session, so the completed request and audit stay intact.
+        status, _, denied = self.dispatch("/stay", cookie=cookie)
+        self.assertEqual(status, 403)
+        self.assertIn("/__qa/", denied.decode("utf-8"))
+        status, _, qa_page = self.dispatch("/__qa/", cookie=cookie)
+        self.assertEqual(status, 200)
+        self.assertIn("does not sign you in", qa_page.decode("utf-8"))
+        act("/api/qa/select", {"role": "guest"})
+        status, _, guest_page = self.dispatch("/stay", cookie=cookie)
+        self.assertEqual(status, 200)
+        status, _, refreshed = self.dispatch(
+            "/api/session", method="POST", body=b"{}", cookie=cookie)
+        self.assertEqual(status, 200)
+        restored = json.loads(refreshed)
+        self.assertEqual(restored["workspace"], "guest")
+        self.assertEqual(restored["requests"][0]["status"], "resolved")
+        self.assertIn('data-workspace="guest"', guest_page.decode("utf-8"))
 
     def test_browser_session_stays_server_side_and_never_returns_internal_contract(self):
         status, headers, body = self.dispatch("/api/session", method="POST", body=b"{}")
@@ -320,14 +505,19 @@ class GuestChatDemoHttpTests(unittest.TestCase):
         cookie_pair = cookie.split(";", 1)[0]
         session_view = json.loads(body)
         self.assertNotIn("session_id", session_view)
-        self.assertFalse(session_view["submitted"])
+        self.assertEqual(session_view["workspace"], "guest")
+        self.assertFalse(session_view["chat"]["submitted"])
+        self.assertNotIn("rooms", session_view)
+        self.assertNotIn("metrics", session_view)
+        self.assertNotIn("housekeeping", session_view)
 
         message = json.dumps({"text": "Abeg, my AC no dey cool for room 205."}).encode()
         status, _, body = self.dispatch("/api/message", method="POST", body=message,
                                         cookie=cookie_pair)
         self.assertEqual(status, 200)
         view = json.loads(body)
-        self.assertEqual(view["pending"]["summary"]["department"], "Maintenance")
+        self.assertEqual(view["workspace"], "guest")
+        self.assertEqual(view["chat"]["pending"]["summary"]["department"], "Maintenance")
         self.assertNotIn("internal", view)
         self.assertNotIn("request_plan", json.dumps(view))
 
@@ -343,6 +533,125 @@ class GuestChatDemoHttpTests(unittest.TestCase):
         status, _, _ = self.dispatch("/api/confirm", method="POST", body=b'{"revision":1}')
         self.assertEqual(status, 401)
 
+    def test_complete_browser_journey_is_server_scoped_and_survives_reload(self):
+        status, headers, body = self.dispatch("/api/session", method="POST", body=b"{}")
+        self.assertEqual(status, 200)
+        cookie = headers["Set-Cookie"].split(";", 1)[0]
+        state = json.loads(body)
+        self.assertEqual(state["workspace"], "guest")
+        self.assertEqual(state["property_name"], "The Linden House")
+        self.assertTrue(state["example_property"])
+        self.assertEqual(state["guest"]["room"], "205")
+        self.assertEqual(state["guest"]["stay_status"], "checked_in")
+        self.assertEqual(state["guest"]["name"], "Amara Okafor")
+        self.assertEqual(set(state), {"workspace", "property_name", "example_property", "guest", "requests", "chat", "reception_contact"})
 
+        status, _, body = self.dispatch(
+            "/api/message", method="POST",
+            body=json.dumps({"text": "Please bring extra towels to room 205."}).encode(),
+            cookie=cookie,
+        )
+        self.assertEqual(status, 200)
+        state = json.loads(body)
+        self.assertEqual(state["chat"]["pending"]["summary"]["department"], "Housekeeping")
+        revision = state["chat"]["pending"]["revision"]
+        self.assertNotIn("rooms", state)
+        self.assertNotIn("metrics", state)
+        status, _, body = self.dispatch(
+            "/api/confirm", method="POST",
+            body=json.dumps({"revision": revision}).encode(), cookie=cookie,
+        )
+        self.assertEqual(status, 200)
+        state = json.loads(body)
+        self.assertEqual(state["requests"][0]["status"], "received")
+        self.assertIn("has not been sent to hotel staff", state["chat"]["messages"][-1]["text"])
+        def act(path, payload):
+            status, _, result = self.dispatch(
+                path, method="POST", body=json.dumps(payload).encode(), cookie=cookie)
+            self.assertEqual(status, 200, result.decode())
+            return json.loads(result)
+
+        self.assertEqual(act("/api/qa/select", {"role": "reception"})["path"], "/staff/reception")
+        state = act("/api/session", {})
+        self.assertEqual(state["workspace"], "reception")
+        self.assertEqual(state["metrics"]["in_house"], 2)
+        self.assertEqual(state["metrics"]["arrivals"], 1)
+        self.assertEqual(state["metrics"]["departures"], 1)
+        self.assertEqual(state["metrics"]["maintenance_blocked_rooms"], 1)
+        self.assertNotIn("guest", state)
+        request_id = state["requests"][0]["request_id"]
+        state = act("/api/assign", {"request_id": request_id})
+        self.assertEqual(state["requests"][0]["status"], "assigned")
+        self.assertIn("Chidi Nwosu", json.dumps(state["in_house"]))
+        self.assertEqual(act("/api/qa/select", {"role": "housekeeping"})["path"], "/staff/housekeeping")
+        state = act("/api/session", {})
+        self.assertEqual(state["workspace"], "housekeeping")
+        self.assertNotIn("guest", state)
+        self.assertNotIn("metrics", state)
+        self.assertNotIn("arrivals", state)
+        self.assertEqual(state["requests"][0]["room"], "205")
+        self.assertNotIn("Amara Okafor", json.dumps(state))
+        for action, expected in (("acknowledge", "acknowledged"),
+                                 ("start", "in_progress"), ("resolve", "resolved")):
+            state = act("/api/staff-action", {"action": action, "request_id": request_id})
+            self.assertEqual(state["requests"][0]["status"], expected)
+        self.assertEqual(act("/api/qa/select", {"role": "guest"})["path"], "/stay")
+        denied = self.dispatch("/api/staff-action", method="POST",
+                               body=json.dumps({"action": "resolve", "request_id": request_id}).encode(),
+                               cookie=cookie)
+        self.assertEqual(denied[0], 403)
+
+        status, _, body = self.dispatch("/api/session", method="POST", body=b"{}", cookie=cookie)
+        self.assertEqual(status, 200)
+        reloaded = json.loads(body)
+        self.assertEqual(reloaded["workspace"], "guest")
+        self.assertEqual(reloaded["requests"][0]["status"], "resolved")
+        self.assertEqual(reloaded["requests"][0]["department"], "Housekeeping")
+        self.assertNotIn("request_id", json.dumps(reloaded))
+        self.assertNotIn("operation_signature", json.dumps(reloaded))
+        self.assertNotIn("guest_id", json.dumps(reloaded))
+        self.assertIn("Request updates are limited to this example session", (ROOT / "tools/guest_chat_demo_assets/index.html").read_text())
+
+    def test_example_sessions_do_not_share_guest_requests_or_chat_state(self):
+        status, first_headers, first_body = self.dispatch(
+            "/api/session", method="POST", body=b"{}")
+        self.assertEqual(status, 200)
+        first_cookie = first_headers["Set-Cookie"].split(";", 1)[0]
+        status, _, first_body = self.dispatch(
+            "/api/message", method="POST",
+            body=json.dumps({"text": "Please bring extra towels to room 205."}).encode(),
+            cookie=first_cookie,
+        )
+        self.assertEqual(status, 200)
+        pending = json.loads(first_body)["chat"]["pending"]
+        status, _, first_body = self.dispatch(
+            "/api/confirm", method="POST",
+            body=json.dumps({"revision": pending["revision"]}).encode(),
+            cookie=first_cookie,
+        )
+        self.assertEqual(status, 200)
+        self.assertEqual(json.loads(first_body)["requests"][0]["status"], "received")
+
+        status, second_headers, second_body = self.dispatch(
+            "/api/session", method="POST", body=b"{}")
+        self.assertEqual(status, 200)
+        second_cookie = second_headers["Set-Cookie"].split(";", 1)[0]
+        second = json.loads(second_body)
+        self.assertEqual(second["workspace"], "guest")
+        self.assertEqual(second["requests"], [])
+        self.assertEqual(len(second["chat"]["messages"]), 1)
+        self.assertEqual(second["chat"]["state"], "ready")
+
+    def test_browser_refuses_actions_outside_server_selected_test_role(self):
+        status, headers, _ = self.dispatch("/api/session", method="POST", body=b"{}")
+        self.assertEqual(status, 200)
+        cookie = headers["Set-Cookie"].split(";", 1)[0]
+        status, _, body = self.dispatch("/api/assign", method="POST",
+                                        body=b'{"request_id":"unknown"}', cookie=cookie)
+        self.assertEqual(status, 403)
+        self.assertEqual(json.loads(body)["error"], "demo_reception_role_required")
+        status, _, body = self.dispatch(
+            "/api/qa/select", method="POST", body=b'{"role":"owner"}', cookie=cookie)
+        self.assertEqual(status, 400)
 if __name__ == "__main__":
     unittest.main()

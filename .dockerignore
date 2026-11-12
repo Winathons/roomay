@@ -1,0 +1,13 @@
+.git
+.venv
+**/__pycache__/
+*.py[cod]
+.env
+.env.*
+*.pem
+*.key
+*.crt
+tests/
+docs/
+ui/
+function/

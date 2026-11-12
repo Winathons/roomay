@@ -1,1 +1,1 @@
-"""Standalone, offline-testable Vapi to YarnGPT custom TTS adapter."""
+"""Offline-testable Vapi custom TTS and non-mutating intent tool adapters."""

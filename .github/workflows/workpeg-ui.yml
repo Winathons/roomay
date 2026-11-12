@@ -2,9 +2,9 @@ name: Roomay UI Check
 
 on:
   pull_request:
-    branches: [staging, main]
+    branches: [main]
   push:
-    branches: [staging, main]
+    branches: [main]
 
 permissions:
   contents: read
@@ -13,7 +13,24 @@ jobs:
   workpeg-ui:
     name: Workpeg UI build
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
+    env:
+      # Temporary, runner-local database only. Never a hosted credential.
+      ROOMAY_TEST_DATABASE_URL: postgresql+psycopg://roomay:roomay_ci_local_only@127.0.0.1:55432/roomay
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: roomay
+          POSTGRES_USER: roomay
+          POSTGRES_PASSWORD: roomay_ci_local_only
+        ports:
+          - 55432:5432
+        options: >-
+          --health-cmd "pg_isready -U roomay -d roomay"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 15
     steps:
       - name: Check out source
         uses: actions/checkout@v4
@@ -25,10 +42,14 @@ jobs:
           cache: pip
           cache-dependency-path: |
             requirements-dev.txt
+            requirements-voice.txt
             server-requirements.txt
 
-      - name: Install Workpeg SDK and backend test dependencies
+      - name: Install pinned Workpeg SDK and guest backend test dependencies
         run: python -m pip install -r requirements-dev.txt
+
+      - name: Install isolated voice WSGI runtime
+        run: python -m pip install -r requirements-voice.txt
 
       - name: Set up Node for compiled UI offline tests
         uses: actions/setup-node@v4
@@ -38,8 +59,19 @@ jobs:
       - name: Python syntax check
         run: python -m compileall -q ui function domain tests backend migrations
 
-      - name: Offline hotel rules and compiled smoke UI
+      - name: Offline rules and real PostgreSQL 16 backend integration
         run: python -m unittest discover -s tests -v
+
+      - name: Build and start Railway voice container (offline provider smoke)
+        run: ROOMAY_RUN_DOCKER_TESTS=1 python -m unittest tests.test_voice_docker_runtime -v
+
+      - name: Build and smoke-test isolated Vapi intent tool (no provider calls)
+        run: ROOMAY_RUN_DOCKER_TESTS=1 python -m unittest tests.test_voice_tool_docker_runtime -v
 
       - name: Compile Workpeg UI
         run: workpeg ui build ui/
+
+      # Explicit release gate for pull requests into protected main.
+      # Rebuild a fresh artifact; do not trust a previously generated ui/dist.
+      - name: Block dev routes, privileged CRUD and secrets in release bundle (WOR-33)
+        run: python -m unittest discover -s tests -p 'test_release_candidate.py' -v
