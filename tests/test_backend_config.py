@@ -50,6 +50,26 @@ class BackendConfigurationTests(TestCase):
         self.assertFalse(hasattr(settings, "workpeg_pk"))
         self.assertNotIn("WORKPEG_PK", values)
 
+    def test_oidc_callback_is_pinned_to_exact_backend_https_origin(self):
+        self.assertIs(self.valid().validate().__class__, Settings)
+        self.assertIsNotNone(self.valid(
+            public_base_url="https://roomay.example/",
+        ).validate())
+        for changes in (
+            {"oidc_redirect_uri": "https://untrusted.example/auth/workpeg/callback"},
+            {"oidc_redirect_uri": "https://roomay.example/incorrect/callback"},
+            {"oidc_redirect_uri": "https://roomay.example/auth/workpeg/callback?code=unsafe"},
+            {"oidc_redirect_uri": "https://user@roomay.example/auth/workpeg/callback"},
+            {"public_base_url": "https://roomay.example/app"},
+            {"public_base_url": "https://user@roomay.example"},
+            {"public_base_url": "https://roomay.example?next=unsafe"},
+        ):
+            with self.subTest(changes=changes):
+                with self.assertRaisesRegex(
+                    RuntimeError, "oidc_callback_must_match_public_origin|public_base_url_must_be_https_origin",
+                ):
+                    self.valid(**changes).validate()
+
     def test_business_and_hotel_bindings_must_be_canonical_uuids(self):
         with self.assertRaisesRegex(RuntimeError, "workpeg_business_and_hotel_binding_invalid"):
             self.valid(business_id="browser-supplied").validate()
