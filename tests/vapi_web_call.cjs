@@ -296,6 +296,32 @@ test('microphone denial is sanitized and returns to the typed fallback', async (
   assert.equal(h.elements['call-remi'].hidden, false);
 });
 
+test('call-start-failed exposes an allowlisted stage and HTTP status, never provider details', async () => {
+  const h = harness();
+  h.elements['call-remi'].emit('click'); await tick();
+  h.clientRef.value.emit('call-start-failed', {
+    stage: 'web-call-creation',
+    error: 'Request failed with status code 403. authorization=private-value',
+    errorStack: 'private stack and request body',
+    context: { callId: 'private-call-id' },
+  });
+  const status = h.elements['remi-call-status'].textContent;
+  assert.match(status, /could not be authorized/);
+  assert.match(status, /Reference: VAPI_WEB_CALL_HTTP_403/);
+  assert.doesNotMatch(status, /private-value|private stack|request body|private-call-id|status code 403/);
+  assert.equal(h.elements['remi-orb'].state, 'idle');
+});
+
+test('rejected start promises show a safe diagnostic reference and preserve typed fallback', async () => {
+  const h = harness({ startError: Object.assign(new Error('provider token=private-value'), { status: 429 }) });
+  h.elements['call-remi'].emit('click'); await tick(); await tick();
+  const status = h.elements['remi-call-status'].textContent;
+  assert.match(status, /Reference: VAPI_CALL_START_HTTP_429/);
+  assert.doesNotMatch(status, /private-value|provider token|Error/);
+  assert.equal(h.elements['call-remi'].hidden, false);
+  assert.equal(h.elements['remi-orb'].state, 'idle');
+});
+
 test('provider errors do not reveal raw exception details', async () => {
   const h = harness();
   h.elements['call-remi'].emit('click'); await tick();

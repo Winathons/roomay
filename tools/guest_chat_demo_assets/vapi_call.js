@@ -123,15 +123,49 @@
       captions.scrollTop = captions.scrollHeight;
     }
 
+    function safeHttpStatus(error) {
+      const candidates = [error?.status, error?.statusCode, error?.response?.status,
+        error?.error?.status, error?.error?.statusCode];
+      for (const candidate of candidates) {
+        if (Number.isInteger(candidate) && candidate >= 400 && candidate <= 599) return candidate;
+      }
+      const message = typeof error === "string" ? error
+        : typeof error?.error === "string" ? error.error
+          : typeof error?.message === "string" ? error.message
+            : typeof error?.error?.message === "string" ? error.error.message : "";
+      const match = message.match(/\b(?:HTTP|status(?: code)?)\s*[:=]?\s*(4\d\d|5\d\d)\b/i);
+      return match ? Number(match[1]) : null;
+    }
+
+    function safeDiagnosticCode(error) {
+      const stages = {
+        "microphone-preflight": "MICROPHONE",
+        "web-call-creation": "WEB_CALL",
+        "daily-call-object-creation": "MEDIA_SETUP",
+        "mobile-permissions": "DEVICE_PERMISSION",
+        "daily-call-join": "MEDIA_CONNECTION",
+        "reconnect": "RECONNECT",
+      };
+      const stage = typeof error?.stage === "string" ? error.stage.toLowerCase() : "";
+      const status = safeHttpStatus(error);
+      return "VAPI_" + (stages[stage] || "CALL_START") + (status ? "_HTTP_" + status : "_FAILED");
+    }
+
+    function failureWithReference(error) {
+      return safeFailure(error) + " Reference: " + safeDiagnosticCode(error) + ".";
+    }
+
     function safeFailure(error) {
       const code = String(error?.type || error?.name || error?.code || error?.error || "").toLowerCase();
+      const status = safeHttpStatus(error);
       if (/notallowed|permission|microphone|denied/.test(code)) {
         return "Microphone access was not granted. You can use typed chat or try the call again.";
       }
-      if (error?.status === 401 || error?.status === 403) {
+      if (status === 401 || status === 403) {
         return "The voice session could not be authorized. Use typed chat or contact Reception.";
       }
-      if (/network|connection|timeout|websocket/.test(code)) {
+      if (status === 408 || status === 502 || status === 503 || status === 504
+          || /network|connection|timeout|websocket/.test(code)) {
         return "The voice connection was interrupted. Use typed chat or try again.";
       }
       return "The voice call could not start or continue. Use typed chat or try again.";
@@ -260,12 +294,12 @@
           assistantSpeaking = false;
           client = null;
           stopElapsed();
-          setState("error", safeFailure(event));
+          setState("error", failureWithReference(event));
           releaseClaim();
         });
         vapi.on("error", (error) => {
           if (client !== vapi) return;
-          const message = safeFailure(error);
+          const message = failureWithReference(error);
           if (active || busy) {
             if (active) finish(message);
             else {
@@ -312,7 +346,7 @@
         } else if (error?.status === 404) {
           setState("unavailable", "Voice calls are not configured for this local session. Typed chat remains available.");
         } else {
-          setState("error", safeFailure(error));
+          setState("error", failureWithReference(error));
         }
       }
     }
