@@ -74,7 +74,7 @@ Plain `ui serve` is a localhost compiler preview; it has no Workpeg business
 session and cannot load hotel rows. To inspect the authenticated Workpeg UI,
 open the already installed Peg in the Roomay AI business. For the SDK's local
 development origin (`--fake-cloud`), exact PowerShell setup, account/permission
-requirements and its real API/test-table behavior, follow the owner-reviewed
+requirements and its real API/test-table behavior, follow the
 [WOR-25 tester handoff](docs/wor-25-release.md). `--fake-cloud` is not a sandbox
 and is not the same as the installed Peg's data environment.
 
