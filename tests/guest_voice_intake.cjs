@@ -90,7 +90,7 @@ test('browser speech service stays off until the guest opts in', async () => {
   h.consentAllow.emit('click');
   assert.equal(h.consentDialog.hidden, true);
   assert.equal(RemoteOnly.latest.startCalls, 1);
-  assert.match(h.status.textContent, /browser’s speech service/i);
+  assert.match(h.status.textContent, /browser['’]s speech service/i);
 });
 
 test('microphone start waits for verified local en-NG dictation and a direct button gesture', async () => {
@@ -142,7 +142,7 @@ test('legacy remote-only browser with opt-in reports browser-managed processing'
   await new Promise(resolve => setImmediate(resolve));
   h.button.emit('click');
   assert.equal(LegacyRemoteRecognition.latest.startCalls, 1);
-  assert.match(h.status.textContent, /browser’s speech service/i);
+  assert.match(h.status.textContent, /browser['’]s speech service/i);
   assert.doesNotMatch(h.status.textContent, /Listening on this device/i);
   assert.equal(h.input.value, 'Please bring towels');
 });
