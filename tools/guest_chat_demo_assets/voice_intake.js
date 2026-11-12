@@ -21,6 +21,9 @@
     let busy = false;
     let remoteCheck = 0;
     let remoteChecking = false;
+    // Track the selected processing mode explicitly. Older implementations
+    // may omit processLocally even when an opted-in browser service is used.
+    let selectedMode = null;
 
     const remoteApproved = () => Boolean(remoteConsent && remoteConsent.checked);
     const updateButton = () => {
@@ -191,10 +194,11 @@
       lastError = "";
       setDraft(baseWasVoiceDraft);
       setListening(true);
-      const remoteMode = recognition.processLocally === false;
-      const modeCopy = remoteMode
+      const modeCopy = selectedMode === "browser-managed"
         ? "Listening with your browser’s speech service. Audio may be sent to its provider."
-        : "Listening on this device.";
+        : selectedMode === "on-device"
+          ? "Listening on this device."
+          : "Listening mode could not be verified. Stop and type your message instead.";
       setStatus(baseText
         ? `${modeCopy} Existing text is being kept; new recognized words will be appended.`
         : `${modeCopy} Speak, then stop or wait for recognition to finish.`);
@@ -228,7 +232,7 @@
       const messages = {
         "not-allowed": "Microphone permission was denied. Type your message instead or change the browser permission.",
         "service-not-allowed": "Speech recognition is not allowed by this browser. Type your message instead.",
-        "language-not-supported": recognition.processLocally === false
+        "language-not-supported": selectedMode === "browser-managed"
           ? "This browser speech service cannot recognize en-NG. Type your message instead."
           : "This browser does not have an en-NG on-device language pack. Roomay did not download one; type your message instead.",
         "audio-capture": "The microphone is unavailable. Check the device or type your message instead.",
@@ -238,7 +242,7 @@
       };
       lastError = messages[code] || "Voice input could not continue. Review any transcript or type your message instead.";
       if (code === "language-not-supported" || code === "service-not-allowed") {
-        if (recognition.processLocally === false) remoteAvailable = false;
+        if (selectedMode === "browser-managed") remoteAvailable = false;
         else localAvailable = false;
         available = localAvailable || (remoteApproved() && remoteAvailable);
         updateButton();
@@ -289,11 +293,23 @@
       // second recording cannot silently replace guest edits.
       baseText = input.value.trim();
       baseWasVoiceDraft = voiceDraft;
-      const remoteMode = remoteApproved() && remoteAvailable;
+      // Prefer verified local en-NG even when remote-service consent is on.
+      // Browser-managed recognition is only a fallback when local is absent.
+      const mode = localAvailable
+        ? "on-device"
+        : (remoteApproved() && remoteAvailable ? "browser-managed" : null);
+      if (!mode) {
+        setStatus("Voice input is unavailable with your current settings. Type your message instead.");
+        updateButton();
+        return;
+      }
+      selectedMode = mode;
       try {
-        if ("processLocally" in recognition) recognition.processLocally = !remoteMode;
-        if (remoteMode) {
+        if ("processLocally" in recognition) recognition.processLocally = mode === "on-device";
+        if (mode === "browser-managed") {
           setStatus("Listening with your browser’s speech service. Audio may be sent to its provider; you can stop at any time.");
+        } else {
+          setStatus("Starting verified on-device en-NG recognition…");
         }
         recognition.start();
       } catch (_error) {

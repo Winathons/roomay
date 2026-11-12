@@ -345,7 +345,10 @@ class GuestChatDemoHttpTests(unittest.TestCase):
         status, headers, voice_js = self.dispatch("/voice_intake.js")
         self.assertEqual(status, 200)
         self.assertIn("text/javascript", headers["Content-Type"])
-        self.assertIn("processLocally = !remoteMode", voice_js.decode("utf-8"))
+        voice_source = voice_js.decode("utf-8")
+        self.assertIn('const mode = localAvailable', voice_source)
+        self.assertIn('selectedMode = mode', voice_source)
+        self.assertIn('recognition.processLocally = mode === "on-device"', voice_source)
 
     def test_staff_routes_require_matching_server_session_and_show_separate_pages(self):
         status, _, _ = self.dispatch("/staff/reception")

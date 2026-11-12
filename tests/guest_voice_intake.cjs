@@ -102,7 +102,7 @@ test('microphone start waits for verified local en-NG dictation and a direct but
   assert.match(h.status.textContent, /Listening on this device/);
 });
 
-test('explicit remote consent selects browser recognition and discloses provider processing', async () => {
+test('verified local recognition remains preferred when remote consent is checked', async () => {
   const h = voiceHarness(MockRecognition);
   await h.voice.ready;
   h.remoteConsent.checked = true;
@@ -110,9 +110,65 @@ test('explicit remote consent selects browser recognition and discloses provider
   await new Promise(resolve => setImmediate(resolve));
   assert.equal(h.button.disabled, false);
   h.button.emit('click');
-  assert.equal(MockRecognition.latest.processLocally, false);
+  assert.equal(MockRecognition.latest.processLocally, true);
   assert.equal(MockRecognition.latest.startCalls, 1);
-  assert.match(h.status.textContent, /audio may be sent to its provider/i);
+  assert.match(h.status.textContent, /Listening on this device/i);
+  assert.doesNotMatch(h.status.textContent, /audio may be sent to its provider/i);
+});
+
+test('legacy remote-only browser with opt-in reports browser-managed processing', async () => {
+  class LegacyRemoteRecognition {
+    constructor() { this.startCalls = 0; LegacyRemoteRecognition.latest = this; }
+    start() { this.startCalls += 1; if (this.onstart) this.onstart(); }
+    stop() {}
+    static available(options) { return Promise.resolve(options.processLocally ? 'unavailable' : 'available'); }
+  }
+  const h = voiceHarness(LegacyRemoteRecognition);
+  await h.voice.ready;
+  assert.equal(h.button.disabled, true);
+  h.input.value = 'Please bring towels';
+  h.remoteConsent.checked = true;
+  h.remoteConsent.emit('change');
+  await new Promise(resolve => setImmediate(resolve));
+  h.button.emit('click');
+  assert.equal(LegacyRemoteRecognition.latest.startCalls, 1);
+  assert.match(h.status.textContent, /browser’s speech service/i);
+  assert.doesNotMatch(h.status.textContent, /Listening on this device/i);
+  assert.equal(h.input.value, 'Please bring towels');
+});
+
+test('remote consent unchecked or revoked never enables remote-only recognition', async () => {
+  class RemoteOnlyRecognition {
+    constructor() { this.startCalls = 0; RemoteOnlyRecognition.latest = this; }
+    start() { this.startCalls += 1; }
+    stop() {}
+    static available(options) { return Promise.resolve(options.processLocally ? 'unavailable' : 'available'); }
+  }
+  const h = voiceHarness(RemoteOnlyRecognition);
+  await h.voice.ready;
+  h.input.value = 'Keep my typed request';
+  h.button.emit('click');
+  assert.equal(RemoteOnlyRecognition.latest.startCalls, 0);
+  h.remoteConsent.checked = true;
+  h.remoteConsent.emit('change');
+  await new Promise(resolve => setImmediate(resolve));
+  h.remoteConsent.checked = false;
+  h.remoteConsent.emit('change');
+  h.button.emit('click');
+  assert.equal(RemoteOnlyRecognition.latest.startCalls, 0);
+  assert.equal(h.input.value, 'Keep my typed request');
+  assert.match(h.status.textContent, /browser speech service is off/i);
+});
+
+test('microphone capture failure preserves the typed message', async () => {
+  const h = voiceHarness(MockRecognition);
+  h.input.value = 'My existing typed request';
+  await h.voice.ready;
+  h.button.emit('click');
+  MockRecognition.latest.onerror({ error: 'audio-capture' });
+  MockRecognition.latest.onend();
+  assert.equal(h.input.value, 'My existing typed request');
+  assert.match(h.status.textContent, /microphone is unavailable/i);
 });
 
 test('microphone stays disabled until the opted-in remote availability check completes', async () => {
@@ -132,7 +188,7 @@ test('microphone stays disabled until the opted-in remote availability check com
   await new Promise(resolve => setImmediate(resolve));
   assert.equal(h.button.disabled, false);
   h.button.emit('click');
-  assert.equal(MockRecognition.latest.processLocally, false);
+  assert.equal(MockRecognition.latest.processLocally, true, 'verified local mode wins after the remote check completes');
   MockRecognition.available = oldAvailable;
 });
 

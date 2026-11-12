@@ -18,7 +18,7 @@ class GuestVoiceIntakeBrowserTests(unittest.TestCase):
         )
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertIn(
-            "20 guest voice intake browser scenarios passed", result.stdout,
+            "23 guest voice intake browser scenarios passed", result.stdout,
         )
 
 
