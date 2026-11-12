@@ -94,7 +94,7 @@ class FrontDeskCheckInTests(TestCase):
             ({"contact_confirmed": False}, "contact_confirmation_required"),
             ({"rate_reviewed": False}, "agreed_rate_review_required"),
             ({"reviewed_by_actor_id": uid("other-staff")}, "review_actor_mismatch"),
-            ({"reservation_id": uid("future")}, "review_primary_guest_mismatch"),
+            ({"primary_guest_id": uid("Guest B")}, "review_primary_guest_mismatch"),
         ):
             with self.subTest(changes=changes), self.assertRaisesRegex(
                     ReservationRejected, reason):
