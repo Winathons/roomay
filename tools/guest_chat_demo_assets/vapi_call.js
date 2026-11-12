@@ -123,7 +123,7 @@
     }
 
     function onMessage(message) {
-      if (!message || typeof message !== "object") return;
+      if (!active || !message || typeof message !== "object") return;
       if (message.type === "assistant.speechStarted") {
         assistantSpeaking = true;
         setState("speaking", "Remi is speaking. You can interrupt at any time.");
@@ -181,7 +181,9 @@
         }
         const vapi = new sdk.Vapi(config.publicKey);
         client = vapi;
+        const isCurrentCall = () => active && client === vapi;
         vapi.on("call-start", () => {
+          if (client !== vapi || active) return;
           busy = false;
           active = true;
           microphoneMuted = false;
@@ -190,21 +192,35 @@
           const seconds = Math.min(Number(config.maxDurationSeconds) || MAX_SECONDS, MAX_SECONDS);
           timer = windowRef.setTimeout(() => finish("The 3-minute call limit was reached. The call has ended."), seconds * 1000);
         });
-        vapi.on("call-end", () => finish());
+        vapi.on("call-end", () => {
+          if (client === vapi) finish();
+        });
         vapi.on("speech-start", () => {
-          if (active) setState("listening", "Listening to you.");
+          if (!isCurrentCall()) return;
+          assistantSpeaking = true;
+          setState("speaking", "Remi is speaking. You can interrupt at any time.");
         });
         vapi.on("speech-end", () => {
-          if (active) setState("listening", "Thanks. Remi is preparing a reply.");
+          if (!isCurrentCall()) return;
+          assistantSpeaking = false;
+          setState(microphoneMuted ? "muted" : "listening", microphoneMuted
+            ? "Microphone muted. Unmute when you’re ready to talk."
+            : "Listening. Speak whenever you’re ready.");
         });
-        vapi.on("message", onMessage);
+        vapi.on("message", (message) => {
+          if (isCurrentCall()) onMessage(message);
+        });
         vapi.on("call-start-failed", (event) => {
+          if (client !== vapi) return;
           busy = false;
           active = false;
+          assistantSpeaking = false;
+          client = null;
           setState("error", safeFailure(event));
           releaseClaim();
         });
         vapi.on("error", (error) => {
+          if (client !== vapi) return;
           const message = safeFailure(error);
           if (active || busy) {
             if (active) finish(message);

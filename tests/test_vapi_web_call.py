@@ -17,7 +17,7 @@ class VapiWebCallTests(unittest.TestCase):
             cwd=ROOT, capture_output=True, text=True, timeout=30, check=False,
         )
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-        self.assertIn("9 Vapi Web call scenarios passed", result.stdout)
+        self.assertIn("11 Vapi Web call scenarios passed", result.stdout)
 
 
 if __name__ == "__main__":

@@ -190,6 +190,58 @@ test('only actual assistant output maps to speaking and every failure maps back 
   assert.match(h.elements['remi-call-status'].textContent, /Microphone access was not granted/);
 });
 
+test('remote speech events drive Remi states, honor mute, and ignore events after end', async () => {
+  const h = harness();
+  h.elements['call-remi'].emit('click'); await tick();
+  const client = h.clientRef.value;
+  client.emit('call-start');
+  client.emit('message', { type: 'speech-update', role: 'user', status: 'started' });
+  assert.equal(h.elements['remi-orb'].state, 'listening');
+  client.emit('message', { type: 'speech-update', role: 'assistant', status: 'started' });
+  assert.equal(h.elements['remi-orb'].state, 'speaking');
+  client.emit('message', { type: 'speech-update', role: 'assistant', status: 'stopped' });
+  assert.equal(h.elements['remi-orb'].state, 'listening');
+  client.emit('speech-start');
+  assert.equal(h.elements['remi-orb'].state, 'speaking');
+  assert.match(h.elements['remi-call-status'].textContent, /Remi is speaking/);
+  client.emit('speech-end');
+  assert.equal(h.elements['remi-orb'].state, 'listening');
+  assert.match(h.elements['remi-call-status'].textContent, /Listening/);
+
+  h.elements['mute-remi'].emit('click');
+  assert.equal(h.elements['remi-orb'].state, 'idle');
+  client.emit('speech-start');
+  assert.equal(h.elements['remi-orb'].state, 'speaking');
+  client.emit('speech-end');
+  assert.equal(h.elements['remi-orb'].state, 'idle');
+  assert.match(h.elements['remi-call-status'].textContent, /Microphone muted/);
+
+  h.elements['end-remi'].emit('click');
+  assert.equal(h.elements['remi-orb'].state, 'idle');
+  const endedStatus = h.elements['remi-call-status'].textContent;
+  client.emit('speech-start');
+  client.emit('speech-end');
+  client.emit('message', { type: 'assistant.speechStarted' });
+  client.emit('message', { type: 'speech-update', role: 'assistant', status: 'started' });
+  assert.equal(h.elements['remi-orb'].state, 'idle');
+  assert.equal(h.elements['remi-call-status'].textContent, endedStatus);
+});
+
+test('remote call-end returns the orb to idle and rejects subsequent speech events', async () => {
+  const h = harness();
+  h.elements['call-remi'].emit('click'); await tick();
+  const client = h.clientRef.value;
+  client.emit('call-start');
+  client.emit('speech-start');
+  assert.equal(h.elements['remi-orb'].state, 'speaking');
+  client.emit('call-end');
+  assert.equal(h.elements['remi-orb'].state, 'idle');
+  client.emit('speech-start');
+  client.emit('speech-end');
+  assert.equal(h.elements['remi-orb'].state, 'idle');
+  assert.match(h.elements['remi-call-status'].textContent, /Call ended/);
+});
+
 test('microphone denial is sanitized and returns to the typed fallback', async () => {
   const h = harness();
   h.elements['call-remi'].emit('click'); await tick();
