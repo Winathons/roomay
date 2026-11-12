@@ -97,6 +97,7 @@ class MaintenanceSafetyTests(unittest.TestCase):
         ))
 
     def test_occupied_room_can_be_blocked_but_not_auto_evicted(self):
+        self.snapshot["room_blocks"] = []  # simulate first report in Room 205
         plan = self.block(
             "205", idempotency_key="maintenance-occupied-room-1",
             start="2026-11-09", end="2026-11-15",
