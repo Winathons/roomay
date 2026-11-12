@@ -1,0 +1,19 @@
+services:
+  roomay-db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: roomay
+      POSTGRES_USER: roomay
+      POSTGRES_PASSWORD: ${ROOMAY_PG_PASSWORD:?Set ROOMAY_PG_PASSWORD in an ignored local .env file}
+    ports:
+      - "127.0.0.1:55432:5432"
+    volumes:
+      - roomay_pg_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U roomay -d roomay"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  roomay_pg_data:

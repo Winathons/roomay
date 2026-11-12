@@ -1,1 +1,4 @@
 workpeg==0.152.0
+
+# Standalone guest-service prototype and PostgreSQL test dependencies.
+-r server-requirements.txt
