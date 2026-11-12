@@ -47,7 +47,8 @@
             <div class="chat-heading-copy"><h2 id="request-heading">How can we help you?</h2><p>Describe what you need during your stay.</p></div>
             <button id="call-remi" class="call-remi-button call-remi-trigger" type="button" aria-label="Call Remi AI receptionist" aria-haspopup="dialog" aria-controls="remi-call">
               <span aria-hidden="true" class="call-remi-icon">☎</span><span id="call-remi-label">Call Remi</span>
-            </button>          </div>
+            </button>
+          </div>
           <div id="messages" class="messages" role="log" aria-live="polite" aria-relevant="additions text">
             <div class="loading-state">Loading your stay…</div>
           </div>
@@ -95,7 +96,7 @@
           </div>
           <div class="remi-orb-stage" aria-hidden="true">
             <span class="remi-orb-fallback"></span>
-            <roomay-orb id="remi-orb" state="idle" aria-hidden="true"></roomay-orb>
+            <roomay-orb id="remi-orb" state="idle" paused aria-hidden="true"></roomay-orb>
             <span class="remi-orb-connecting"></span>
           </div>
           <p id="remi-call-duration" class="remi-call-duration" role="timer" aria-label="Elapsed call time">00:00</p>
