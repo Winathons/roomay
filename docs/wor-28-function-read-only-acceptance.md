@@ -12,17 +12,23 @@ Function submitted, or hosted invocation made.
 
 The action cannot accept actor, business, Peg, or token claims in its payload.
 It accepts only `{}` and derives context exclusively from the Function
-envelope. A successful response is:
+envelope. A successful read-only inventory response is:
 
 ```json
 {
-  "authorization": "authorized",
+  "token_authorization": "accepted",
   "inventory": "complete",
   "peg_scope": "match",
   "business_scope": "match",
-  "actor_presence": "verified"
+  "actor_presence": "unverified"
 }
 ```
+
+`token_authorization=accepted` means Workpeg accepted the platform-minted
+Function token for the metadata reads. It does **not** establish a Roomay staff
+identity or department role. `actor_presence` is reported separately and
+remains `unverified` when Workpeg omits `context.staff.email`. The read-only
+action never manufactures actor identity or an actor-bound write attestation.
 
 Failure results contain the same five fields with `denied` or `unverified`,
 `incomplete`, and where locally known `mismatch`. No email, business UUID,
@@ -31,14 +37,18 @@ table UUID, response body, row, token, or error string is returned.
 ## Workpeg invocation and authorization contract
 
 The current official [Functions documentation](https://developers.workpeg.com/docs/latest/functions/)
-defines `main(context, payload)`. A platform invocation supplies `context`;
-for a manifest action it includes the business, a per-invocation token, and
-staff context. The token acts for the person who caused the call, is valid for
-15 minutes, and is the Function's credential for Tables access. Workpeg's
-Tables API authenticates it and enforces that person's table permissions
-within that business and Peg. `WORKPEG_PK` is for registry/CDN submission and
-the development listener; it is not a Tables API credential and is never
-used by this Function.
+defines `main(context, payload)` and warns that context fields differ by
+invocation path. The Workpeg 0.162.0 SDK's manifest-action envelope contains
+`action`, `table`, `phase`, `business`, and a per-invocation `token`; its action
+envelope builder does not include `staff`. This handler therefore treats staff
+identity as optional for this read-only diagnostic. If `staff.email` is
+present in a real platform context, the result reports only its presence; if
+absent, a successful scoped metadata read is reported with
+`actor_presence=unverified`. This does not establish a Roomay role. Workpeg
+authenticates the per-invocation token and enforces its Peg/business/person
+permissions. `WORKPEG_PK` is only for the development listener and
+registry/CDN submission; it is not a Tables credential and is never used by
+this Function.
 
 The [Manifest action contract](https://developers.workpeg.com/docs/latest/manifest/)
 has a phase form: `via: {"table": "<alias>", "phase": "post_save_hook"}`.
@@ -53,10 +63,11 @@ needed here. See the official [Save hooks documentation](https://developers.work
 The Function sends exactly two HTTPS `GET` requests using the platform token,
 to the fixed Workpeg Tables API host and the platform-provided business UUID,
 with the two canonical namespaces. It does not send a caller-supplied
-`Peg-Namespace` header. Both authorized reads are required before it reports
-scope matches. Then it uses the existing Function-scope attestation and
-`resolve_tables_for_write()` only as a schema/permission validator; no writer
-is constructed or called.
+`Peg-Namespace` header. Both reads must succeed before the handler reports the
+token as accepted and validates canonical schemas with pure `resolve_tables()`.
+It deliberately does not create a `FunctionPegScopeAttestation`: that proof
+binds an actor and remains reserved for future writer readiness. No writer is
+constructed or called.
 
 Important result semantics:
 
@@ -69,15 +80,12 @@ Important result semantics:
   scoped to **Roomay AI** before invoking. The official Function config
   reference does not document custom environment injection, and the exact
   Roomay AI business UUID is intentionally not embedded here.
-* `actor_presence=verified` means Workpeg provided staff context and accepted
-  both reads under the invocation token. The identity is not returned. This
-  does not create a Roomay department-role mapping or establish that a
-  Housekeeping/Member actor is authorized.
-* The inventory fingerprint binds the two returned lists to the current
-  in-process attestation. It is reusable for the same inventory and is **not**
-  single-use replay protection. Each invocation constructs a fresh client;
-  the proof is not returned or persisted. This read-only check needs no
-  replay protection and makes no such claim for future writes.
+* `actor_presence=verified` means the platform context included a non-empty
+  staff email. It does not establish Roomay department membership or authorize
+  Housekeeping/Member actions. When absent or malformed, it is `unverified`;
+  the read-only result makes no actor claim.
+* No Function-scope write attestation is created in this read-only path. No
+  replay or write-readiness claim is made.
 
 The Function Docker build context is `function/`, so repository-level
 `domain/` is not visible to `COPY`. The image includes the small pure-domain
@@ -111,7 +119,7 @@ installations.
     "properties": {},
     "additionalProperties": false
   },
-  "returns": "Sanitized authorization, canonical inventory completeness, Peg/business scope match, and actor presence."
+  "returns": "Sanitized token acceptance, canonical inventory completeness, Peg/business scope match, and actor presence."
 }
 ```
 
@@ -121,22 +129,33 @@ read by the Function only after Workpeg has authorized the alias action; the
 per-call token's table permissions still apply to each GET. All table
 permissions remain `700`.
 
-## Installed SDK limitation
+## Runner compatibility
 
-The inspected local environment is pinned to Workpeg SDK **0.152.0**. Its CLI
-offers `workpeg function new/build/run/runtime/submit`; it does not expose
-the current docs' `workpeg function test` or `workpeg project serve`
-development-listener commands. A manually supplied envelope to `function
-runtime` is offline simulation and cannot prove Workpeg minted a token.
+The repository's UI dependency remains pinned to Workpeg SDK **0.152.0**.
+The disposable compatibility environment installed Workpeg **0.162.0** and
+confirmed that `workpeg project serve --fake-cloud` and `workpeg function
+test` are available. The 0.162.0 runner requires an invoke-key-aware Function
+image at 0.162.0 or newer; the previous 0.157.0 image is too old. The
+Function Dockerfile now uses `pegfn-base:0.162.0`; this does not alter the UI
+SDK pin. Docker Desktop was unavailable during local verification, so a
+container build/smoke still requires CI or a machine with a running Docker
+engine.
 
 Current official docs describe `workpeg project serve <peg> --fake-cloud` as
 the local development Function runner. Its listener registers with Workpeg's
 API using the developer's private `WORKPEG_PK`; Workpeg supplies a different,
 per-call Function token to the handler. The dev listener may be unavailable
-to the business/API (the documented response can be `404`). The installed
-0.152.0 CLI cannot run that flow. The Function image is based on
-`pegfn-base:0.157.0`; its compatibility with the UI SDK pin and a future
-development runner has not been live-tested.
+to the business/API (the documented response can be `404`). The Function
+image now uses `pegfn-base:0.162.0`, which satisfies this runner's
+invoke-key requirement. This compatibility was inspected locally but not
+exercised in a Docker container because Docker Desktop was unavailable.
+
+The 0.162.0 `function test --envelope action` fixture uses
+`phase=pre_save`/`post_save` and placeholder token `test-token`; it cannot
+prove a real Function context or authorization. The registered manifest
+action uses `phase=post_save_hook`, so the CLI fixture is not a positive test
+of the real action path. The unit suite tests the handler with a mocked Tables
+port instead.
 
 The current official Functions documentation also says a `dev` Function
 version is not installed or run on Workpeg. Only a `main:<version>` release
@@ -153,12 +172,10 @@ Function activation required by Workpeg; and (d) one read-only invocation.
 No hook change, table permission change, record write, Function release, or
 table-row inspection is part of this procedure.
 
-1. Ask Workpeg to confirm the current supported SDK/CLI command for a local
-   manifest phase action and that the dev Function listener is enabled for
-   Roomay. The installed CLI does not have the current documented command, so
-   first upgrade only the owner's isolated local tooling to a reviewed
-   compatible version. Do not change the repository UI pin without separate
-   review.
+1. Confirm the approved Peg is installed for testing in Roomay AI. For a
+   future listener run, use an isolated Workpeg 0.162.0-or-newer environment
+   and the Function base at the same version or newer. Keep the repository's
+   UI SDK pin at 0.152.0.
 2. Ask whether a local development manifest action can be used without
    uploading `manifest.json` to the Peg CDN. If it cannot, stop for separate
    release/security approval; do not upload it as part of this test.
@@ -170,16 +187,18 @@ table-row inspection is part of this procedure.
    or share it. It authenticates listener registration only; the Function
    must use `context.token` for the Tables GETs. Never put a token in a
    command argument or Function payload.
-5. From a disposable clean project copy with only the action above added, use
-   the exact command confirmed by that SDK's `--help` and Workpeg support.
-   Current docs name `workpeg project serve <peg> --fake-cloud`, but this is
-   **not available in the installed CLI**. `--fake-cloud` contacts real
-   Workpeg services; it is not a cloud mock. Do not start it until the owner
-   approves the listener and the selected business.
+5. Do not proceed until the manifest action's visibility scope is approved.
+   If approved, start the listener from a disposable clean project copy using
+   `workpeg project serve <peg> --fake-cloud --with docker --concurrency 1`.
+   Supply `WORKPEG_PK` through the owner's private process environment only;
+   never place it in shell history or command arguments. `--fake-cloud`
+   contacts real Workpeg services; it is not a cloud mock. This procedure has
+   not been run.
 6. Invoke the exact action with empty arguments `{}` from a Workpeg AI turn.
-   Do not invoke a table operation and do not save a row. Accept only the five
-   sanitized flags. The owner separately verifies that the active business
-   was Roomay AI.
+   Do not invoke a table operation and do not save a row. Record the sanitized
+   token-acceptance, inventory, scope and actor-presence flags separately. The
+   owner verifies that the active business was Roomay AI. An unverified actor
+   field does not satisfy actor or staff-role verification.
 7. On denial, unverified scope, incomplete inventory, timeout or malformed
    result, stop. Do not retry automatically, fall back to a developer token
    for Tables, inspect rows, change permissions, or repair the pending audit.
@@ -190,9 +209,10 @@ table-row inspection is part of this procedure.
 ## What acceptance proves and leaves open
 
 A passing invocation would prove that one platform-invoked Function context
-provided a token Workpeg accepted for metadata GETs in its current Peg,
-business and actor permission scope, and that the visible inventory matched
-the nine canonical schemas/permissions. It would not prove a Roomay staff
+provided a token Workpeg accepted for metadata GETs in its current Peg and
+invocation business scope, and that the visible inventory matched the nine
+canonical schemas/permissions. Actor presence is verified only if the
+platform supplies `context.staff.email`; it would not prove a Roomay staff
 department mapping, Member or Housekeeping access, row-level privacy for
 other actors, request write permission, request/audit atomicity, conditional
 updates, global serialization, duplicate-write protection, or persistence.

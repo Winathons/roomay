@@ -44,7 +44,7 @@ class FunctionTablesError(ValueError):
 class _Invocation:
     business_id: str
     peg_namespace: str
-    staff_email: str = field(repr=False)
+    staff_email: str | None = field(repr=False)
     token: str = field(repr=False, compare=False)
 
 
@@ -63,8 +63,10 @@ class WorkpegFunctionTables:
     error codes and are never retried.
     """
 
-    def __init__(self, context, *, expected_business_id, transport=None):
-        self._invocation = self._parse_context(context, expected_business_id)
+    def __init__(self, context, *, expected_business_id, transport=None,
+                 require_actor=True):
+        self._invocation = self._parse_context(
+            context, expected_business_id, require_actor=require_actor)
         self._transport = transport
         self._observed_lists = {}
 
@@ -96,7 +98,7 @@ class WorkpegFunctionTables:
         return namespace
 
     @classmethod
-    def _parse_context(cls, context, expected_business_id):
+    def _parse_context(cls, context, expected_business_id, *, require_actor):
         if not isinstance(context, dict):
             raise FunctionTablesError("function_context_missing")
         business_id = context.get("business")
@@ -107,13 +109,16 @@ class WorkpegFunctionTables:
             raise FunctionTablesError("function_business_scope_mismatch")
         if not isinstance(token, str) or not token:
             raise FunctionTablesError("function_token_missing")
-        if not isinstance(staff, dict) or not isinstance(staff.get("email"), str) or not staff["email"].strip():
+        staff_email = None
+        if isinstance(staff, dict) and isinstance(staff.get("email"), str):
+            staff_email = staff["email"].strip().casefold() or None
+        if require_actor and staff_email is None:
             raise FunctionTablesError("function_actor_missing")
         namespace = cls._token_peg_namespace(token)
         return _Invocation(
             business_id=business_id,
             peg_namespace=namespace,
-            staff_email=staff["email"].strip().casefold(),
+            staff_email=staff_email,
             token=token,
         )
 

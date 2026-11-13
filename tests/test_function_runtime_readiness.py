@@ -31,16 +31,18 @@ def load_module():
 
 
 def function_context(*, peg="roomay", business=BUSINESS, staff=ACTOR,
-                     phase="post_save_hook"):
+                     phase="post_save_hook", include_staff=True):
     claims = base64.urlsafe_b64encode(
         json.dumps({"peg_namespace": peg}).encode("ascii")
     ).decode("ascii").rstrip("=")
-    return {
+    context = {
         "business": business,
         "token": "header." + claims + ".signature",
-        "staff": {"email": staff},
         "phase": phase,
     }
+    if include_staff:
+        context["staff"] = {"email": staff}
+    return context
 
 
 def canonical_inventory():
@@ -75,11 +77,12 @@ class FunctionReadOnlyAcceptanceTests(unittest.TestCase):
     def invoke(self, *, context=None, payload=None, transport=None):
         transport = transport or FakeTransport()
 
-        def factory(platform_context, *, expected_business_id):
+        def factory(platform_context, *, expected_business_id, require_actor=True):
             return WorkpegFunctionTables(
                 platform_context,
                 expected_business_id=expected_business_id,
                 transport=transport,
+                require_actor=require_actor,
             )
 
         with patch.object(self.module, "WorkpegFunctionTables", factory):
@@ -94,7 +97,7 @@ class FunctionReadOnlyAcceptanceTests(unittest.TestCase):
                          ("context", "payload"))
         result, transport = self.invoke()
         self.assertEqual(result, {
-            "authorization": "authorized",
+            "token_authorization": "accepted",
             "inventory": "complete",
             "peg_scope": "match",
             "business_scope": "match",
@@ -123,14 +126,32 @@ class FunctionReadOnlyAcceptanceTests(unittest.TestCase):
         ):
             with self.subTest(field=field):
                 result, transport = self.invoke(context=context)
-                self.assertEqual(result["authorization"], "denied")
+                self.assertEqual(result["token_authorization"], "denied")
                 self.assertEqual(result[field], "mismatch")
                 self.assertEqual(transport.calls, [])
 
-    def test_missing_actor_and_non_action_phase_fail_closed(self):
-        result, transport = self.invoke(context=function_context(staff=""))
+    def test_missing_action_actor_keeps_identity_unverified_without_blocking_read(self):
+        result, transport = self.invoke(
+            context=function_context(include_staff=False))
+        self.assertEqual(result, {
+            "token_authorization": "accepted",
+            "inventory": "complete",
+            "peg_scope": "match",
+            "business_scope": "match",
+            "actor_presence": "unverified",
+        })
+        self.assertEqual(len(transport.calls), 2)
+        self.assertTrue(all(call[0] == "GET" for call in transport.calls))
+
+    def test_malformed_optional_actor_stays_unverified(self):
+        context = function_context()
+        context["staff"] = {"email": "  "}
+        result, transport = self.invoke(context=context)
+        self.assertEqual(result["token_authorization"], "accepted")
         self.assertEqual(result["actor_presence"], "unverified")
-        self.assertEqual(transport.calls, [])
+        self.assertEqual(len(transport.calls), 2)
+
+    def test_non_action_phase_fails_before_reads(self):
         for phase in ("pre_save_hook", None):
             with self.subTest(phase=phase):
                 with self.assertRaisesRegex(
@@ -141,28 +162,28 @@ class FunctionReadOnlyAcceptanceTests(unittest.TestCase):
         for status in (401, 403, 404):
             with self.subTest(status=status):
                 result, transport = self.invoke(transport=FakeTransport(status=status))
-                self.assertNotEqual(result["authorization"], "authorized")
+                self.assertNotEqual(result["token_authorization"], "accepted")
                 self.assertEqual(result["inventory"], "incomplete")
                 self.assertNotIn(str(status), json.dumps(result))
                 self.assertEqual(len(transport.calls), 1)
         result, _transport = self.invoke(
             transport=FakeTransport(error=RuntimeError(PRIVATE_MARKER)))
-        self.assertNotEqual(result["authorization"], "authorized")
+        self.assertNotEqual(result["token_authorization"], "accepted")
         self.assertNotIn(PRIVATE_MARKER, json.dumps(result))
 
     def test_unexpected_validation_exception_is_sanitized_after_reads(self):
         transport = FakeTransport()
-        def factory(context, *, expected_business_id):
+        def factory(context, *, expected_business_id, require_actor=True):
             return WorkpegFunctionTables(
                 context, expected_business_id=expected_business_id,
-                transport=transport)
+                transport=transport, require_actor=require_actor)
 
         with patch.object(self.module, "WorkpegFunctionTables", factory):
-            with patch.object(self.module, "resolve_tables_for_write",
+            with patch.object(self.module, "resolve_tables",
                               side_effect=RuntimeError(PRIVATE_MARKER)):
                 result = self.module.main(function_context(), {})
         self.assertEqual(result, {
-            "authorization": "authorized", "inventory": "incomplete",
+            "token_authorization": "accepted", "inventory": "incomplete",
             "peg_scope": "match", "business_scope": "match",
             "actor_presence": "verified",
         })
@@ -184,7 +205,7 @@ class FunctionReadOnlyAcceptanceTests(unittest.TestCase):
                 result, transport = self.invoke(
                     transport=FakeTransport(inventory=value))
                 self.assertEqual(result, {
-                    "authorization": "authorized",
+                    "token_authorization": "accepted",
                     "inventory": "incomplete",
                     "peg_scope": "match",
                     "business_scope": "match",
@@ -194,7 +215,7 @@ class FunctionReadOnlyAcceptanceTests(unittest.TestCase):
 
     def test_no_row_reads_or_mutations_are_possible_in_this_path(self):
         result, transport = self.invoke()
-        self.assertEqual(result["authorization"], "authorized")
+        self.assertEqual(result["token_authorization"], "accepted")
         self.assertEqual(len(transport.calls), 2)
         self.assertTrue(all(method == "GET" and body is None
                             for method, _url, _headers, body, _timeout in transport.calls))
@@ -202,7 +223,7 @@ class FunctionReadOnlyAcceptanceTests(unittest.TestCase):
     def test_function_image_packages_checked_canonical_domain_subset(self):
         dockerfile = DOCKERFILE.read_text(encoding="utf-8")
         self.assertIn(
-            "FROM registry.gitlab.com/workpeg/workpeg-sdk/pegfn-base:0.157.0",
+            "FROM registry.gitlab.com/workpeg/workpeg-sdk/pegfn-base:0.162.0",
             dockerfile,
         )
         self.assertIn("COPY app /app/app", dockerfile)
