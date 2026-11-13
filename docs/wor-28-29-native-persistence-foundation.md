@@ -22,21 +22,33 @@ Read compatibility and write readiness are separate:
 * `resolve_tables()` continues validating the nine canonical schemas and
   `700` permissions without requiring a `peg` value. This preserves existing
   authenticated read-only behavior when ownership is unavailable.
-* `resolve_tables_for_write()` additionally requires every canonical table to
-  return the exact registered Peg identifier, including its native type. It
-  rejects missing, null, malformed, different, and type-coerced ownership.
-  The Peg identifier must be provided by trusted registration/configuration;
-  namespace `roomay` alone is not proof of ownership.
-
-There is a Workpeg documentation discrepancy to resolve before hosted writer
-readiness. The [official Tables reference](https://developers.workpeg.com/docs/latest/tables/)
-describes table `peg` as `number | null` and says the `Peg-Namespace` header
-scopes table listing to the calling Peg. Roomay's earlier owner-observed
-development metadata reported the approved Peg UUID as a string. The code
-accepts either a canonical UUID string or positive integer as trusted config,
-but requires the returned table value to match the configured value exactly;
-it never converts a string to a number or vice versa. No live metadata was
-queried for this PR.
+* `resolve_tables_for_write()` accepts either (a) the prior explicit,
+  trusted registered Peg identifier and exact type/value comparison for each
+  returned `table.peg`, or (b) an in-process attestation issued only by
+  `WorkpegFunctionTables` after authenticated reads of both canonical
+  namespaces. The second path uses Workpeg's documented Function-token scope
+  instead of requiring a separate local slug-to-internal-ID lookup.
+* Peg UI `workpeg.get_tables()` automatically sends `Peg-Namespace`. That
+  header is a client-supplied list filter; this change does **not** treat it
+  as ownership proof. The alternative is specifically the server-side
+  Function invocation token: current Workpeg docs say it is minted for one
+  call, names Peg namespace/business/person, expires after 15 minutes, and
+  the Tables API restricts it to that installed Peg's tables and the invoking
+  person's permissions. The adapter sends it only in HTTPS `Authorization:
+  Bearer` requests to the fixed Tables API host; it never uses `WORKPEG_PK`.
+* The attestation is limited to the exact two fetched table lists, expected
+  business, `roomay` namespace and actor resolved by the trusted caller. It
+  supplements the unchanged full schema, namespace, permission, native UUID
+  and row checks. A browser header, local config string, untrusted context
+  dict, caller-constructed proof, missing schema metadata or API denial
+  cannot issue an attestation. Explicit typed UUID validation remains
+  available.
+* This is an offline adapter implementation, not evidence that a Function has
+  been published, installed, invoked, or has read the hosted tables. The
+  current `function/app/main.py` remains inactive; the writer remains
+  disabled and unwired. The observed internal UUID is therefore no longer a
+  required config input **for a future Function-token path**; explicit-ID
+  callers still need an exact trusted ID.
 
 ## Coordinator gates and operation sequence
 
@@ -44,7 +56,9 @@ The future caller must provide all of these from trusted server-side sources:
 
 1. Authenticated active Workpeg business membership and exact business binding.
 2. A verified actor mapping and authorization for this exact request operation.
-3. A verified registered Peg identity and exact ownership for all nine schemas.
+3. Either an exact trusted registered Peg ID matching all nine metadata
+   values, or a fresh Workpeg Function-token-scoped inventory attestation for
+   the expected business/person/Peg and all nine canonical schemas.
 4. Verified write permission for both `Roomay Service Requests` and
    `Roomay Service Request Audit` for that actor.
 5. A serialization lease that is active, matches the business/request, covers
@@ -100,11 +114,13 @@ therefore refuses to operate without a verified all-writers serialization
 lease. A Python process-local lock would not meet that contract.
 
 Table permission `700` grants the table owner read/write/share and grants no
-business-member or guest access. A trusted server-side route that can use an
-owner-held session without exposing raw private rows to a browser is not
-implemented here. Current `StaffActionGateway` identity and readers are
-injected seams, not Workpeg authentication integrations. The coordinator is
-not connected to `WORKPEG_PK` or an unverified external Tables credential.
+business-member or guest access. A Function token does not elevate the
+invoking person: Workpeg says the Tables API acts as that person and enforces
+their table permissions. `StaffActionGateway` identity, actor-to-department
+roster, and the writer's trusted context/serialization ports remain
+unimplemented integrations, not guarantees established by this adapter. The
+coordinator is not connected to `WORKPEG_PK` or an unverified external Tables
+credential.
 
 ## WOR-28 / WOR-29 acceptance status
 
@@ -112,10 +128,14 @@ not connected to `WORKPEG_PK` or an unverified external Tables credential.
 
 Previously reported owner UI read success and Member UI fail-closed behavior
 remain useful evidence for those two UI sessions. They do not establish direct
-row denial, server-side actor identity, Peg ownership for every current table,
-or a backend write path. This PR validates ownership offline and deliberately
-does not repeat live reads. Direct table/row denial remains NOT VERIFIED unless
-Workpeg provides an already-authorized supported path to test it.
+row denial, server-side actor identity, or a backend write path. The owner has
+now reported current metadata for all nine tables with expected
+namespace/schema/permission and the same UUID-formatted `peg` value; this
+change does not independently query or alter hosted records. Official Function
+token scoping provides a documented alternative for a future Function to
+establish Peg ownership through successful server-authorized API reads. That
+adapter is tested only with mocks. Real Function-token reads, actor/business
+binding, and direct denial outcomes remain NOT VERIFIED.
 
 ### WOR-29 — OFFLINE FOUNDATION IMPLEMENTED / HOSTED ACCEPTANCE BLOCKED
 
@@ -123,7 +143,9 @@ The canonical nine schemas, complete pagination, snapshot validation,
 request/audit reconciliation, and full-row update rules are reused. The new
 ownership gate and disabled writer coordinator are covered by mocks. Hosted
 write permission, actor authorization, a global serialization guarantee, and
-post-write reload evidence are not established. The previously reported
+post-write reload evidence are not established. Explicit UUID comparison and
+Function-token-scoped ownership are both represented offline. Neither
+establishes hosted write permissions or serialization. The previously reported
 pending event is not read, retried, or modified by this change; its current
 state remains unverified here.
 
@@ -137,11 +159,14 @@ the previously observed pending event.
 1. In the installed approved Roomay Peg, sign in as the owner in the isolated
    Roomay AI development business. Record the business ID and current Peg
    registration through the dashboard. Do not copy credentials into logs.
-2. From the supported authenticated Reception read path, refresh both table
-   namespaces. Require exactly nine canonical tables, all exact schema and
-   `700` permission, and exact typed `peg` agreement with the approved Peg.
-   If `peg` is absent or the observed UUID/string disagrees with the documented
-   type, stop and request Workpeg clarification.
+2. For an explicit-ID adapter, require exact schema, `700` permission, and
+   exact typed `peg` agreement. For the Function-token adapter, invoke only
+   inside an actual Workpeg Function call; require its platform-minted
+   `context.token` and `context.business`, then GET both namespaces with that
+   bearer token and no user-selected `Peg-Namespace` header. Require exact
+   canonical schemas and fail closed on 401/403/404, empty or incomplete
+   inventory, or mismatch. Do not run this path until a Function is separately
+   reviewed, installed, and authorized.
 3. Read every row page from all nine tables. Validate the complete hotel
    snapshot and current request/audit history. Do not infer that an unreadable
    table is empty. Preserve all existing rows and the pending event.
@@ -184,16 +209,17 @@ the previously observed pending event.
    claim success. Perform read-only reconciliation and leave ambiguous state
    for owner review.
 
-## Single Workpeg clarification to unblock the hosted path
+## Remaining Workpeg question before any hosted write
 
-Please confirm the authoritative type/source of `tables[].peg` for an
-installed Peg and whether Workpeg provides a supported server-side execution
-and authorization mechanism that can both (a) bind the authenticated caller to
-the active business and enforce per-actor/department permissions without
-exposing private table rows, and (b) serialize all writes for the same request
-and idempotency key or conditionally/atomically commit the request plus audit
-rows. If the answer is no, specify the supported mechanism and guarantees that
-replace these requirements.
+Current official docs establish a server-side Function token bound to its
+invoking person, business and Peg, and say the Tables API enforces that person's
+table permissions. They do not document transactions or conditional
+compare-and-swap for row updates. Please confirm whether Workpeg provides a
+supported transaction, conditional update, uniqueness/idempotency constraint,
+or platform-wide serialization primitive that coordinates every writer for
+one request and its audit event. If none exists, identify the supported way to
+ensure a single writer across Function instances and retries. Until answered
+and verified, the writer must stay disabled.
 
 ## Resumption guidance for Aliameen
 

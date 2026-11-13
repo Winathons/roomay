@@ -27,8 +27,10 @@ from .workpeg_adapter import (
     decode_rows,
     full_row_update,
     normalize_snapshot,
+    resolve_tables_for_function_scope,
     resolve_tables_for_write,
 )
+from .workpeg_function_tables import FunctionTablesError, WorkpegFunctionTables
 
 
 class NativeWriterError(ValueError):
@@ -151,8 +153,9 @@ class NativeRequestWriter:
                 or not context["actor_id"].strip()):
             raise NativeWriterError("trusted_context_invalid")
         peg_id = context["registered_peg_id"]
-        if not ((type(peg_id) is str and _uuid(peg_id))
-                or (type(peg_id) is int and peg_id > 0)):
+        if (peg_id is not None and not (
+                (type(peg_id) is str and _uuid(peg_id))
+                or (type(peg_id) is int and peg_id > 0))):
             raise NativeWriterError("registered_peg_unverified")
 
     @staticmethod
@@ -161,7 +164,7 @@ class NativeRequestWriter:
             raise NativeWriterError("invalid_operation_reference")
         return command["request_id"]
 
-    def _tables(self, registered_peg_id):
+    def _tables(self, registered_peg_id, business_id, actor_id):
         grouped = {}
         for namespace in ("roomay_hotel_v1", "roomay_requests_v1"):
             result = self.tables.get_tables(namespace)
@@ -169,13 +172,26 @@ class NativeRequestWriter:
                 raise NativeWriterError("table_inventory_incomplete")
             grouped[namespace] = result
         try:
-            resolved = resolve_tables_for_write(grouped, registered_peg_id)
+            if registered_peg_id is not None:
+                resolved = resolve_tables_for_write(grouped, registered_peg_id)
+            else:
+                if not isinstance(self.tables, WorkpegFunctionTables):
+                    raise NativeWriterError("registered_peg_unverified")
+                attestation = self.tables.attest_inventory(
+                    grouped, business_id=business_id, actor_id=actor_id)
+                resolved = resolve_tables_for_function_scope(
+                    grouped, attestation,
+                    business_id=business_id,
+                    actor_id=actor_id,
+                    peg_namespace="roomay")
         except AdapterError as error:
+            raise NativeWriterError(error.code) from None
+        except FunctionTablesError as error:
             raise NativeWriterError(error.code) from None
         return resolved
 
-    def _read_snapshot(self, business_id, registered_peg_id, request_id):
-        table_ids = self._tables(registered_peg_id)
+    def _read_snapshot(self, business_id, registered_peg_id, request_id, actor_id):
+        table_ids = self._tables(registered_peg_id, business_id, actor_id)
         rows_by_table, raw_by_entity = {}, {}
         contracts = contract_by_key()
         for key in contracts:
@@ -237,7 +253,8 @@ class NativeRequestWriter:
             if prepared_persisted is not True:
                 raise NativeWriterError("duplicate_outcome_uncertain")
             _, _, raw_by_entity, snapshot = self._read_snapshot(
-                context["business_id"], context["registered_peg_id"], request_id)
+                context["business_id"], context["registered_peg_id"], request_id,
+                context["actor_id"])
             pair = raw_by_entity["service_requests"].get(request_id)
             if pair is None:
                 raise NativeWriterError("duplicate_outcome_uncertain")
@@ -259,7 +276,8 @@ class NativeRequestWriter:
         last_step = None
         try:
             table_ids, rows_by_table, raw_by_entity, snapshot = self._read_snapshot(
-                context["business_id"], context["registered_peg_id"], request_id)
+                context["business_id"], context["registered_peg_id"], request_id,
+                context["actor_id"])
             self._check_duplicate_keys(snapshot, plan, request_id)
             for _ in range(4):
                 request_pair = raw_by_entity["service_requests"].get(request_id)
@@ -334,7 +352,8 @@ class NativeRequestWriter:
                 # Every successful helper response is followed by an independent
                 # complete read. The response body is never treated as proof.
                 table_ids, rows_by_table, raw_by_entity, snapshot = self._read_snapshot(
-                    context["business_id"], context["registered_peg_id"], request_id)
+                    context["business_id"], context["registered_peg_id"], request_id,
+                    context["actor_id"])
 
             return self._result("uncertain", "reconciliation_step_limit",
                                 request_id=request_id,
@@ -354,7 +373,8 @@ class NativeRequestWriter:
     def _reconcile_after_uncertain(self, context, plan, request_id, reason):
         try:
             _, _, raw_by_entity, snapshot = self._read_snapshot(
-                context["business_id"], context["registered_peg_id"], request_id)
+                context["business_id"], context["registered_peg_id"], request_id,
+                context["actor_id"])
             request_pair = raw_by_entity["service_requests"].get(request_id)
             request = request_pair[0] if request_pair else None
             events = [event for event in snapshot["service_request_audit"]
