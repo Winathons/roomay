@@ -6,7 +6,6 @@ use ``--check`` in tests/CI to detect drift from the canonical source.
 """
 import argparse
 from pathlib import Path
-import shutil
 import sys
 
 
@@ -34,11 +33,21 @@ def main(argv=None):
     for name in MODULES:
         original = source / name
         vendored = target / name
+        # Git may check the canonical sources out with CRLF on Windows while
+        # the image build and CI use LF. Compare normalized UTF-8 text and
+        # always write LF so the mirrored package is reproducible cross-OS.
+        original_text = original.read_text(encoding="utf-8")
+        normalized = original_text.replace("\r\n", "\n").replace("\r", "\n")
         if args.check:
-            if not vendored.is_file() or vendored.read_bytes() != original.read_bytes():
+            if not vendored.is_file():
+                mismatches.append(name)
+                continue
+            vendored_text = vendored.read_text(encoding="utf-8")
+            vendored_normalized = vendored_text.replace("\r\n", "\n").replace("\r", "\n")
+            if vendored_normalized != normalized:
                 mismatches.append(name)
         else:
-            shutil.copyfile(original, vendored)
+            vendored.write_bytes(normalized.encode("utf-8"))
     if mismatches:
         print("Function domain mirror is stale: " + ", ".join(mismatches), file=sys.stderr)
         return 1
