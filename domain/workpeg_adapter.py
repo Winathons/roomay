@@ -5,7 +5,7 @@ business rules continue to live in :mod:`domain.hotel`,
 :mod:`domain.reservation_commands`, and :mod:`domain.service_requests`.
 """
 from copy import deepcopy
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from uuid import UUID
 
 from .hotel import validate_snapshot
@@ -32,6 +32,38 @@ class RowReference:
     entity_id: str
     row_id: int
     fingerprint: str
+
+
+@dataclass(frozen=True)
+class FunctionPegScopeAttestation:
+    """Evidence from a successful Function-token-scoped Workpeg inventory.
+
+    This is an integration handoff, not an authentication primitive. Only a
+    server-side Function table client should construct it after Workpeg has
+    accepted its platform-minted invocation token for both namespaces. Never
+    build one from a browser header, manifest text, or request payload.
+    """
+
+    business_id: str
+    peg_namespace: str
+    actor_id: str
+    inventory_fingerprint: str
+    _issuer: object = field(repr=False, compare=False)
+
+
+_FUNCTION_SCOPE_ISSUER = object()
+
+
+def _issue_function_peg_scope_attestation(*, business_id, peg_namespace,
+                                           actor_id, inventory_fingerprint):
+    """Issue an in-process proof for the Function Tables adapter only."""
+    return FunctionPegScopeAttestation(
+        business_id=business_id,
+        peg_namespace=peg_namespace,
+        actor_id=actor_id,
+        inventory_fingerprint=inventory_fingerprint,
+        _issuer=_FUNCTION_SCOPE_ISSUER,
+    )
 
 
 HOTEL_ALIASES = {
@@ -199,12 +231,65 @@ def validate_table_ownership(table, registered_peg_id):
     return actual
 
 
-def resolve_tables_for_write(tables_by_namespace, registered_peg_id):
-    """Resolve canonical tables and prove exact Peg ownership for each.
+def _table_inventory_fingerprint(tables_by_namespace):
+    """Stable, non-secret digest used to bind scope evidence to one inventory."""
+    import hashlib
+    import json
+
+    try:
+        encoded = json.dumps(tables_by_namespace, sort_keys=True, separators=(",", ":"))
+    except (TypeError, ValueError):
+        raise AdapterError("malformed_table_lists") from None
+    return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
+
+
+def resolve_tables_for_function_scope(
+        tables_by_namespace, attestation, *, business_id, actor_id,
+        peg_namespace="roomay"):
+    """Resolve tables proven Peg-owned by Workpeg's Function-token jail.
+
+    The Function client must have fetched both namespace lists with the
+    platform-minted ``context.token`` and ``context.business``. The Tables API
+    validates that token and only returns tables belonging to its Peg and
+    caller-readable in that business. This path does not trust the UI's
+    Peg-Namespace header, local namespace text, or an unbound table list.
+
+    Schema, namespace, permission and table UUID checks remain identical to
+    the explicit-ID path. Only the undocumented internal ``table.peg`` value
+    comparison is replaced by this server-enforced scope proof.
+    """
+    if (not isinstance(attestation, FunctionPegScopeAttestation)
+            or attestation._issuer is not _FUNCTION_SCOPE_ISSUER):
+        raise AdapterError("peg_scope_untrusted")
+    _canonical_uuid(business_id, "invalid_business_id")
+    if (attestation.business_id != business_id
+            or attestation.peg_namespace != peg_namespace
+            or not isinstance(attestation.actor_id, str)
+            or not attestation.actor_id.strip()
+            or attestation.actor_id != actor_id):
+        raise AdapterError("peg_scope_mismatch")
+    if attestation.inventory_fingerprint != _table_inventory_fingerprint(tables_by_namespace):
+        raise AdapterError("peg_scope_inventory_mismatch")
+    return resolve_tables(tables_by_namespace)
+
+
+def resolve_tables_for_write(tables_by_namespace, registered_peg_id=None, *,
+                             scope_attestation=None, business_id=None,
+                             actor_id=None, peg_namespace="roomay"):
+    """Resolve canonical tables using exact ID or Function-token scope proof.
 
     This does not prove actor authorization, row permission, or serialization;
     those are separate mandatory gates in the writer coordinator.
     """
+    if scope_attestation is not None:
+        if registered_peg_id is not None:
+            raise AdapterError("ambiguous_peg_ownership_proof")
+        return resolve_tables_for_function_scope(
+            tables_by_namespace, scope_attestation,
+            business_id=business_id, actor_id=actor_id,
+            peg_namespace=peg_namespace)
+    if registered_peg_id is None:
+        raise AdapterError("registered_peg_unverified")
     resolved = resolve_tables(tables_by_namespace)
     for key, contract in contract_by_key().items():
         tables = tables_by_namespace[contract["namespace"]]
