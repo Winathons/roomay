@@ -165,6 +165,54 @@ def resolve_tables(tables_by_namespace):
     return resolved
 
 
+def validate_table_ownership(table, registered_peg_id):
+    """Require exact, typed Peg ownership evidence for write readiness.
+
+    Workpeg's current Tables reference describes ``peg`` as ``number | null``,
+    while Roomay's owner-observed development metadata has returned a UUID
+    string.  Do not coerce either representation: the trusted registered Peg
+    identity and every table's returned value must match exactly.  This check
+    is deliberately separate from :func:`validate_table_response`, so an
+    unknown ownership field does not break otherwise-valid read-only use.
+    """
+    if not isinstance(table, dict):
+        raise AdapterError("malformed_table")
+    if type(registered_peg_id) is str:
+        try:
+            if str(UUID(registered_peg_id)) != registered_peg_id:
+                raise ValueError
+        except (ValueError, TypeError, AttributeError) as error:
+            raise AdapterError("invalid_registered_peg_id") from error
+    elif type(registered_peg_id) is int:
+        if registered_peg_id <= 0:
+            raise AdapterError("invalid_registered_peg_id")
+    else:
+        raise AdapterError("invalid_registered_peg_id")
+
+    if "peg" not in table:
+        raise AdapterError("peg_ownership_missing")
+    actual = table["peg"]
+    if type(actual) is not type(registered_peg_id):
+        raise AdapterError("peg_ownership_type_mismatch")
+    if actual != registered_peg_id:
+        raise AdapterError("peg_ownership_mismatch")
+    return actual
+
+
+def resolve_tables_for_write(tables_by_namespace, registered_peg_id):
+    """Resolve canonical tables and prove exact Peg ownership for each.
+
+    This does not prove actor authorization, row permission, or serialization;
+    those are separate mandatory gates in the writer coordinator.
+    """
+    resolved = resolve_tables(tables_by_namespace)
+    for key, contract in contract_by_key().items():
+        tables = tables_by_namespace[contract["namespace"]]
+        table = next(item for item in tables if item.get("name") == contract["name"])
+        validate_table_ownership(table, registered_peg_id)
+    return resolved
+
+
 def collect_pages(pages, *, page_size=PAGE_SIZE, max_pages=MAX_PAGES):
     """Validate already-fetched Workpeg windows and return a single row list."""
     if not isinstance(pages, list) or not pages:
@@ -254,7 +302,7 @@ def decode_rows(table_key, business_id, rows):
     return records, references
 
 
-def normalize_snapshot(business_id, rows_by_table):
+def normalize_snapshot(business_id, rows_by_table, *, allow_pending_request_id=None):
     """Decode and validate a complete hotel snapshot and service requests."""
     if not isinstance(rows_by_table, dict):
         raise AdapterError("malformed_snapshot_rows")
@@ -292,9 +340,12 @@ def normalize_snapshot(business_id, rows_by_table):
     audit_sequences = {}
     for event in audit:
         request = requests_by_id.get(event["request_id"])
-        if request is None:
+        if request is None and not (
+                event["request_id"] == allow_pending_request_id
+                and event.get("commit_state") == "pending"
+                and event.get("sequence") == 1):
             raise AdapterError("orphan_service_request_audit")
-        if event["hotel_id"] != request["hotel_id"]:
+        if request is not None and event["hotel_id"] != request["hotel_id"]:
             raise AdapterError("service_request_audit_hotel_mismatch")
         if type(event["sequence"]) is not int or event["sequence"] < 1:
             raise AdapterError("invalid_service_request_audit_sequence")

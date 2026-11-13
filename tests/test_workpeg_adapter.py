@@ -7,7 +7,8 @@ from domain.service_requests import create_request
 from domain.workpeg_adapter import (
     AdapterError, PAGE_SIZE, collect_pages, contract_by_key, decode_rows,
     full_row_update, normalize_snapshot, reconcile_write, resolve_tables,
-    table_contracts, validate_table_response,
+    resolve_tables_for_write, table_contracts, validate_table_ownership,
+    validate_table_response,
 )
 from ui.hotel_data import HotelData
 
@@ -112,6 +113,38 @@ class ContractTests(unittest.TestCase):
         self.assertNotIn("alias", table)
         self.assertEqual(validate_table_response(contract_by_key()["rooms"], table),
                          table["uuid"])
+
+    def test_ownership_is_separate_from_read_validation_and_exactly_typed(self):
+        contract = contract_by_key()["rooms"]
+        table = remote_table("rooms")
+        peg_uuid = uid("registered-peg")
+        self.assertEqual(validate_table_response(contract, table), table["uuid"])
+        with self.assertRaisesRegex(AdapterError, "peg_ownership_missing"):
+            validate_table_ownership(table, peg_uuid)
+
+        table["peg"] = peg_uuid
+        self.assertEqual(validate_table_ownership(table, peg_uuid), peg_uuid)
+        for bad_peg, code in ((uid("other-peg"), "peg_ownership_mismatch"),
+                              (None, "peg_ownership_type_mismatch"),
+                              (123, "peg_ownership_type_mismatch")):
+            with self.subTest(bad_peg=bad_peg):
+                with self.assertRaisesRegex(AdapterError, code):
+                    validate_table_ownership({**table, "peg": bad_peg}, peg_uuid)
+        with self.assertRaisesRegex(AdapterError, "invalid_registered_peg_id"):
+            validate_table_ownership(table, "not-a-uuid")
+
+    def test_write_table_resolution_requires_all_nine_owned_contracts(self):
+        peg_uuid = uid("registered-peg")
+        grouped = {"roomay_hotel_v1": [], "roomay_requests_v1": []}
+        for key, contract in contract_by_key().items():
+            table = remote_table(key)
+            table["peg"] = peg_uuid
+            grouped[contract["namespace"]].append(table)
+        self.assertEqual(set(resolve_tables_for_write(grouped, peg_uuid)),
+                         set(contract_by_key()))
+        grouped["roomay_hotel_v1"][0]["peg"] = uid("wrong-peg")
+        with self.assertRaisesRegex(AdapterError, "peg_ownership_mismatch"):
+            resolve_tables_for_write(grouped, peg_uuid)
 
     def test_compiled_transport_literals_match_the_pure_contract(self):
         transport = HotelData()
@@ -286,6 +319,25 @@ class SnapshotAndWriteContractTests(unittest.TestCase):
             "service_request_audit", plan["event"], 91)]
         with self.assertRaisesRegex(AdapterError, "orphan_service_request_audit"):
             normalize_snapshot(BUSINESS_ID, rows)
+
+    def test_only_exact_first_pending_event_may_be_read_during_new_request_prepare(self):
+        rows = remote_snapshot()
+        plan = service_request_plan(synthetic_hotel())
+        rows["service_request_audit"] = [remote_row(
+            "service_request_audit", plan["event"], 91)]
+        with self.assertRaisesRegex(AdapterError, "orphan_service_request_audit"):
+            normalize_snapshot(BUSINESS_ID, rows)
+        result = normalize_snapshot(
+            BUSINESS_ID, rows,
+            allow_pending_request_id=plan["target_request"]["request_id"],
+        )
+        self.assertEqual(len(result["service_request_audit"]), 1)
+        self.assertEqual(result["service_request_audit"][0]["commit_state"], "pending")
+        with self.assertRaisesRegex(AdapterError, "orphan_service_request_audit"):
+            normalize_snapshot(
+                BUSINESS_ID, rows,
+                allow_pending_request_id=uid("other-request"),
+            )
 
     def test_full_data_patch_preserves_unrelated_fields_and_identity(self):
         existing = {"data": {"business_id": BUSINESS_ID, "entity_id": uid("room"),
