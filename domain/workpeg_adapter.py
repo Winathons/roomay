@@ -343,7 +343,10 @@ def normalize_snapshot(business_id, rows_by_table, *, allow_pending_request_id=N
         if request is None and not (
                 event["request_id"] == allow_pending_request_id
                 and event.get("commit_state") == "pending"
-                and event.get("sequence") == 1):
+                and event.get("sequence") == 1
+                and event.get("event_type") == "created"
+                and event.get("from_status") is None
+                and event.get("to_status") == "received"):
             raise AdapterError("orphan_service_request_audit")
         if request is not None and event["hotel_id"] != request["hotel_id"]:
             raise AdapterError("service_request_audit_hotel_mismatch")
