@@ -117,20 +117,31 @@ class HotelData(App):
     def _nav_button_for(self, label, view, icon):
         if self.active_view == view:
             return Button(label, on_click=lambda: self.set_view(view),
-                          variant="primary", full_width=True, icon=icon,
-                          icon_position="left")
+                          variant="ghost-gray", full_width=True, icon=icon,
+                          icon_position="left",
+                          style={"justify-content": "flex-start", "text-align": "left",
+                                 "border-radius": "10px", "font-weight": "700",
+                                 ":rest": {"color": "#174c3d", "background-color": "#e5efe8"},
+                                 ":hover": {"color": "#103a30", "background-color": "#eaf2ed"},
+                                 ":focus-visible": {"color": "#103a30",
+                                                    "background-color": "#eaf2ed",
+                                                    "outline": "2px solid #174c3d",
+                                                    "outline-offset": "2px"},
+                                 ":active": {"color": "#103a30",
+                                             "background-color": "#d8e8dc"}})
         return Button(label, on_click=lambda: self.set_view(view),
                       variant="ghost-gray", full_width=True, icon=icon,
                       icon_position="left",
                       style={"justify-content": "flex-start", "text-align": "left",
-                             "border-radius": "10px",
-                             ":rest": {"color": "#d8e2dc", "background-color": "transparent"},
-                             ":hover": {"color": "#14382c", "background-color": "#e8efe9"},
-                             ":focus-visible": {"color": "#14382c",
-                                                 "background-color": "#e8efe9",
-                                                 "outline": "2px solid #14382c",
-                                                 "outline-offset": "2px"},
-                             ":active": {"color": "#14382c", "background-color": "#d8e2dc"}})
+                             "border-radius": "10px", "font-weight": "600",
+                             ":rest": {"color": "#53675c", "background-color": "transparent"},
+                             ":hover": {"color": "#103a30", "background-color": "#eaf2ed"},
+                             ":focus-visible": {"color": "#103a30",
+                                                "background-color": "#eaf2ed",
+                                                "outline": "2px solid #174c3d",
+                                                "outline-offset": "2px"},
+                             ":active": {"color": "#103a30",
+                                         "background-color": "#d8e8dc"}})
 
     def _filter_button(self, label, value):
         if self.room_filter == value:
@@ -962,14 +973,20 @@ class HotelData(App):
 
     def _metric_card(self, metric):
         return Container(Column(
-            Text(metric["label"], variant="label", tone="muted", weight="medium"),
+            Text(metric["label"], variant="label", tone="muted", weight="semibold",
+                 style={"letter-spacing": "0.01em"}),
             Text(metric["value"], variant="display", weight="bold",
-                 style={"color": "#14382c", "font-size": "38px",
-                        "line-height": "1.08", "letter-spacing": "-1px"}),
-            Text(metric["helper"], variant="caption", tone="muted"),
-            gap=8,
-        ), padding=20, width=232, radius=16, color="#ffffff",
-            style={"border": "1px solid #dce7e2", "min-height": "148px"})
+                 style={"color": "#103a30", "font-size": "38px",
+                        "line-height": "1.02", "letter-spacing": "-1.4px",
+                        "font-variant-numeric": "tabular-nums"}),
+            Text(metric["helper"], variant="caption", tone="muted",
+                 style={"line-height": "1.45"}),
+            gap=7,
+        ), padding=18, width=184, radius=16, color="#ffffff",
+            style={"flex": "1 1 168px", "min-width": "145px",
+                   "max-width": "100%", "border": "1px solid #e2e9e4",
+                   "box-shadow": "0 8px 22px rgba(25, 43, 39, 0.04)",
+                   "min-height": "128px"})
 
     def _room_card(self, room):
         return Container(Column(
@@ -988,9 +1005,10 @@ class HotelData(App):
                    variant="outline-gray", size="sm", icon="eye",
                    icon_position="left"),
             gap=9,
-        ), padding=18, width=228, radius=16, color="#ffffff",
-            style={"border": "1px solid #dce7e2", "min-height": "218px",
-                   "min-width": "0"})
+        ), padding=17, width=228, radius=16, color="#ffffff",
+            style={"flex": "1 1 205px", "min-height": "210px",
+                   "min-width": "0", "border": "1px solid #e2e9e4",
+                   "box-shadow": "0 8px 22px rgba(25, 43, 39, 0.035)"})
 
     def _housekeeping_badge(self, room):
         if room["housekeeping"] == "ready":
@@ -1024,8 +1042,9 @@ class HotelData(App):
             Text("Booking, assignment and check-in writes are unavailable in this read-only workspace.",
                  variant="caption", tone="muted"),
             gap=9,
-        ), padding=16, width=220, radius=16, color="#e8efe9",
-            style={"border": "1px solid #cde4da", "min-width": "0"})
+        ), padding=18, width=260, radius=16, color="#f0f5f1",
+            style={"flex": "0 1 270px", "border": "1px solid #d8e5dc",
+                   "min-width": "230px", "max-width": "100%"})
 
     def _room_inspector(self):
         return Column(
@@ -1036,16 +1055,17 @@ class HotelData(App):
                 Text("Select a room to inspect its verified operational details.",
                      variant="caption", tone="muted"),
                 gap=8,
-            ), padding=16, width=220, radius=16, color="#e8efe9",
-                style={"border": "1px solid #cde4da"},
+            ), padding=18, width=260, radius=16, color="#f0f5f1",
+                style={"border": "1px solid #d8e5dc", "max-width": "100%"},
                 visible=self.selected_room == ""),
             gap=0,
         )
 
     def _today_content(self):
         return Column(
-            Column(Text("Today at a glance", variant="heading", weight="bold"),
-                   Text("Counts are calculated from the complete, validated Workpeg snapshot.", tone="muted"),
+            Column(Text("Today at a glance", variant="heading", weight="bold",
+                        style={"color": "#103a30", "letter-spacing": "-0.025em"}),
+                   Text("A clear view of today's verified hotel operations.", tone="muted"),
                    gap=4),
             Wrap(*[self._metric_card(metric) for metric in self.metrics],
                  spacing=12, run_spacing=12),
@@ -1059,8 +1079,10 @@ class HotelData(App):
                              for item in self.in_house_cards], gap=8),
                     Text("Only physically checked-in stays count as in house.", variant="caption", tone="muted"),
                     gap=10,
-                ), padding=20, width=300, radius=16, color="#ffffff",
-                    style={"border": "1px solid #dce7e2", "min-height": "190px"}),
+                ), padding=20, width=300, radius=18, color="#ffffff",
+                    style={"flex": "1 1 270px", "min-height": "190px",
+                           "border": "1px solid #e2e9e4",
+                           "box-shadow": "0 8px 24px rgba(25, 43, 39, 0.04)"}),
                 Container(Column(
                     Row(Text("Arrivals", variant="subheading", weight="bold"),
                         Tag(str(len(self.arrival_cards)), tone="info", size="sm"),
@@ -1069,8 +1091,10 @@ class HotelData(App):
                     Column(*[Text(f"{item['guest']} - Room {item['room']}") for item in self.arrival_cards], gap=8),
                     Text("A reservation is not a checked-in stay.", variant="caption", tone="muted"),
                     gap=10,
-                ), padding=20, width=300, radius=16, color="#ffffff",
-                    style={"border": "1px solid #dce7e2", "min-height": "190px"}),
+                ), padding=20, width=300, radius=18, color="#ffffff",
+                    style={"flex": "1 1 270px", "min-height": "190px",
+                           "border": "1px solid #e2e9e4",
+                           "box-shadow": "0 8px 24px rgba(25, 43, 39, 0.04)"}),
                 Container(Column(
                     Row(Text("Scheduled departures", variant="subheading", weight="bold"),
                         Tag(str(len(self.departure_cards)), tone="neutral", size="sm"),
@@ -1083,8 +1107,10 @@ class HotelData(App):
                              for item in self.overdue_departure_cards], gap=8),
                     Text("An overdue guest remains in house until checkout is recorded.", variant="caption", tone="muted"),
                     gap=10,
-                ), padding=20, width=300, radius=16, color="#ffffff",
-                    style={"border": "1px solid #dce7e2", "min-height": "190px"}),
+                ), padding=20, width=300, radius=18, color="#ffffff",
+                    style={"flex": "1 1 270px", "min-height": "190px",
+                           "border": "1px solid #e2e9e4",
+                           "box-shadow": "0 8px 24px rgba(25, 43, 39, 0.04)"}),
                 spacing=12, run_spacing=12,
             ),
             Container(Column(
@@ -1092,14 +1118,16 @@ class HotelData(App):
                 Text(f"{self.operational_date} - browser-local date; hotel timezone is not persisted",
                      variant="caption", tone="muted"),
                 gap=4,
-            ), padding=14, radius=12, color="#f0f4f1"),
+            ), padding=15, radius=14, color="#edf3ef",
+                style={"border": "1px solid #dfe9e1"}),
             gap=20,
         )
 
     def _rooms_content(self):
         return Column(
-            Column(Text("Rooms & availability", variant="heading", weight="bold"),
-                   Text("Occupancy, housekeeping readiness and maintenance blocks are separate verified signals.", tone="muted"),
+            Column(Text("Rooms & availability", variant="heading", weight="bold",
+                        style={"color": "#103a30", "letter-spacing": "-0.025em"}),
+                   Text("Occupancy, room readiness and maintenance are shown separately.", tone="muted"),
                    gap=4),
             Wrap(
                 self._filter_button("All rooms", "All rooms"),
@@ -1119,9 +1147,11 @@ class HotelData(App):
                                  or (self.room_filter == "Needs cleaning" and room["housekeeping"] != "ready")
                                  or (self.room_filter == "Blocked" and room["maintenance"] == "Blocked")],
                               spacing=12, run_spacing=12),
-                         padding=16, width=610, radius=16, color="#ffffff",
-                         style={"border": "1px solid #dce7e2", "max-width": "100%",
-                                "box-sizing": "border-box"}),
+                         padding=16, width=610, radius=18, color="#ffffff",
+                         style={"flex": "1 1 560px", "min-width": "280px",
+                                "max-width": "100%", "box-sizing": "border-box",
+                                "border": "1px solid #e2e9e4",
+                                "box-shadow": "0 8px 24px rgba(25, 43, 39, 0.035)"}),
                 self._room_inspector(), spacing=12, run_spacing=12,
                 cross_alignment="start"),
             Text("No rooms match this filter.", tone="muted",
@@ -1155,9 +1185,11 @@ class HotelData(App):
                     Column(*[Text(f"Audit {event['sequence']}: {event['event_type']} - {event['from_status'] or 'start'} -> {event['to_status']} - {event['commit_state']} - {event['occurred_at']}",
                                   variant="caption", tone="muted")
                              for event in request["audit_history"]], gap=5),
-                    gap=9,
-                ), padding=18, width=264, radius=16, color="#ffffff",
-                    style={"border": "1px solid #dce7e2", "min-width": "0"})
+                    gap=10,
+                ), padding=18, width=360, radius=18, color="#ffffff",
+                    style={"flex": "1 1 330px", "min-width": "0",
+                           "border": "1px solid #e2e9e4",
+                           "box-shadow": "0 8px 24px rgba(25, 43, 39, 0.035)"})
                 for request in self.request_cards
             ], spacing=12, run_spacing=12),
             gap=18,
@@ -1181,29 +1213,41 @@ class HotelData(App):
 
     def _sidebar(self):
         return Container(Column(
-            Column(Text("ROOMAY", variant="title", weight="bold", style={"color": "#ffffff"}),
-                   Text("HOTEL OPERATIONS", variant="caption", style={"color": "#c9ddd5"}), gap=2),
+            Row(
+                Container(Text("R", variant="title", weight="bold",
+                               style={"color": "#ffffff"}),
+                          width=38, height=38, radius=12, color="#174c3d",
+                          style={"display": "grid", "place-items": "center"}),
+                Column(Text("roomay.", variant="title", weight="bold",
+                            style={"color": "#192b27", "letter-spacing": "-0.06em"}),
+                       Text("HOTEL OPERATIONS", variant="caption",
+                            style={"color": "#687972", "letter-spacing": "0.07em"}),
+                       gap=1),
+                gap=10, align="center",
+            ),
             Divider(spacing=10),
-            Text("FRONT DESK", variant="caption", weight="bold", style={"color": "#a8c5b7"}),
+            Text("FRONT DESK", variant="caption", weight="bold",
+                 style={"color": "#718178", "letter-spacing": "0.1em"}),
             self._nav_button("Today", "Today"),
             self._nav_button("Rooms & availability", "Rooms"),
             self._nav_button("Service requests", "Requests"),
             Divider(spacing=10),
             Text("WORKSPACES", variant="caption", weight="bold",
-                 style={"color": "#a8c5b7"}),
+                 style={"color": "#718178", "letter-spacing": "0.1em"}),
             Button("Housekeeping", on_click=self.open_housekeeping,
                    variant="ghost-gray", full_width=True, icon="brush",
                    icon_position="left",
                    style={"justify-content": "flex-start", "text-align": "left",
                           "border-radius": "10px",
-                          ":rest": {"color": "#d8e2dc", "background-color": "transparent"},
-                          ":hover": {"color": "#14382c", "background-color": "#e8efe9"},
-                          ":focus-visible": {"color": "#14382c", "background-color": "#e8efe9",
-                                             "outline": "2px solid #14382c", "outline-offset": "2px"}}),
+                          ":rest": {"color": "#53675c", "background-color": "transparent"},
+                          ":hover": {"color": "#103a30", "background-color": "#eaf2ed"},
+                          ":focus-visible": {"color": "#103a30", "background-color": "#eaf2ed",
+                                             "outline": "2px solid #174c3d", "outline-offset": "2px"}}),
             Divider(spacing=10),
             Text("DATA SOURCE", variant="caption", weight="bold",
-                 style={"color": "#a8c5b7"}, visible=self.view_state == "loaded"),
-            Wrap(Tag("WORKPEG RECORDS", tone="success", size="sm"),
+                 style={"color": "#718178", "letter-spacing": "0.1em"},
+                 visible=self.view_state == "loaded"),
+            Wrap(Tag("WORKPEG SNAPSHOT", tone="success", size="sm"),
                  Tag("READ ONLY", tone="neutral", size="sm"),
                  spacing=6, run_spacing=6, visible=self.view_state == "loaded"),
             Tag("CHECKING ACCESS", tone="warning", size="sm", visible=self.view_state == "loading"),
@@ -1211,11 +1255,14 @@ class HotelData(App):
                 visible=self.view_state == "connection_unavailable"
                         or self.view_state == "authentication_required"
                         or self.view_state == "access_denied"),
-            Text("No records were seeded or substituted.", variant="caption",
-                 style={"color": "#c9ddd5"}, visible=self.view_state != "loaded"),
-            gap=10,
-        ), padding=22, width=248, radius=18, color="#0d281e",
-            style={"min-height": "360px"})
+            Text("No sample records are substituted for Workpeg data.", variant="caption",
+                 style={"color": "#687972", "line-height": "1.45"},
+                 visible=self.view_state != "loaded"),
+            gap=12,
+        ), padding=20, width=250, radius=20, color="#fbfcf9",
+            style={"min-height": "calc(100vh - 40px)", "border": "1px solid #e2e9e4",
+                   "box-shadow": "0 10px 30px rgba(25, 43, 39, 0.045)",
+                   "align-self": "stretch"})
 
     def open_housekeeping(self):
         navigate(f"/b/{route.business_id}/reception/housekeeping")
@@ -1225,29 +1272,39 @@ class HotelData(App):
 
     def _housekeeping_sidebar(self):
         return Container(Column(
-            Column(Text("ROOMAY", variant="title", weight="bold",
-                        style={"color": "#ffffff"}),
-                   Text("HOTEL OPERATIONS", variant="caption",
-                        style={"color": "#c9ddd5"}), gap=2),
+            Row(
+                Container(Text("R", variant="title", weight="bold",
+                               style={"color": "#ffffff"}),
+                          width=38, height=38, radius=12, color="#174c3d",
+                          style={"display": "grid", "place-items": "center"}),
+                Column(Text("roomay.", variant="title", weight="bold",
+                            style={"color": "#192b27", "letter-spacing": "-0.06em"}),
+                       Text("HOTEL OPERATIONS", variant="caption",
+                            style={"color": "#687972", "letter-spacing": "0.07em"}),
+                       gap=1),
+                gap=10, align="center",
+            ),
             Divider(spacing=10),
             Text("HOUSEKEEPING", variant="caption", weight="bold",
-                 style={"color": "#a8c5b7"}),
+                 style={"color": "#718178", "letter-spacing": "0.1em"}),
             Button("Reception workspace", on_click=self.open_reception,
                    variant="ghost-gray", full_width=True, icon="layout-dashboard",
                    icon_position="left",
                    style={"justify-content": "flex-start", "text-align": "left",
                           "border-radius": "10px",
-                          ":rest": {"color": "#d8e2dc", "background-color": "transparent"},
-                          ":hover": {"color": "#14382c", "background-color": "#e8efe9"},
-                          ":focus-visible": {"color": "#14382c", "background-color": "#e8efe9",
-                                             "outline": "2px solid #14382c", "outline-offset": "2px"}}),
+                          ":rest": {"color": "#53675c", "background-color": "transparent"},
+                          ":hover": {"color": "#103a30", "background-color": "#eaf2ed"},
+                          ":focus-visible": {"color": "#103a30", "background-color": "#eaf2ed",
+                                             "outline": "2px solid #174c3d", "outline-offset": "2px"}}),
             Divider(spacing=10),
             Tag("OWNER-ONLY READ", tone="warning", size="sm"),
-            Text("Department staff access is not configured.",
-                 variant="caption", style={"color": "#c9ddd5"}),
-            gap=10,
-        ), padding=22, width=248, radius=18, color="#0d281e",
-            style={"min-height": "300px"})
+            Text("Department staff access is not configured. This preview contains no operational actions.",
+                 variant="caption", style={"color": "#687972", "line-height": "1.45"}),
+            gap=12,
+        ), padding=20, width=250, radius=20, color="#fbfcf9",
+            style={"min-height": "calc(100vh - 40px)", "border": "1px solid #e2e9e4",
+                   "box-shadow": "0 10px 30px rgba(25, 43, 39, 0.045)",
+                   "align-self": "stretch"})
 
     def _housekeeping_room_card(self, room):
         if room["housekeeping"] == "ready":
@@ -1272,9 +1329,10 @@ class HotelData(App):
             Text("Occupancy, readiness and maintenance are separate signals.",
                  variant="caption", tone="muted"),
             gap=9,
-        ), padding=18, width=270, radius=16, color="#ffffff",
-            style={"border": "1px solid #dce7e2", "min-width": "0",
-                   "min-height": "150px"})
+        ), padding=17, width=270, radius=17, color="#ffffff",
+            style={"flex": "1 1 250px", "border": "1px solid #e2e9e4",
+                   "min-width": "0", "min-height": "150px",
+                   "box-shadow": "0 8px 22px rgba(25, 43, 39, 0.035)"})
 
     def _housekeeping_request_card(self, request):
         return Container(Column(
@@ -1287,15 +1345,19 @@ class HotelData(App):
                  variant="caption", tone="muted"),
             self._audit_note(request),
             gap=9,
-        ), padding=18, width=300, radius=16, color="#ffffff",
-            style={"border": "1px solid #dce7e2", "min-width": "0"})
+        ), padding=18, width=340, radius=17, color="#ffffff",
+            style={"flex": "1 1 320px", "border": "1px solid #e2e9e4",
+                   "min-width": "0", "box-shadow": "0 8px 22px rgba(25, 43, 39, 0.035)"})
 
     def _housekeeping_content(self):
         return Container(Wrap(
             self._housekeeping_sidebar(),
             Container(Column(
-                Wrap(Column(Text("Housekeeping", variant="caption", tone="muted"),
-                            Text("Room readiness", variant="heading", weight="bold"),
+                Wrap(Column(Text("HOUSEKEEPING", variant="caption", weight="bold",
+                                 style={"color": "#718178", "letter-spacing": "0.1em"}),
+                            Text("Room readiness", variant="heading", weight="bold",
+                                 style={"color": "#103a30", "font-size": "32px",
+                                        "letter-spacing": "-0.035em"}),
                             Text("A read-only view of verified room and department records.",
                                  variant="caption", tone="muted"), gap=3),
                      Tag("READ ONLY", tone="info", size="sm"),
@@ -1330,11 +1392,14 @@ class HotelData(App):
                     Column(Text("Readiness overview", variant="subheading", weight="bold"),
                            Wrap(*[Container(Column(
                                Text(metric["label"], variant="caption", tone="muted"),
-                               Text(metric["value"], variant="display", weight="bold",
-                                    style={"color": "#14382c", "font-size": "34px",
-                                           "line-height": "1.1"}), gap=7),
-                               padding=18, width=205, radius=16, color="#ffffff",
-                               style={"border": "1px solid #dce7e2", "min-height": "112px"})
+                                Text(metric["value"], variant="display", weight="bold",
+                                     style={"color": "#103a30", "font-size": "36px",
+                                            "line-height": "1.05", "letter-spacing": "-1px",
+                                            "font-variant-numeric": "tabular-nums"}), gap=7),
+                                padding=17, width=205, radius=16, color="#ffffff",
+                                style={"flex": "1 1 170px", "min-width": "145px",
+                                       "border": "1px solid #e2e9e4", "min-height": "112px",
+                                       "box-shadow": "0 8px 22px rgba(25, 43, 39, 0.035)"})
                                for metric in self.housekeeping_metrics], spacing=12, run_spacing=12), gap=12),
                     Column(Text("Rooms requiring attention", variant="subheading", weight="bold"),
                            Text("Housekeeping readiness remains separate from occupancy and maintenance.",
@@ -1355,20 +1420,22 @@ class HotelData(App):
                     Container(Text("Acknowledge, start-work and resolve actions are unavailable until "
                                    "trusted department authorization and committed persistence are implemented.",
                                    variant="caption", tone="muted"),
-                              padding=14, radius=12, color="#f0f4f1"),
+                               padding=16, radius=14, color="#edf3ef",
+                               style={"border": "1px solid #dfe9e1"}),
                     gap=20, visible=self.view_state == "loaded"),
                 gap=18,
-            ), style={"flex": "1 1 480px", "min-width": "300px", "max-width": "100%"}),
+            ), style={"flex": "1 1 600px", "min-width": "280px", "max-width": "100%"}),
             spacing=18, run_spacing=18, cross_alignment="start"),
-            padding=20, color="#f7f9f6",
-            style={"min-height": "100vh", "max-width": "1440px", "margin": "0 auto"})
+            padding=24, color="#f7f8f3",
+            style={"min-height": "100vh", "max-width": "1600px", "margin": "0 auto"})
 
     def _loaded_view(self):
         return Column(
             self._active_content(),
             Container(Text("This workspace is read only. No booking, check-in, assignment or service-request writes are enabled.",
                            variant="caption", tone="muted"),
-                      padding=14, radius=12, color="#f0f4f1"),
+                      padding=15, radius=14, color="#edf3ef",
+                      style={"border": "1px solid #dfe9e1"}),
             gap=18,
             visible=self.view_state == "loaded",
         )
@@ -1384,15 +1451,20 @@ class HotelData(App):
             Text(self.date_error, variant="caption", tone="warning", visible=self.date_error != ""),
             self._refresh_control(),
             spacing=14, run_spacing=10, cross_alignment="center",
-        ), padding=16, radius=14, color="#ffffff",
-             style={"border": "1px solid #dce7e2"})
+        ), padding=17, radius=16, color="#ffffff",
+             style={"border": "1px solid #e2e9e4",
+                    "box-shadow": "0 8px 24px rgba(25, 43, 39, 0.035)"})
 
     def _main_content(self):
         return Container(Column(
             Wrap(
-                Column(Text("Reception", variant="caption", tone="muted"),
-                       Text(self._page_title(), variant="heading", weight="bold"),
-                       Text("A clear view of verified hotel operations.", variant="caption", tone="muted"), gap=2),
+                Column(Text("RECEPTION / FRONT DESK", variant="caption", weight="bold",
+                            style={"color": "#718178", "letter-spacing": "0.1em"}),
+                       Text(self._page_title(), variant="heading", weight="bold",
+                            style={"color": "#103a30", "font-size": "32px",
+                                   "letter-spacing": "-0.035em"}),
+                       Text("A clear view of verified hotel operations.",
+                            variant="caption", tone="muted"), gap=4),
                 Tag("READ ONLY", tone="info", size="sm"),
                 spacing=12, cross_alignment="center",
             ),
@@ -1416,7 +1488,7 @@ class HotelData(App):
                 "#fff4f4", "#e6b8b8", "connection_unavailable"),
             self._loaded_view(),
             gap=18,
-        ), style={"flex": "1 1 480px", "min-width": "300px",
+        ), style={"flex": "1 1 600px", "min-width": "280px",
                   "max-width": "100%"})
 
     def _active_content(self):
@@ -1456,6 +1528,6 @@ class HotelData(App):
     def build(self):
         if route.workspace == "housekeeping":
             return Authenticated(self._housekeeping_content())
-        return Authenticated(Container(Wrap(self._sidebar(), self._main_content(), spacing=18, run_spacing=18,
-                cross_alignment="start"), padding=20, color="#f7f9f6",
-            style={"min-height": "100vh", "max-width": "1440px", "margin": "0 auto"}))
+        return Authenticated(Container(Wrap(self._sidebar(), self._main_content(), spacing=22, run_spacing=18,
+                cross_alignment="start"), padding=24, color="#f7f8f3",
+                style={"min-height": "100vh", "max-width": "1600px", "margin": "0 auto"}))

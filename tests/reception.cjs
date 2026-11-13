@@ -90,31 +90,33 @@ for (const label of [
 ]) assert.match(todayMarkup, new RegExp(label));
 assert.match(todayMarkup, /min-height/);
 assert.match(todayMarkup, /min-width/);
-assert.match(todayMarkup, /480px/);
+assert.match(todayMarkup, /600px/);
 assert.match(todayMarkup, /max-width/);
 assert.match(todayMarkup, /outline-gray/);
 assert.doesNotMatch(todayMarkup, /outline-color/);
 assert.match(todayMarkup, /font-size/);
 assert.match(todayMarkup, /38px/);
+assert.match(todayMarkup, /box-shadow/);
+assert.match(todayMarkup, /#f7f8f3/);
 const navButtons = visit(tree, node => node.type === 'button' &&
   ['Today', 'Rooms & availability', 'Service requests'].includes(node.props.label));
 assert.equal(navButtons.length, 3);
 assert.deepEqual(navButtons.map(node => node.props.icon),
   ['layout-dashboard', 'bed', 'clipboard-list']);
-assert.equal(navButtons[0].props.variant, 'primary', 'current section retains the active contrast state');
-for (const inactive of navButtons.slice(1)) {
-  assert.equal(inactive.props.variant, 'ghost-gray');
-  assert.equal(inactive.props.style[':rest'].color, '#d8e2dc');
-  assert.equal(inactive.props.style[':hover'].color, '#14382c');
-  assert.equal(inactive.props.style[':hover']['background-color'], '#e8efe9');
-  assert.equal(inactive.props.style[':focus-visible'].color, '#14382c');
-  assert.equal(inactive.props.style[':focus-visible']['background-color'], '#e8efe9');
-  assert.equal(inactive.props.style[':focus-visible'].outline, '2px solid #14382c');
-  assert.equal(inactive.props.style[':active'].color, '#14382c');
+for (const [index, button] of navButtons.entries()) {
+  assert.equal(button.props.variant, 'ghost-gray');
+  assert.equal(button.props.style[':rest'].color, index === 0 ? '#174c3d' : '#53675c');
+  assert.equal(button.props.style[':rest']['background-color'], index === 0 ? '#e5efe8' : 'transparent');
+  assert.equal(button.props.style[':hover'].color, '#103a30');
+  assert.equal(button.props.style[':hover']['background-color'], '#eaf2ed');
+  assert.equal(button.props.style[':focus-visible'].color, '#103a30');
+  assert.equal(button.props.style[':focus-visible']['background-color'], '#eaf2ed');
+  assert.equal(button.props.style[':focus-visible'].outline, '2px solid #174c3d');
+  assert.equal(button.props.style[':active'].color, '#103a30');
 }
-assert.match(todayMarkup, /WORKPEG RECORDS/);
+assert.match(todayMarkup, /WORKPEG SNAPSHOT/);
 assert.match(todayMarkup, /READ ONLY/);
-assert.doesNotMatch(todayMarkup, /WORKPEG RECORDS - READ ONLY/);
+assert.doesNotMatch(todayMarkup, /WORKPEG SNAPSHOT - READ ONLY/);
 const businessId = Workpeg.routeParam();
 assert.doesNotMatch(todayMarkup, new RegExp(businessId), 'business ID is collapsed by default');
 const showBusinessId = visit(tree, node => node.type === 'button' && node.props.label === 'Show ID');
@@ -180,7 +182,7 @@ assert.equal(overdue.state.metrics.find(item => item.label === 'Overdue active s
 
 const rendered = JSON.stringify(overdue.build());
 assert.match(rendered, /Today/);
-assert.match(rendered, /WORKPEG RECORDS/);
+assert.match(rendered, /WORKPEG SNAPSHOT/);
 assert.match(rendered, /OVERDUE/);
 assert.match(rendered, /This workspace is read only/);
 assert.match(rendered, /Authentication required/);
@@ -265,6 +267,10 @@ assert.match(housekeepingTree, /Room 205/);
 assert.match(housekeepingTree, /Room 206/);
 assert.match(housekeepingTree, /Dirty/);
 assert.match(housekeepingTree, /Maintenance blocked/);
+assert.match(housekeepingTree, /#fbfcf9/);
+assert.match(housekeepingTree, /flex/);
+assert.match(housekeepingTree, /box-shadow/);
+assert.match(housekeepingTree, /#103a30/);
 assert.equal(sliceApp.state.housekeeping_metrics.find(item => item.label === 'Needs cleaning').value, 1);
 assert.match(housekeepingTree, /Received/);
 assert.match(housekeepingTree, /Audit: Latest audit event pending commit/);
