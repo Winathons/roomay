@@ -6,11 +6,12 @@
 > remains owner-observed evidence; non-owner staff permissions and writes are
 > separate open gates.
 
-WOR-34 replaces the release demo with an authenticated, business-scoped,
-read-only receptionist route:
+WOR-34 replaces the release demo with authenticated, business-scoped,
+read-only staff workspace routes:
 
 ```text
 /b/<business_id>/reception
+/b/<business_id>/reception/housekeeping
 ```
 
 The route uses the Workpeg 0.152.0 `Authenticated` widget, the router's
@@ -45,6 +46,17 @@ contract. It does not call create, add, update, or delete helpers.
   because the current model does not persist a hotel timezone.
 - No mutation controls are enabled. A locally eligible room is not represented
   as a committed booking or authorization to check in.
+- The native Reception workspace now includes a Housekeeping navigation entry.
+  The Housekeeping view uses the same complete, validated Workpeg snapshot and
+  presents room readiness, maintenance blocks, and open Housekeeping-routed
+  requests without guest names or free-text request descriptions. It does not
+  show an assigned-staff queue because staff identity/assignment authorization
+  is not available in this client contract.
+- Housekeeping is explicitly an **owner-only read preview**. The nine tables
+  remain at permission `700`; the route does not establish Housekeeping
+  membership, and no cleaning or request lifecycle actions are enabled. A
+  non-owner remains subject to Workpeg's denied/empty behavior; no grants were
+  changed.
 - A real Chrome render against the local non-`--fake-cloud` server reached the
   route and displayed the SDK authentication gate: `Couldn't verify your
   session. Please retry.` This is browser-render evidence for the unauthenticated
@@ -95,7 +107,9 @@ identity/session authorization, mutation, committed request/audit writes, and
 business-local authoritative operating dates. Keep booking, assignment,
 check-in/out, and service-request writes disabled until the trusted
 authorization and concurrency-safe persistence work is implemented and
-accepted. A build or mocked test is not hosted acceptance.
+accepted. A build or mocked test is not hosted acceptance. The Housekeeping
+preview is not a deployable staff inbox while these tables remain owner-only.
+Cleaning transitions and service-request lifecycle actions also remain disabled.
 
 WOR-34 must remain In Progress until the authenticated live acceptance criteria
 pass. A successful offline build or mocked browser test is not proof of hosted

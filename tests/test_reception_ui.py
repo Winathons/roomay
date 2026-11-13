@@ -111,6 +111,9 @@ class ReceptionProjectionTests(unittest.TestCase):
     def test_release_router_exposes_only_real_business_reception(self):
         source = (ROOT / "ui" / "main.py").read_text(encoding="utf-8")
         self.assertIn('Route("/b/[business_id]/reception", HotelData)', source)
+        self.assertIn('Route("/b/[business_id]/reception/[workspace]", HotelData)', source)
+        self.assertIn('route.workspace not in ["", "housekeeping"]',
+                      (ROOT / "ui" / "hotel_data.py").read_text(encoding="utf-8"))
         for forbidden in ("/demo/reception", "/dev-smoke", "/hotel-data", "ReceptionDemo"):
             self.assertNotIn(forbidden, source)
         ui_source = (ROOT / "ui" / "hotel_data.py").read_text(encoding="utf-8")

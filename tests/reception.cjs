@@ -8,6 +8,8 @@ globalThis.window = globalThis;
 let loadHandler;
 globalThis.addEventListener = (event, handler) => { if (event === 'load') loadHandler = handler; };
 globalThis.fetch = () => { throw new Error('NETWORK FORBIDDEN IN RECEPTION TEST'); };
+let routeWorkspace = '';
+let navigationTarget = '';
 const output = process.argv[2];
 const releaseHtml = fs.readFileSync(path.join(output, 'index.html'), 'utf8');
 const compiledApp = fs.readFileSync(path.join(output, 'app.js'), 'utf8');
@@ -15,7 +17,7 @@ const compiledIcons = fs.readFileSync(path.join(output, 'icons.css'), 'utf8');
 assert.match(releaseHtml, /fonts\.googleapis\.com\/css2\?family=Plus\+Jakarta\+Sans/);
 assert.match(compiledApp, /--color-brand-primary/);
 assert.match(compiledApp, /--font-base/);
-for (const icon of ['layout-dashboard', 'bed', 'clipboard-list', 'eye', 'refresh']) {
+for (const icon of ['layout-dashboard', 'bed', 'clipboard-list', 'eye', 'refresh', 'brush']) {
   assert.match(compiledIcons, new RegExp(`\\.ti-${icon}(?:\\s|\\{)`));
 }
 vm.runInThisContext(fs.readFileSync(path.join(output, 'workpeg-runtime.js'), 'utf8'));
@@ -27,11 +29,16 @@ loadHandler();
 assert.ok(Array.isArray(registeredRoutes), 'generated router registers its compiled routes');
 const ReceptionTest = registeredRoutes.find(route => route.path === '/b/[business_id]/reception').app;
 assert.equal(typeof ReceptionTest, 'function');
+assert.ok(registeredRoutes.some(route =>
+  route.path === '/b/[business_id]/reception/[workspace]' && route.app === ReceptionTest),
+  'housekeeping workspace is business scoped and uses the same validated reader');
 const Home = registeredRoutes.find(route => route.path === '/').app;
 const homeTree = JSON.stringify(new Home().build());
 assert.match(homeTree, /Roomay reception is available inside an authenticated Workpeg business\./);
 Workpeg.stateHandler = () => ({});
-Workpeg.routeParam = () => '00000000-0000-4000-8000-000000000034';
+Workpeg.routeParam = name => name === 'workspace' ? routeWorkspace :
+  '00000000-0000-4000-8000-000000000034';
+Workpeg.navigate = target => { navigationTarget = target; };
 
 const id = n => `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
 const app = new ReceptionTest();
@@ -116,6 +123,13 @@ assert.equal(showBusinessId[0].props.handler, 'toggle_business_id');
 app.toggle_business_id();
 assert.match(JSON.stringify(app.build()), new RegExp(businessId), 'business scope can be inspected without removing route validation');
 app.toggle_business_id();
+const housekeepingLink = visit(app.build(), node => node.type === 'button' &&
+  node.props.label === 'Housekeeping');
+assert.equal(housekeepingLink.length, 1);
+assert.equal(housekeepingLink[0].props.handler, 'open_housekeeping');
+app.open_housekeeping();
+assert.equal(navigationTarget,
+  '/b/00000000-0000-4000-8000-000000000034/reception/housekeeping');
 navButtons[1].props.handler();
 assert.equal(app.state.active_view, 'Rooms');
 app.state.active_view = 'Rooms';
@@ -233,6 +247,49 @@ assert.match(sliceTree, /Received/);
 assert.match(sliceTree, /Audit 1: created - start/);
 assert.match(sliceTree, /delivery is not represented/);
 assert.doesNotMatch(sliceTree, /PRIVATE-ACTOR-CANARY|PRIVATE-REASON-CANARY|PRIVATE-OPERATION-CANARY|PRIVATE-SIGNATURE-CANARY/);
+sliceApp.state.rooms.push({entity_id: id(111), number: '206', room_type_id: id(101),
+  enabled: true, housekeeping: 'dirty'});
+sliceApp.state.room_blocks.push({entity_id: id(112), room_id: id(111),
+  start: '2026-11-08', end: '2026-11-10', reason: 'test fixture', status: 'active'});
+sliceApp.project_records();
+routeWorkspace = 'housekeeping';
+const housekeepingTree = JSON.stringify(sliceApp.build());
+assert.match(housekeepingTree, /Housekeeping/);
+assert.match(housekeepingTree, /Room readiness/);
+assert.match(housekeepingTree, /Owner-only preview/);
+assert.match(housekeepingTree, /Housekeeping staff are not authorized/);
+assert.match(housekeepingTree, /Readiness overview/);
+assert.match(housekeepingTree, /Housekeeping request activity/);
+assert.match(housekeepingTree, /Extra towels/);
+assert.match(housekeepingTree, /Room 205/);
+assert.match(housekeepingTree, /Room 206/);
+assert.match(housekeepingTree, /Dirty/);
+assert.match(housekeepingTree, /Maintenance blocked/);
+assert.equal(sliceApp.state.housekeeping_metrics.find(item => item.label === 'Needs cleaning').value, 1);
+assert.match(housekeepingTree, /Received/);
+assert.match(housekeepingTree, /Audit: Latest audit event pending commit/);
+assert.match(housekeepingTree, /Guest message withheld/);
+assert.doesNotMatch(housekeepingTree, /WOR-60 Fictional Guest|Synthetic WOR-60 extra-towels request/);
+const housekeepingButtons = visit(sliceApp.build(), node => node.type === 'button');
+assert.deepEqual(housekeepingButtons.map(node => node.props.label).sort(),
+  ['Reception workspace', 'Refresh records', 'Show ID'].sort(),
+  'Housekeeping preview exposes no operational action controls');
+assert.match(housekeepingTree, /actions are unavailable/);
+assert.match(housekeepingTree, /Authentication required/);
+assert.match(housekeepingTree, /Access denied/);
+assert.match(housekeepingTree, /Connection unavailable/);
+const receptionLink = visit(sliceApp.build(), node => node.type === 'button' &&
+  node.props.label === 'Reception workspace');
+assert.equal(receptionLink.length, 1);
+assert.equal(receptionLink[0].props.handler, 'open_reception');
+sliceApp.open_reception();
+assert.equal(navigationTarget, '/b/00000000-0000-4000-8000-000000000034/reception');
+routeWorkspace = 'unknown';
+sliceApp.load_snapshot();
+assert.equal(sliceApp.state.view_state, 'connection_unavailable');
+assert.equal(sliceApp.state.failure, 'This Roomay staff workspace is not available.');
+assert.equal(sliceApp.state.freshness, 'No complete snapshot');
+routeWorkspace = '';
 sliceApp.state.request_audit[0].commit_state = 'committed';
 sliceApp.project_records();
 assert.equal(sliceApp.state.request_cards[0].audit_tone, 'neutral');

@@ -1,13 +1,15 @@
-"""Authenticated, read-only receptionist application over Workpeg tables.
+"""Authenticated, read-only Workpeg reception and housekeeping views.
 
 The UI compiles with Workpeg 0.152.0. It never provisions, seeds, or mutates
 records and fails closed when the complete owner-only table contract cannot be
-read. Browser-local ``dates.today()`` is exposed rather than mislabelled as a
-persisted hotel timezone.
+read. Housekeeping is an owner-only, department-filtered preview until trusted
+staff membership and table access are verified. Browser-local ``dates.today()``
+is exposed rather than mislabelled as a persisted hotel timezone.
 """
 from workpeg.ui import (
     App, Authenticated, Button, Column, Container, Divider, Row, State, Tab,
     Tabs, Tag, Text, TextInput, Wrap, dates, route, set_interval, workpeg,
+    navigate,
 )
 
 
@@ -41,6 +43,9 @@ class HotelData(App):
     room_cards = State([])
     request_cards = State([])
     overdue_departure_cards = State([])
+    housekeeping_room_cards = State([])
+    housekeeping_request_cards = State([])
+    housekeeping_metrics = State([])
     room_filter = State("All rooms")
     selected_room = State("")
     active_view = State("Today")
@@ -48,6 +53,12 @@ class HotelData(App):
     show_business_id = State(False)
 
     async def on_mount(self):
+        if route.workspace not in ["", "housekeeping"]:
+            self.status = "Workspace unavailable"
+            self.failure = "This Roomay staff workspace is not available."
+            self.freshness = "No records read"
+            self.view_state = "connection_unavailable"
+            return
         set_interval(self.watch_timeout, 1000)
         self.operational_date = dates.today()
         await self.load_snapshot()
@@ -745,6 +756,9 @@ class HotelData(App):
                 "room_id": room["entity_id"], "number": room["number"],
                 "room_type": room_type["name"], "occupancy": occupancy,
                 "housekeeping": room["housekeeping"],
+                "housekeeping_label": {"ready": "Ready", "dirty": "Dirty",
+                                       "cleaning": "Cleaning", "inspection": "Inspection"}
+                                      .get(room["housekeeping"], "Unknown"),
                 "maintenance": "Blocked" if blocks else "Clear",
                 "maintenance_reason": blocks[0]["reason"] if blocks else "",
                 "guest": (", ".join(registered_occupants) if stay
@@ -844,11 +858,28 @@ class HotelData(App):
         self.in_house_cards = in_house
         self.room_cards = room_cards
         self.request_cards = request_cards
+        self.housekeeping_room_cards = [room for room in room_cards
+                                       if room["housekeeping"] != "ready"]
+        self.housekeeping_request_cards = [request for request in request_cards
+                                           if request["department"] == "housekeeping"
+                                           and request["status"] not in ["resolved", "cancelled"]]
+        self.housekeeping_metrics = [
+            {"label": "Needs cleaning", "value": len([room for room in self.rooms
+                                                        if room["housekeeping"] == "dirty"])},
+            {"label": "In progress", "value": len([room for room in self.rooms
+                                                      if room["housekeeping"] == "cleaning"])},
+            {"label": "Awaiting inspection", "value": len([room for room in self.rooms
+                                                               if room["housekeeping"] == "inspection"])},
+            {"label": "Open department requests", "value": len(self.housekeeping_request_cards)},
+        ]
         if room_cards and not any(room["number"] == self.selected_room for room in room_cards):
             self.selected_room = room_cards[0]["number"]
 
     async def load_snapshot(self):
         if self.busy:
+            return
+        if route.workspace not in ["", "housekeeping"]:
+            self.fail("This Roomay staff workspace is not available.")
             return
         if not self.valid_uuid(route.business_id):
             self.fail("Business context is missing or malformed. Open this route inside an authorized Workpeg business.")
@@ -1158,6 +1189,18 @@ class HotelData(App):
             self._nav_button("Rooms & availability", "Rooms"),
             self._nav_button("Service requests", "Requests"),
             Divider(spacing=10),
+            Text("WORKSPACES", variant="caption", weight="bold",
+                 style={"color": "#a8c5b7"}),
+            Button("Housekeeping", on_click=self.open_housekeeping,
+                   variant="ghost-gray", full_width=True, icon="brush",
+                   icon_position="left",
+                   style={"justify-content": "flex-start", "text-align": "left",
+                          "border-radius": "10px",
+                          ":rest": {"color": "#d8e2dc", "background-color": "transparent"},
+                          ":hover": {"color": "#14382c", "background-color": "#e8efe9"},
+                          ":focus-visible": {"color": "#14382c", "background-color": "#e8efe9",
+                                             "outline": "2px solid #14382c", "outline-offset": "2px"}}),
+            Divider(spacing=10),
             Text("DATA SOURCE", variant="caption", weight="bold",
                  style={"color": "#a8c5b7"}, visible=self.view_state == "loaded"),
             Wrap(Tag("WORKPEG RECORDS", tone="success", size="sm"),
@@ -1173,6 +1216,152 @@ class HotelData(App):
             gap=10,
         ), padding=22, width=248, radius=18, color="#0d281e",
             style={"min-height": "360px"})
+
+    def open_housekeeping(self):
+        navigate(f"/b/{route.business_id}/reception/housekeeping")
+
+    def open_reception(self):
+        navigate(f"/b/{route.business_id}/reception")
+
+    def _housekeeping_sidebar(self):
+        return Container(Column(
+            Column(Text("ROOMAY", variant="title", weight="bold",
+                        style={"color": "#ffffff"}),
+                   Text("HOTEL OPERATIONS", variant="caption",
+                        style={"color": "#c9ddd5"}), gap=2),
+            Divider(spacing=10),
+            Text("HOUSEKEEPING", variant="caption", weight="bold",
+                 style={"color": "#a8c5b7"}),
+            Button("Reception workspace", on_click=self.open_reception,
+                   variant="ghost-gray", full_width=True, icon="layout-dashboard",
+                   icon_position="left",
+                   style={"justify-content": "flex-start", "text-align": "left",
+                          "border-radius": "10px",
+                          ":rest": {"color": "#d8e2dc", "background-color": "transparent"},
+                          ":hover": {"color": "#14382c", "background-color": "#e8efe9"},
+                          ":focus-visible": {"color": "#14382c", "background-color": "#e8efe9",
+                                             "outline": "2px solid #14382c", "outline-offset": "2px"}}),
+            Divider(spacing=10),
+            Tag("OWNER-ONLY READ", tone="warning", size="sm"),
+            Text("Department staff access is not configured.",
+                 variant="caption", style={"color": "#c9ddd5"}),
+            gap=10,
+        ), padding=22, width=248, radius=18, color="#0d281e",
+            style={"min-height": "300px"})
+
+    def _housekeeping_room_card(self, room):
+        if room["housekeeping"] == "ready":
+            return self._housekeeping_room_card_for_tone(room, "success")
+        if room["housekeeping"] in ["dirty", "inspection"]:
+            return self._housekeeping_room_card_for_tone(room, "warning")
+        return self._housekeeping_room_card_for_tone(room, "info")
+
+    def _housekeeping_room_card_for_tone(self, room, tone):
+        return Container(Column(
+            Row(Text("Room " + room["number"], variant="subheading", weight="bold"),
+                Tag(room["housekeeping_label"], tone=tone, size="sm"),
+                justify="space_between", align="center", gap=8),
+            Text(room["room_type"], variant="caption", tone="muted",
+                 style={"overflow-wrap": "anywhere", "word-break": "break-word",
+                        "min-width": "0"}),
+            Wrap(Tag("Maintenance blocked", tone="critical", size="sm",
+                     visible=room["maintenance"] == "Blocked"),
+                 Tag("Room in house", tone="neutral", size="sm",
+                     visible=room["occupancy"] == "In house"),
+                 spacing=6, run_spacing=6),
+            Text("Occupancy, readiness and maintenance are separate signals.",
+                 variant="caption", tone="muted"),
+            gap=9,
+        ), padding=18, width=270, radius=16, color="#ffffff",
+            style={"border": "1px solid #dce7e2", "min-width": "0",
+                   "min-height": "150px"})
+
+    def _housekeeping_request_card(self, request):
+        return Container(Column(
+            Wrap(Tag(request["category_label"], tone="info", size="sm"),
+                 Tag(request["urgency_label"], tone="warning", size="sm"),
+                 Tag(request["status_label"], tone="neutral", size="sm"),
+                 spacing=6, run_spacing=6),
+            Text("Room " + request["room"], variant="label", weight="semibold"),
+            Text("Guest message withheld until department access is authorized.",
+                 variant="caption", tone="muted"),
+            self._audit_note(request),
+            gap=9,
+        ), padding=18, width=300, radius=16, color="#ffffff",
+            style={"border": "1px solid #dce7e2", "min-width": "0"})
+
+    def _housekeeping_content(self):
+        return Container(Wrap(
+            self._housekeeping_sidebar(),
+            Container(Column(
+                Wrap(Column(Text("Housekeeping", variant="caption", tone="muted"),
+                            Text("Room readiness", variant="heading", weight="bold"),
+                            Text("A read-only view of verified room and department records.",
+                                 variant="caption", tone="muted"), gap=3),
+                     Tag("READ ONLY", tone="info", size="sm"),
+                     spacing=12, cross_alignment="center"),
+                Container(Column(
+                    Text("Owner-only preview", variant="label", weight="bold"),
+                    Text("Housekeeping staff are not authorized to read these owner-only tables. "
+                         "This view does not verify department membership and is not available "
+                         "for staff operations. No actions are enabled.", tone="muted"),
+                    gap=6,
+                ), padding=16, radius=14, color="#fff8e8",
+                    style={"border": "1px solid #ecd6a4"}),
+                self._controls(),
+                self._state_panel("Loading authenticated records...",
+                    "Room data remains hidden until the complete Workpeg snapshot validates.",
+                    "No cached or fictional records are substituted.",
+                    "#ffffff", "#dce7e2", "loading"),
+                self._state_panel("No rooms configured",
+                    "The authenticated hotel snapshot contains no configured rooms.",
+                    "No records were added by this workspace.",
+                    "#fef6ee", "#ecd6a4", "empty_inventory"),
+                self._state_panel("Authentication required", self.failure,
+                    "Sign in through the Workpeg business context.",
+                    "#fff4f4", "#e6b8b8", "authentication_required"),
+                self._state_panel("Access denied", self.failure,
+                    "No alternate business or data source was queried.",
+                    "#fff4f4", "#e6b8b8", "access_denied"),
+                self._state_panel("Connection unavailable", self.failure,
+                    "No records are shown until every required read validates.",
+                    "#fff4f4", "#e6b8b8", "connection_unavailable"),
+                Column(
+                    Column(Text("Readiness overview", variant="subheading", weight="bold"),
+                           Wrap(*[Container(Column(
+                               Text(metric["label"], variant="caption", tone="muted"),
+                               Text(metric["value"], variant="display", weight="bold",
+                                    style={"color": "#14382c", "font-size": "34px",
+                                           "line-height": "1.1"}), gap=7),
+                               padding=18, width=205, radius=16, color="#ffffff",
+                               style={"border": "1px solid #dce7e2", "min-height": "112px"})
+                               for metric in self.housekeeping_metrics], spacing=12, run_spacing=12), gap=12),
+                    Column(Text("Rooms requiring attention", variant="subheading", weight="bold"),
+                           Text("Housekeeping readiness remains separate from occupancy and maintenance.",
+                                variant="caption", tone="muted"),
+                           Text("No rooms need cleaning.", tone="muted",
+                                visible=len(self.housekeeping_room_cards) == 0),
+                           Wrap(*[self._housekeeping_room_card(room)
+                                  for room in self.housekeeping_room_cards], spacing=12, run_spacing=12),
+                           gap=10),
+                    Column(Text("Housekeeping request activity", variant="subheading", weight="bold"),
+                           Text("Unresolved requests routed to Housekeeping. No assignment, notification or staff action is implied.",
+                                variant="caption", tone="muted"),
+                           Text("No open Housekeeping requests.", tone="muted",
+                                visible=len(self.housekeeping_request_cards) == 0),
+                           Wrap(*[self._housekeeping_request_card(request)
+                                  for request in self.housekeeping_request_cards], spacing=12, run_spacing=12),
+                           gap=10),
+                    Container(Text("Acknowledge, start-work and resolve actions are unavailable until "
+                                   "trusted department authorization and committed persistence are implemented.",
+                                   variant="caption", tone="muted"),
+                              padding=14, radius=12, color="#f0f4f1"),
+                    gap=20, visible=self.view_state == "loaded"),
+                gap=18,
+            ), style={"flex": "1 1 480px", "min-width": "300px", "max-width": "100%"}),
+            spacing=18, run_spacing=18, cross_alignment="start"),
+            padding=20, color="#f7f9f6",
+            style={"min-height": "100vh", "max-width": "1440px", "margin": "0 auto"})
 
     def _loaded_view(self):
         return Column(
@@ -1265,6 +1454,8 @@ class HotelData(App):
                    align="center", gap=6)
 
     def build(self):
+        if route.workspace == "housekeeping":
+            return Authenticated(self._housekeeping_content())
         return Authenticated(Container(Wrap(self._sidebar(), self._main_content(), spacing=18, run_spacing=18,
                 cross_alignment="start"), padding=20, color="#f7f9f6",
             style={"min-height": "100vh", "max-width": "1440px", "margin": "0 auto"}))
