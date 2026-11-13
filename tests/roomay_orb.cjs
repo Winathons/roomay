@@ -32,10 +32,11 @@ function makeOrb({ contextAvailable = true, reducedMotion = false } = {}) {
       this.attributes = {};
       this.isConnected = false;
       this.rect = { left: 0, top: 0, right: 0, bottom: 0, width: 0, height: 0 };
-      this.shadowRoot = { querySelector: selector => selector === 'canvas' ? (this.canvas ||= new Canvas()) : null };
+      this.children = [];
     }
     attachShadow() { return this.shadowRoot; }
     getBoundingClientRect() { return this.rect; }
+    appendChild(child) { this.children.push(child); this.canvas = child; return child; }
     hasAttribute(name) { return Object.hasOwn(this.attributes, name); }
     setAttribute(name, value) {
       const oldValue = this.getAttribute(name);
@@ -106,8 +107,16 @@ test('orb is registered and canvas has a responsive, explicit visible stage', ()
   assert.match(html, /<roomay-orb id="remi-orb" state="idle" paused/);
   assert.match(html, /class="remi-orb-fallback"/);
   assert.match(css, /\.remi-orb-stage[^\n]*height: min\(224px, 64vw\)/);
-  assert.match(css, /\.remi-dialog \.remi-orb-stage[^\n]*height: min\(250px, 62vw\)/);
-  assert.match(css, /\.remi-dialog \.remi-orb-stage[^\n]*height: min\(220px, 60vw\)/);
+  assert.match(css, /\.remi-dialog \.remi-orb-stage[^\n]*height: clamp\(148px, min\(52vw, 250px\), 250px\)/);
+  assert.match(css, /\.remi-dialog \.remi-orb-stage[^\n]*height: clamp\(144px, 58vw, 220px\)/);
+  assert.match(css, /roomay-orb canvas \{ display: block; width: 100%; height: 100%; \}/);
+  assert.match(css, /roomay-orb\[data-canvas-unavailable\] canvas \{ display: none; \}/);
+  assert.doesNotMatch(source, /attachShadow|innerHTML|this\._canvas\.style/);
+  assert.match(source, /this\.appendChild\(this\._canvas\)/);
+  assert.match(css, /\.remi-dialog-overlay[^\n]*overflow-y: auto/);
+  assert.match(css, /\.remi-dialog[^\n]*max-height: calc\(100dvh - 32px\)/);
+  assert.match(css, /@media \(max-height: 640px\)/);
+  assert.match(css, /env\(safe-area-inset-bottom\)/);
 });
 
 test('hidden-at-load orb starts rendering immediately when the call modal reveals it', () => {
@@ -161,6 +170,8 @@ test('missing canvas support does not throw, keeps static fallback and schedules
   h.orb.removeAttribute('paused');
   assert.equal(h.frames.size, 0);
   assert.match(html, /class="remi-orb-fallback"/);
+  assert.equal(h.orb.children.length, 1, 'canvas is a normal light-DOM child styled by external CSS');
+  assert.match(css, /roomay-orb\[data-canvas-unavailable\] canvas \{ display: none; \}/);
 });
 
 test('provider-unavailable state remains independent from the idle visual', () => {

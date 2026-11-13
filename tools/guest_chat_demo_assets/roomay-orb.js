@@ -277,10 +277,10 @@
         this._tick = this._tick.bind(this);
         this._sync = this._sync.bind(this);
         this.refreshColors = this.refreshColors.bind(this);
-        this.attachShadow({ mode: 'open' }).innerHTML =
-          '<style>:host{display:inline-block;width:200px;aspect-ratio:1;contain:content}' +
-          'canvas{display:block;width:100%;height:100%}</style><canvas></canvas>';
-        this._canvas = this.shadowRoot.querySelector('canvas');
+        // Keep all presentation in app.css so the local page's strict
+        // style-src 'self' policy does not need an inline-style exception.
+        this._canvas = document.createElement('canvas');
+        this.appendChild(this._canvas);
         try { this._ctx = this._canvas && this._canvas.getContext('2d'); }
         catch (_) { this._ctx = null; }
       }
@@ -446,7 +446,6 @@
           // lacks a usable 2D context or one of its drawing primitives.
           this.setAttribute('data-canvas-unavailable', '');
           this._ctx = null;
-          if (this._canvas) this._canvas.style.display = 'none';
           this._sync();
           return false;
         }

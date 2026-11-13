@@ -19,11 +19,12 @@ class Element {
   append(...values) { this.children.push(...values); }
   removeChild(child) { this.children.splice(this.children.indexOf(child), 1); }
   setAttribute(key, value) { this.attributes[key] = value; }
+  removeAttribute(key) { delete this.attributes[key]; }
 }
 
 function harness({ configStatus = 200, startError = null, sdk = true, configGate = null } = {}) {
   const ids = ['remi-call', 'remi-call-overlay', 'call-remi', 'call-remi-label',
-    'close-remi', 'remi-call-duration', 'end-remi', 'mute-remi', 'remi-call-status',
+    'close-remi', 'remi-call-duration', 'end-remi', 'mute-remi', 'retry-remi', 'remi-call-status',
     'remi-call-captions', 'use-call-transcript', 'remi-orb'];
   const elements = Object.fromEntries(ids.map(id => [id, new Element(id)]));
   elements['remi-call-overlay'].hidden = true;
@@ -310,6 +311,9 @@ test('call-start-failed exposes an allowlisted stage and HTTP status, never prov
   assert.match(status, /Reference: VAPI_WEB_CALL_HTTP_403/);
   assert.doesNotMatch(status, /private-value|private stack|request body|private-call-id|status code 403/);
   assert.equal(h.elements['remi-orb'].state, 'idle');
+  assert.equal(h.clientRef.value.stopped, 1, 'failed setup stops and releases the SDK call object');
+  assert.equal(h.elements['retry-remi'].hidden, false);
+  assert.equal(h.elements['remi-orb'].attributes.paused, '');
 });
 
 test('rejected start promises show a safe diagnostic reference and preserve typed fallback', async () => {
@@ -320,13 +324,55 @@ test('rejected start promises show a safe diagnostic reference and preserve type
   assert.doesNotMatch(status, /private-value|provider token|Error/);
   assert.equal(h.elements['call-remi'].hidden, false);
   assert.equal(h.elements['remi-orb'].state, 'idle');
+  assert.equal(h.clientRef.value.stopped, 1, 'a rejected start promise cleans up its SDK client');
+  assert.equal(h.elements['remi-orb'].attributes.paused, '');
+});
+
+test('DNS failure is described as connectivity trouble, cleans up, and allows a safe retry', async () => {
+  const h = harness();
+  h.elements['call-remi'].emit('click'); await tick();
+  const failedClient = h.clientRef.value;
+  failedClient.emit('call-start-failed', {
+    stage: 'web-call-creation',
+    error: 'net::ERR_NAME_NOT_RESOLVED POST https://api.vapi.ai/call/web',
+    errorStack: 'secret=never-display-this',
+  });
+  const status = h.elements['remi-call-status'].textContent;
+  assert.match(status, /internet or DNS connection/);
+  assert.match(status, /VAPI_WEB_CALL_NETWORK_FAILED/);
+  assert.doesNotMatch(status, /ERR_NAME_NOT_RESOLVED|api\.vapi\.ai|secret=|https:/);
+  assert.equal(failedClient.stopped, 1);
+  assert.equal(h.elements['remi-orb'].state, 'idle');
+  assert.equal(h.elements['retry-remi'].hidden, false);
+  assert.equal(h.elements['remi-orb'].attributes.paused, '');
+
+  h.elements['retry-remi'].emit('click'); await tick();
+  assert.notEqual(h.clientRef.value, failedClient);
+  assert.equal(h.clientRef.value.startArgs[0], 'assistant-test-id');
+  assert.equal(h.elements['remi-call-status'].textContent.includes('Connecting'), true);
+  assert.equal(h.elements['remi-orb'].attributes.paused, undefined);
+});
+
+test('failure while speaking terminates animation and leaves a readable retry state', async () => {
+  const h = harness();
+  h.elements['call-remi'].emit('click'); await tick();
+  const client = h.clientRef.value;
+  client.emit('call-start');
+  client.emit('speech-start');
+  assert.equal(h.elements['remi-orb'].state, 'speaking');
+  client.emit('error', { type: 'network-error', message: 'connection lost' });
+  assert.equal(client.stopped, 1);
+  assert.equal(h.elements['remi-orb'].state, 'idle');
+  assert.match(h.elements['remi-call-status'].textContent, /internet or DNS connection/);
+  assert.equal(h.elements['retry-remi'].hidden, false);
+  assert.equal(h.elements['remi-orb'].attributes.paused, '');
 });
 
 test('provider errors do not reveal raw exception details', async () => {
   const h = harness();
   h.elements['call-remi'].emit('click'); await tick();
   h.clientRef.value.emit('error', { type: 'network-error', message: 'token=secret' });
-  assert.match(h.elements['remi-call-status'].textContent, /connection was interrupted/);
+  assert.match(h.elements['remi-call-status'].textContent, /internet or DNS connection/);
   assert.doesNotMatch(h.elements['remi-call-status'].textContent, /token=secret/);
 });
 

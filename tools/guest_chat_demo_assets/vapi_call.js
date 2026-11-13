@@ -29,6 +29,7 @@
     const duration = documentRef.getElementById("remi-call-duration");
     const endButton = documentRef.getElementById("end-remi");
     const muteButton = documentRef.getElementById("mute-remi");
+    const retryButton = documentRef.getElementById("retry-remi");
     const status = documentRef.getElementById("remi-call-status");
     const captions = documentRef.getElementById("remi-call-captions");
     const useTranscript = documentRef.getElementById("use-call-transcript");
@@ -38,7 +39,8 @@
     let busy = false;
     let timer = null;
     let latestUserTranscript = "";
-    let releasePending = false;
+    let releaseFlight = null;
+    let cleanupFlight = null;
     let startAttempt = 0;
     let microphoneMuted = false;
     let assistantSpeaking = false;
@@ -83,6 +85,12 @@
       state = next;
       if (root) root.dataset.state = next;
       if (status) status.textContent = copy;
+      const orb = documentRef.getElementById("remi-orb");
+      if (orb) {
+        orb.state = orbStateForCallState(next);
+        if (next === "error" || next === "ended") orb.setAttribute("paused", "");
+        else if (next === "connecting" || next === "listening" || next === "speaking" || next === "muted") orb.removeAttribute("paused");
+      }
       if (typeof onState === "function") onState(next);
       const connecting = next === "connecting";
       if (startButton) {
@@ -93,6 +101,7 @@
       }
       if (endButton) endButton.hidden = !active && !connecting;
       if (muteButton) muteButton.hidden = !active;
+      if (retryButton) retryButton.hidden = next !== "error";
     };
 
     async function post(path) {
@@ -148,7 +157,15 @@
       };
       const stage = typeof error?.stage === "string" ? error.stage.toLowerCase() : "";
       const status = safeHttpStatus(error);
+      if (isNetworkFailure(error)) return "VAPI_" + (stages[stage] || "CALL_START") + "_NETWORK_FAILED";
       return "VAPI_" + (stages[stage] || "CALL_START") + (status ? "_HTTP_" + status : "_FAILED");
+    }
+
+    function isNetworkFailure(error) {
+      const details = [error?.type, error?.name, error?.code, error?.message,
+        typeof error?.error === "string" ? error.error : error?.error?.message]
+        .filter(value => typeof value === "string").join(" ").toLowerCase();
+      return /err_name_not_resolved|err_internet_disconnected|enotfound|eai_again|dns|failed to fetch|fetch failed|network|connection|load failed|websocket|socket hang up/.test(details);
     }
 
     function failureWithReference(error) {
@@ -165,16 +182,50 @@
         return "The voice session could not be authorized. Use typed chat or contact Reception.";
       }
       if (status === 408 || status === 502 || status === 503 || status === 504
-          || /network|connection|timeout|websocket/.test(code)) {
-        return "The voice connection was interrupted. Use typed chat or try again.";
+          || /timeout/.test(code) || isNetworkFailure(error)) {
+        return "Could not reach the voice service. Check your internet or DNS connection, then try again. Typed chat remains available.";
       }
       return "The voice call could not start or continue. Use typed chat or try again.";
     }
 
+    function stopClient(target) {
+      if (!target || typeof target.stop !== "function") return Promise.resolve();
+      try {
+        const stopping = Promise.resolve(target.stop()).catch(() => {});
+        const trackedStop = stopping.finally(() => { if (cleanupFlight === trackedStop) cleanupFlight = null; });
+        cleanupFlight = trackedStop;
+        return trackedStop;
+      } catch (_) {
+        return Promise.resolve(); // best-effort provider cleanup
+      }
+    }
+
+    function failedClient(target, message) {
+      if (client !== target) return;
+      if (timer !== null) windowRef.clearTimeout(timer);
+      timer = null;
+      stopElapsed();
+      active = false;
+      busy = false;
+      assistantSpeaking = false;
+      microphoneMuted = false;
+      client = null;
+      stopClient(target);
+      if (muteButton) {
+        muteButton.textContent = "Mute microphone";
+        muteButton.setAttribute("aria-pressed", "false");
+      }
+      setState("error", message);
+      releaseClaim();
+    }
+
     function releaseClaim() {
-      if (releasePending) return;
-      releasePending = true;
-      post("/api/voice/release").catch(() => {}).finally(() => { releasePending = false; });
+      if (releaseFlight) return releaseFlight;
+      const flight = post("/api/voice/release").catch(() => {}).finally(() => {
+        if (releaseFlight === flight) releaseFlight = null;
+      });
+      releaseFlight = flight;
+      return releaseFlight;
     }
 
     function finish(copy = "Call ended. You can continue in the request chat.") {
@@ -193,7 +244,7 @@
       }
       const current = client;
       client = null;
-      if (current) Promise.resolve(current.stop()).catch(() => {});
+      stopClient(current);
       releaseClaim();
       setState("ended", wasConnecting ? "Voice setup stopped. No call is active." : copy);
     }
@@ -238,6 +289,9 @@
     async function start() {
       if (busy || active) return;
       const attempt = ++startAttempt;
+      if (releaseFlight) await releaseFlight;
+      if (cleanupFlight) await cleanupFlight;
+      if (attempt !== startAttempt) return;
       const sdk = windowRef.RoomayVapiSDK;
       if (!sdk || typeof sdk.Vapi !== "function") {
         setState("unavailable", "Vapi voice support is not available in this local setup. Typed chat remains available.");
@@ -289,24 +343,17 @@
         });
         vapi.on("call-start-failed", (event) => {
           if (client !== vapi) return;
-          busy = false;
-          active = false;
-          assistantSpeaking = false;
-          client = null;
-          stopElapsed();
-          setState("error", failureWithReference(event));
-          releaseClaim();
+          failedClient(vapi, failureWithReference(event));
         });
         vapi.on("error", (error) => {
           if (client !== vapi) return;
           const message = failureWithReference(error);
           if (active || busy) {
-            if (active) finish(message);
-            else {
-              busy = false;
+            if (active) {
+              finish(message);
               setState("error", message);
-              releaseClaim();
             }
+            else failedClient(vapi, message);
           }
         });
         // Per-call controls are supported by Vapi's AssistantOverrides. Saved
@@ -337,7 +384,9 @@
         if (timer !== null) windowRef.clearTimeout(timer);
         timer = null;
         stopElapsed();
+        const current = client;
         client = null;
+        stopClient(current);
         releaseClaim();
         if (error?.code === "voice_demo_limit_reached") {
           setState("error", "This example session has reached its call limit. Continue with typed chat.");
@@ -357,6 +406,7 @@
       start();
     });
     if (endButton) endButton.addEventListener("click", () => { finish(); closeDialog(); });
+    if (retryButton) retryButton.addEventListener("click", () => { start(); });
     if (closeButton) closeButton.addEventListener("click", closeDialog);
     if (overlay) overlay.addEventListener("click", (event) => {
       if (event.target === overlay) closeDialog();
