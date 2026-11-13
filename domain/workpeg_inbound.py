@@ -8,6 +8,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import hashlib
+import json
+from uuid import UUID
 
 import requests
 
@@ -27,10 +29,11 @@ class InboundConfig:
 class InboundError(RuntimeError):
     """Safe error code; never includes a response body or credential."""
 
-    def __init__(self, code: str, state: str):
+    def __init__(self, code: str, state: str, retry_after: int | None = None):
         super().__init__(code)
         self.code = code
         self.state = state
+        self.retry_after = retry_after
 
 
 def stable_idempotency_key(source_id: str) -> str:
@@ -55,22 +58,37 @@ class WorkpegInboundTransport:
     def _enabled_config(self):
         c = self.config
         if c.enabled is not True:
-            raise InboundError("transport_disabled", "external_queue_accepted")
+            raise InboundError("transport_disabled", "not_attempted")
         if (not isinstance(c.key, str) or not c.key.startswith("wpin_")
-                or len(c.key) <= 5 or "\r" in c.key or "\n" in c.key):
-            raise InboundError("inbound_key_unavailable", "external_queue_accepted")
-        if not c.business_id or not c.table_id:
-            raise InboundError("destination_unconfigured", "external_queue_accepted")
+                or len(c.key) <= 5 or any(ord(char) < 33 or ord(char) > 126 for char in c.key)):
+            raise InboundError("inbound_key_unavailable", "not_attempted")
+        if not self._canonical_uuid(c.business_id) or not self._canonical_uuid(c.table_id):
+            raise InboundError("destination_unconfigured", "not_attempted")
 
-    def _request(self, method, path, *, headers, json_body=None):
+    @staticmethod
+    def _canonical_uuid(value):
+        try:
+            return isinstance(value, str) and str(UUID(value)) == value
+        except (ValueError, TypeError, AttributeError):
+            return False
+
+    @staticmethod
+    def _retry_after(response):
+        """Return a bounded numeric Retry-After value, without trusting it as a URL."""
+        value = response.headers.get("Retry-After") if response.headers else None
+        if not isinstance(value, str) or not value.isascii() or not value.isdigit():
+            return None
+        return min(int(value), 3600)
+
+    def _request(self, method, path, *, headers, body=None, timeout_state="staging_not_written"):
         try:
             return self.session.request(
-                method, API + path, headers=headers, json=json_body,
-                timeout=TIMEOUT_SECONDS)
+                method, API + path, headers=headers, data=body,
+                timeout=TIMEOUT_SECONDS, allow_redirects=False)
         except requests.Timeout:
-            raise InboundError("workpeg_timeout_retry_same_key", "staging_outcome_unknown") from None
+            raise InboundError("workpeg_timeout_retry_same_key", timeout_state) from None
         except requests.RequestException:
-            raise InboundError("workpeg_unavailable_retry_same_key", "staging_outcome_unknown") from None
+            raise InboundError("workpeg_unavailable_retry_same_key", timeout_state) from None
 
     def _auth_headers(self):
         # Do not add Origin: Workpeg rejects browser-originated inbound calls.
@@ -83,7 +101,8 @@ class WorkpegInboundTransport:
         if response.status_code in (401, 403):
             raise InboundError("inbound_key_unauthorized", "staging_not_written")
         if response.status_code == 429:
-            raise InboundError("workpeg_rate_limited", "staging_not_written")
+            raise InboundError("workpeg_rate_limited", "staging_not_written",
+                               self._retry_after(response))
         if response.status_code != 200:
             raise InboundError("destination_verification_failed", "staging_not_written")
         try:
@@ -101,9 +120,15 @@ class WorkpegInboundTransport:
         """Create/replay exactly one staging row; never write canonical tickets."""
         self._enabled_config()
         if business_id != self.config.business_id:
-            raise InboundError("business_scope_mismatch", "external_queue_accepted")
+            raise InboundError("business_scope_mismatch", "not_attempted")
         if not isinstance(data, dict) or not data:
-            raise InboundError("invalid_staging_payload", "external_queue_accepted")
+            raise InboundError("invalid_staging_payload", "not_attempted")
+        try:
+            encoded = json.dumps({"data": data}, ensure_ascii=True, separators=(",", ":"))
+        except (TypeError, ValueError):
+            raise InboundError("invalid_staging_payload", "not_attempted") from None
+        if len(encoded.encode("utf-8")) > 256 * 1024:
+            raise InboundError("staging_payload_too_large", "not_attempted")
         # Same source always maps to same key, including after timeout/restart.
         key = stable_idempotency_key(source_id)
         self.verify_destination()
@@ -111,17 +136,20 @@ class WorkpegInboundTransport:
         headers["Content-Type"] = "application/json"
         headers["Idempotency-Key"] = key
         response = self._request("POST", "/rows/", headers=headers,
-                                 json_body={"data": data})
+                                 body=encoded.encode("utf-8"), timeout_state="staging_outcome_unknown")
         if response.status_code == 409:
-            raise InboundError("workpeg_write_in_progress_retry_after", "staging_outcome_unknown")
+            raise InboundError("workpeg_write_in_progress_retry_after", "staging_outcome_unknown",
+                               self._retry_after(response))
         if response.status_code == 401:
             raise InboundError("inbound_key_unauthorized", "staging_not_written")
         if response.status_code == 403:
             raise InboundError("inbound_write_forbidden", "staging_not_written")
         if response.status_code == 429:
-            raise InboundError("workpeg_rate_limited_retry_after", "staging_outcome_unknown")
+            raise InboundError("workpeg_rate_limited_retry_after", "staging_not_written",
+                               self._retry_after(response))
         if response.status_code == 503:
-            raise InboundError("workpeg_hook_unavailable_retry_after", "staging_outcome_unknown")
+            raise InboundError("workpeg_hook_unavailable_retry_after", "staging_outcome_unknown",
+                               self._retry_after(response))
         if response.status_code == 422:
             raise InboundError("staging_row_rejected", "staging_not_written")
         if response.status_code not in (200, 201):
@@ -141,6 +169,6 @@ class WorkpegInboundTransport:
             "business_id": result["business"],
             "table_id": result["table"],
             "idempotency_key": key,
-            "operational_request_committed": False,
-            "staff_acknowledged": False,
+            "operational_request_state": "not_asserted",
+            "staff_acknowledgement_state": "not_asserted",
         }
