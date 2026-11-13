@@ -849,16 +849,30 @@ class GuestChatDemoHttpTests(unittest.TestCase):
             "/api/qa/select", method="POST", body=b'{"role":"reception"}', cookie=guest_cookie)
         self.assertEqual(status, 200)
         self.assertEqual(json.loads(result)["path"], "/staff/reception")
-        status, _, html = self.dispatch("/staff/reception", cookie=guest_cookie)
+        status, staff_headers, html = self.dispatch("/staff/reception", cookie=guest_cookie)
         self.assertEqual(status, 200)
         self.assertIn("Reception Dashboard", html.decode("utf-8"))
+        staff_csp = staff_headers["Content-Security-Policy"]
+        self.assertIn("connect-src 'self'", staff_csp)
+        self.assertIn("frame-src 'self'", staff_csp)
+        self.assertNotIn("api.vapi.ai", staff_csp)
+        self.assertNotIn("daily.co", staff_csp)
+        self.assertNotIn("dailywebrtc.com", staff_csp)
+        self.assertNotIn("dailywebrtc.net", staff_csp)
+        self.assertNotIn("unsafe-inline", staff_csp)
         status, _, _ = self.dispatch("/staff/housekeeping", cookie=guest_cookie)
         self.assertEqual(status, 403)
 
         self.dispatch("/api/qa/select", method="POST", body=b'{"role":"housekeeping"}', cookie=guest_cookie)
-        status, _, html = self.dispatch("/staff/housekeeping", cookie=guest_cookie)
+        status, staff_headers, html = self.dispatch("/staff/housekeeping", cookie=guest_cookie)
         self.assertEqual(status, 200)
         self.assertIn("Housekeeping", html.decode("utf-8"))
+        staff_csp = staff_headers["Content-Security-Policy"]
+        self.assertIn("connect-src 'self'", staff_csp)
+        self.assertIn("frame-src 'self'", staff_csp)
+        self.assertNotIn("dailywebrtc.com", staff_csp)
+        self.assertNotIn("dailywebrtc.net", staff_csp)
+        self.assertNotIn("unsafe-inline", staff_csp)
         self.assertNotIn("href=\"/staff/reception\"", html.decode("utf-8"))
 
     def test_internal_qa_switcher_is_opt_in_and_not_product_navigation(self):
