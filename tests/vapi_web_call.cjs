@@ -38,7 +38,7 @@ function harness({ configStatus = 200, startError = null, sdk = true, configGate
     if (url === '/api/voice/config') {
       if (configGate) await configGate;
       return { ok: configStatus === 200, status: configStatus, json: async () => configStatus === 200
-        ? { enabled: true, publicKey: 'pk_public_test_only', assistantId: 'assistant-test-id', assistantLabel: 'Remi', modelProvider: 'openai', modelName: 'gpt-4o', maxDurationSeconds: 180 }
+        ? { enabled: true, publicKey: 'pk_public_test_only', assistantId: 'assistant-test-id', assistantLabel: 'Remi', modelProvider: 'openai', modelName: 'gpt-4.1', maxDurationSeconds: 180 }
         : { error: 'not_found' } };
     }
     if (url === '/api/voice/claim') return { ok: true, status: 200, json: async () => ({}) };
@@ -99,7 +99,7 @@ test('does not start a provider call until the guest presses Call Remi', async (
   assert.equal(h.clientRef.value.startArgs[0], 'assistant-test-id');
   assert.equal(h.clientRef.value.startArgs[1].maxDurationSeconds, 180);
   assert.equal(h.clientRef.value.startArgs[1].model.provider, 'openai');
-  assert.equal(h.clientRef.value.startArgs[1].model.model, 'gpt-4o');
+  assert.equal(h.clientRef.value.startArgs[1].model.model, 'gpt-4.1');
   assert.match(h.clientRef.value.startArgs[1].model.messages[0].content, /Never claim a request was submitted/);
   assert.equal(h.clientRef.value.startArgs[1].artifactPlan.recordingEnabled, false);
   assert.equal(h.clientRef.value.startArgs[1].artifactPlan.loggingEnabled, false);

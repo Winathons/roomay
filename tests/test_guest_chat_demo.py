@@ -651,6 +651,9 @@ class GuestChatDemoHttpTests(unittest.TestCase):
         self.assertNotIn("FICTIONAL SESSION", text)
         self.assertNotIn("DEMO VIEW", text)
         self.assertIn("default-src 'self'", headers["Content-Security-Policy"])
+        self.assertIn("connect-src 'self'", headers["Content-Security-Policy"])
+        self.assertNotIn("api.vapi.ai", headers["Content-Security-Policy"])
+        self.assertNotIn("daily.co", headers["Content-Security-Policy"])
         self.assertIn('src="/voice_intake.js"', text)
         self.assertIn("aria-live=\"polite\"", text)
         self.assertIn("id=\"voice-button\"", text)
@@ -717,15 +720,21 @@ class GuestChatDemoHttpTests(unittest.TestCase):
             "ROOMAY_VAPI_TEST_ASSISTANT_ID": "assistant-test-201",
             "ROOMAY_VAPI_TEST_ASSISTANT_VOICE": "remi",
             "ROOMAY_VAPI_TEST_LLM_PROVIDER": "openai",
-            "ROOMAY_VAPI_TEST_LLM_MODEL": "gpt-4o",
+            "ROOMAY_VAPI_TEST_LLM_MODEL": "gpt-4.1",
             "VAPI_PRIVATE_API_KEY": "must-not-be-read-or-returned",
         }
         server = make_server(port=0, enable_local_qa=True,
                              enable_vapi_web_call=True, vapi_environment=env)
         try:
-            status, _, html = self.dispatch("/stay", server=server)
+            status, headers, html = self.dispatch("/stay", server=server)
             self.assertEqual(status, 200)
             self.assertIn('<script src="/vapi_sdk.js" defer></script>', html.decode("utf-8"))
+            csp = headers["Content-Security-Policy"]
+            self.assertIn("connect-src 'self' https://api.vapi.ai https://*.daily.co wss://*.daily.co", csp)
+            self.assertIn("frame-src 'self' https://*.daily.co", csp)
+            status, qa_headers, _ = self.dispatch("/__qa/", server=server)
+            self.assertEqual(status, 200)
+            self.assertNotIn("api.vapi.ai", qa_headers["Content-Security-Policy"])
             status, _, _ = self.dispatch("/api/voice/config", method="POST",
                                          body=b"{}", server=server)
             self.assertEqual(status, 401)
@@ -739,7 +748,7 @@ class GuestChatDemoHttpTests(unittest.TestCase):
             self.assertEqual(config["assistantId"], "assistant-test-201")
             self.assertEqual(config["assistantLabel"], "Remi")
             self.assertEqual(config["modelProvider"], "openai")
-            self.assertEqual(config["modelName"], "gpt-4o")
+            self.assertEqual(config["modelName"], "gpt-4.1")
             self.assertEqual(config["maxDurationSeconds"], 180)
             self.assertEqual(config["publicKey"], env["ROOMAY_VAPI_PUBLIC_KEY"])
             self.assertNotIn("must-not-be-read-or-returned", body.decode("utf-8"))
@@ -774,10 +783,10 @@ class GuestChatDemoHttpTests(unittest.TestCase):
         bad_envs = [
             {"ROOMAY_VAPI_PUBLIC_KEY": "short", "ROOMAY_VAPI_TEST_ASSISTANT_ID": "assistant",
              "ROOMAY_VAPI_TEST_ASSISTANT_VOICE": "remi",
-             "ROOMAY_VAPI_TEST_LLM_PROVIDER": "openai", "ROOMAY_VAPI_TEST_LLM_MODEL": "gpt-4o"},
+             "ROOMAY_VAPI_TEST_LLM_PROVIDER": "openai", "ROOMAY_VAPI_TEST_LLM_MODEL": "gpt-4.1"},
             {"ROOMAY_VAPI_PUBLIC_KEY": "pk_example_0123456789", "ROOMAY_VAPI_TEST_ASSISTANT_ID": "assistant",
              "ROOMAY_VAPI_TEST_ASSISTANT_VOICE": "mary",
-             "ROOMAY_VAPI_TEST_LLM_PROVIDER": "openai", "ROOMAY_VAPI_TEST_LLM_MODEL": "gpt-4o"},
+             "ROOMAY_VAPI_TEST_LLM_PROVIDER": "openai", "ROOMAY_VAPI_TEST_LLM_MODEL": "gpt-4.1"},
             {"ROOMAY_VAPI_PUBLIC_KEY": "pk_example_0123456789", "ROOMAY_VAPI_TEST_ASSISTANT_ID": "assistant",
              "ROOMAY_VAPI_TEST_ASSISTANT_VOICE": "remi"},
         ]

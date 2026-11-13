@@ -60,16 +60,18 @@ assets are not shipped by the local page.
 
 Use a Vapi **public** API key (or a restricted public JWT), the existing test
 assistant ID, and confirm in the Vapi dashboard that this saved test assistant
-actually uses YarnGPT voice `remi` before setting the voice assertion. Never
-use a private API key here.
+uses OpenAI GPT-4.1, GPT-4o Transcribe and the approved Remi voice before
+setting the local assertions. These are the owner-reported test-assistant
+settings; this code cannot inspect or change the dashboard configuration.
+Never use a private API key here.
 
 ```powershell
 $env:ROOMAY_VAPI_PUBLIC_KEY = '<Vapi public key or short-lived public JWT>'
 $env:ROOMAY_VAPI_TEST_ASSISTANT_ID = '<ROOMAY GPT-4o STT Test assistant ID>'
 $env:ROOMAY_VAPI_TEST_ASSISTANT_VOICE = 'remi'
-$env:ROOMAY_VAPI_TEST_LLM_PROVIDER = '<verified saved assistant LLM provider>'
-$env:ROOMAY_VAPI_TEST_LLM_MODEL = '<verified saved assistant LLM model>'
-python -m tools.guest_chat_demo --port 8765 --enable-local-qa --enable-vapi-web-call
+$env:ROOMAY_VAPI_TEST_LLM_PROVIDER = 'openai'
+$env:ROOMAY_VAPI_TEST_LLM_MODEL = 'gpt-4.1'
+.\.venv\Scripts\python.exe -m tools.guest_chat_demo --port 8765 --enable-local-qa --enable-vapi-web-call
 ```
 
 Open `http://127.0.0.1:8765/__qa/`, select **Guest**, then open My Stay and
@@ -77,8 +79,32 @@ press **Call Remi**. The actual call makes billable Vapi/model/transcriber/TTS
 requests; do not run it until the owner has approved that usage and confirmed
 the test assistant settings. The local server remains bound to loopback. The
 Vapi public key should also be restricted in the Vapi dashboard to the local
-origin (`http://127.0.0.1:8765`) and only this test assistant. The restriction
-is a dashboard setting and is not verified by this code.
+origin (`http://127.0.0.1:8765`) and only this test assistant. Origin matching
+includes scheme, host and port: use the exact origin actually shown in the
+browser address bar. If the port changes, update the dashboard allowlist before
+testing. The restriction is a dashboard setting and is not verified by this
+code.
+
+### Call connection policy
+
+The local HTTP handler sends a restrictive Content Security Policy. Only when
+Call Remi is explicitly configured does the My Stay HTML allow Vapi's API and
+Daily's HTTPS/WebSocket signaling and call frame. The `/__qa/` page and
+unconfigured My Stay page retain same-origin `connect-src` and `frame-src`.
+This is required for the browser SDK's web-call setup; it does not start a call
+or contact Vapi on page load. The guest's click remains the call trigger.
+
+The browser controller uses the Vapi Web SDK's documented
+`start(assistantId, assistantOverrides)` signature. It supplies the owner-
+verified OpenAI/GPT-4.1 model assertion plus Roomay's constrained system
+message and call-duration/artifact overrides; the assistant's saved
+GPT-4o-transcribe configuration and Remi voice are not changed by Roomay. If
+the SDK rejects the start before `call-start`, first check the browser Console
+for CSP violations and Network for blocked/failed requests to Vapi and Daily.
+Then check the Vapi test assistant's call log for its sanitized ended reason.
+No prior live trace was available to prove which condition caused the earlier
+00:00 failure; the restrictive policy was a local, confirmed blocker that is
+now corrected for the configured call page.
 
 For an animation-only local preview without provider configuration, run the
 server with `--enable-local-qa` but omit `--enable-vapi-web-call`; select Guest
