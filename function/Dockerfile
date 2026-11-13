@@ -6,3 +6,4 @@ FROM registry.gitlab.com/workpeg/workpeg-sdk/pegfn-base:0.157.0
 # The base supplies the non-root appuser, /app workdir, SDK and runtime.
 # No requirements or online build steps are needed for this disabled entrypoint.
 COPY app /app/app
+COPY domain /app/domain
