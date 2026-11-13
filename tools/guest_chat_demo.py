@@ -913,11 +913,13 @@ def make_server(demo=None, port=PORT_DEFAULT, *, enable_local_qa=False,
                 connect_sources = "'self'"
                 frame_sources = "'self'"
                 if allow_vapi_web_call:
-                    # The SDK creates its call through api.vapi.ai and joins a
-                    # Daily room in an iframe with HTTPS/WSS signaling. Keep
-                    # those origins out of pages that do not load Call Remi.
+                    # The SDK creates calls through api.vapi.ai and joins a
+                    # Daily room. The browser-reported call-machine assets use
+                    # these exact HTTPS hosts; keep provider origins out of
+                    # pages that do not load Call Remi.
                     connect_sources += (
                         " https://api.vapi.ai https://*.daily.co wss://*.daily.co"
+                        " https://c.dailywebrtc.com https://d.dailywebrtc.net"
                     )
                     frame_sources += " https://*.daily.co"
                 self.send_header(

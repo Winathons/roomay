@@ -656,6 +656,9 @@ class GuestChatDemoHttpTests(unittest.TestCase):
         self.assertIn("connect-src 'self'", headers["Content-Security-Policy"])
         self.assertNotIn("api.vapi.ai", headers["Content-Security-Policy"])
         self.assertNotIn("daily.co", headers["Content-Security-Policy"])
+        self.assertNotIn("dailywebrtc.com", headers["Content-Security-Policy"])
+        self.assertNotIn("dailywebrtc.net", headers["Content-Security-Policy"])
+        self.assertIn("frame-src 'self'", headers["Content-Security-Policy"])
         self.assertIn('src="/voice_intake.js"', text)
         self.assertIn("aria-live=\"polite\"", text)
         self.assertIn("id=\"voice-button\"", text)
@@ -708,9 +711,17 @@ class GuestChatDemoHttpTests(unittest.TestCase):
         self.assertNotIn("preview/", html.decode("utf-8"))
 
     def test_voice_calls_are_off_by_default_and_sdk_is_not_loaded(self):
-        status, _, html = self.dispatch("/stay")
+        status, headers, html = self.dispatch("/stay")
         self.assertEqual(status, 200)
         self.assertNotIn('<script src="/vapi_sdk.js"', html.decode("utf-8"))
+        csp = headers["Content-Security-Policy"]
+        self.assertIn("connect-src 'self'", csp)
+        self.assertNotIn("api.vapi.ai", csp)
+        self.assertNotIn("daily.co", csp)
+        self.assertNotIn("dailywebrtc.com", csp)
+        self.assertNotIn("dailywebrtc.net", csp)
+        self.assertIn("frame-src 'self'", csp)
+        self.assertNotIn("unsafe-inline", csp)
         status, _, _ = self.dispatch("/api/voice/config", method="POST", body=b"{}")
         self.assertEqual(status, 404)
         status, _, _ = self.dispatch("/vapi_sdk.js")
@@ -734,12 +745,26 @@ class GuestChatDemoHttpTests(unittest.TestCase):
             csp = headers["Content-Security-Policy"]
             self.assertIn("style-src 'self'", csp)
             self.assertNotIn("unsafe-inline", csp)
-            self.assertIn("connect-src 'self' https://api.vapi.ai https://*.daily.co wss://*.daily.co", csp)
+            self.assertIn(
+                "connect-src 'self' https://api.vapi.ai https://*.daily.co "
+                "wss://*.daily.co https://c.dailywebrtc.com https://d.dailywebrtc.net",
+                csp,
+            )
             self.assertIn("frame-src 'self' https://*.daily.co", csp)
+            frame_src = csp.split("frame-src", 1)[1].split(";", 1)[0]
+            self.assertNotIn("dailywebrtc.com", frame_src)
+            self.assertNotIn("dailywebrtc.net", frame_src)
+            self.assertNotIn("unsafe-inline", csp)
             self.assertIn('id="retry-remi"', html.decode("utf-8"))
             status, qa_headers, _ = self.dispatch("/__qa/", server=server)
             self.assertEqual(status, 200)
-            self.assertNotIn("api.vapi.ai", qa_headers["Content-Security-Policy"])
+            qa_csp = qa_headers["Content-Security-Policy"]
+            self.assertIn("connect-src 'self'", qa_csp)
+            self.assertNotIn("api.vapi.ai", qa_csp)
+            self.assertNotIn("daily.co", qa_csp)
+            self.assertNotIn("dailywebrtc.com", qa_csp)
+            self.assertNotIn("dailywebrtc.net", qa_csp)
+            self.assertNotIn("unsafe-inline", qa_csp)
             status, _, _ = self.dispatch("/api/voice/config", method="POST",
                                          body=b"{}", server=server)
             self.assertEqual(status, 401)
