@@ -17,6 +17,11 @@ The compiled production Workpeg router currently exposes exactly:
   workspace. It discovers and reads the nine canonical hotel/request tables,
   validates the complete snapshot, and then displays Today, Rooms &
   Availability, and Service Requests. It does not create or update records.
+- `/b/<business_id>/reception/housekeeping` — an owner-only, read-only
+  Housekeeping preview using the same validated snapshot. It does not establish
+  department membership, expose guest names or free-text request descriptions,
+  or enable operational actions. All canonical tables remain permission `700`;
+  do not share this route with Housekeeping staff as an authorized inbox.
 
 The owner has reported that this route, opened from the installed Peg in the
 Roomay AI development business, reads the existing fictional hotel records.

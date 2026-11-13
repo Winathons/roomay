@@ -30,4 +30,5 @@ class Main(Router):
     routes = [
         Route("/", Home),
         Route("/b/[business_id]/reception", HotelData),
+        Route("/b/[business_id]/reception/[workspace]", HotelData),
     ]

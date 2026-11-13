@@ -23,7 +23,7 @@ Workpeg.setInterval = () => {};
 
 const business = '00000000-0000-4000-8000-000000000029';
 let routeBusiness = business;
-Workpeg.routeParam = () => routeBusiness;
+Workpeg.routeParam = name => name === 'workspace' ? '' : routeBusiness;
 const hotelNames = ['room_types', 'rooms', 'guests', 'reservations', 'stays', 'stay_guests', 'room_blocks'];
 const requestNames = ['Roomay Service Requests', 'Roomay Service Request Audit'];
 const allNames = [...hotelNames, ...requestNames];

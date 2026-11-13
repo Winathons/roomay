@@ -16,7 +16,11 @@ from domain.fixtures import synthetic_hotel
 
 
 ROOT = Path(__file__).resolve().parents[1]
-RELEASE_ROUTES = ["/", "/b/[business_id]/reception"]
+RELEASE_ROUTES = [
+    "/",
+    "/b/[business_id]/reception",
+    "/b/[business_id]/reception/[workspace]",
+]
 # Match the actual compiled Workpeg SDK 0.152.0 route declarations. Fail if
 # the compiler format changes rather than accepting an uninspected bundle.
 ROUTE_DECLARATION = re.compile(r"""\{\s*path\s*:\s*["']([^"']+)["']\s*,\s*app\s*:""")
@@ -59,6 +63,10 @@ def assert_safe_release_bundle(app_js, index_html, artifact_text):
         raise AssertionError(
             f"compiled release routes changed: expected {RELEASE_ROUTES!r}, got {routes!r}"
         )
+    if ('routeParam("workspace")' not in app_js
+            or 'Workpeg.contains(["","housekeeping"],Workpeg.routeParam("workspace"))'
+            not in app_js):
+        raise AssertionError("staff workspace route does not fail closed to approved views")
 
     if '<meta name="peg-namespace" content="roomay">' not in index_html:
         raise AssertionError("compiled release Peg namespace missing or changed")
@@ -103,6 +111,8 @@ class ReleaseGuardRegressionTests(unittest.TestCase):
     def safe_fixture():
         app = (
             '{path:"/",app:Home},{path:"/b/[business_id]/reception",app:HotelData}'
+            ',{path:"/b/[business_id]/reception/[workspace]",app:HotelData}'
+            ';Workpeg.routeParam("workspace");Workpeg.contains(["","housekeeping"],Workpeg.routeParam("workspace"))'
             ';Workpeg.wpGetTables();Workpeg.wpGetRows()'
         )
         index = '<meta name="peg-namespace" content="roomay">'
@@ -119,6 +129,15 @@ class ReleaseGuardRegressionTests(unittest.TestCase):
         ):
             with self.subTest(extra=extra), self.assertRaises(AssertionError):
                 assert_safe_release_bundle(app + extra, index, app + extra + index)
+
+    def test_unrestricted_workspace_selector_is_rejected(self):
+        app, index, artifact = self.safe_fixture()
+        unsafe_app = app.replace(
+            'Workpeg.contains(["","housekeeping"],Workpeg.routeParam("workspace"))',
+            'Workpeg.routeParam("workspace")',
+        )
+        with self.assertRaisesRegex(AssertionError, "fail closed"):
+            assert_safe_release_bundle(unsafe_app, index, unsafe_app + index)
 
     def test_dev_table_reference_is_rejected_even_outside_app_js(self):
         app, index, artifact = self.safe_fixture()
