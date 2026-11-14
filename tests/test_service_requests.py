@@ -82,6 +82,20 @@ class ServiceRequestLifecycleTests(unittest.TestCase):
         self.assertEqual(event["commit_state"], "pending")
         validate_request(request)
 
+    def test_creation_accepts_validated_category_detail_with_legacy_default(self):
+        titled = self.create(category_detail="Air conditioning issue")
+        self.assertEqual(titled["request"]["category_detail"], "Air conditioning issue")
+        self.assertEqual(titled["request"]["category"], "extra_towels")
+        self.assertEqual(titled["request"]["department"], "housekeeping")
+        legacy = self.create()
+        self.assertEqual(legacy["request"]["category_detail"], "extra_towels")
+
+    def test_creation_rejects_malformed_category_detail(self):
+        for value in ("", " " * 201):
+            with self.subTest(value_length=len(value)):
+                with self.assertRaisesRegex(RequestError, "invalid_category_detail"):
+                    self.create(category_detail=value)
+
     def test_full_happy_path_is_strict_and_audited(self):
         request = self.create()["request"]
         steps = [

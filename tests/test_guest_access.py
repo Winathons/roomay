@@ -224,6 +224,8 @@ class GuestActionGatewayTests(unittest.TestCase):
             self.assertFalse(result["submitted"])
             self.assertFalse(result["persisted"])
             self.assertIn(result["proposal"]["department"], {"Maintenance", "Housekeeping"})
+            self.assertTrue(result["proposal"]["title"])
+            self.assertEqual(result["proposal"]["description"], text)
 
     def test_explicit_confirmation_is_exact_and_replay_is_idempotent(self):
         proposed = self.action("message", text="The AC is faulty in room 205.")
