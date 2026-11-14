@@ -92,14 +92,14 @@ class WorkspaceHome(App):
                         ),
                         Link("Open Workpeg AI chat", href=biz_url("/chats/new")),
                         Text(
-                            "Optional ROOMAY intake instructions can be offered to "
-                            "a Workpeg business administrator. The Skill helps "
-                            "draft and route fictional requests; it does not "
-                            "submit records or grant any hotel data access.",
+                            "ROOMAY can guide a natural hotel-help conversation, "
+                            "suggest the right department, and clarify requests. "
+                            "The optional AI Skill does not verify guest identity "
+                            "or grant access to hotel records or request writes.",
                             tone="muted",
                         ),
                         Link(
-                            "Offer ROOMAY intake Skill (admin approval)",
+                            "Offer ROOMAY guest assistance Skill (admin approval)",
                             href=biz_url("/chats?skill_url=https%3A%2F%2Fraw.githubusercontent.com%2FWinathons%2Froomay%2Fmain%2Fskills%2Froomay-service-intake.json"),
                         ),
                         gap=12,
