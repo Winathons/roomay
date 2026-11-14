@@ -75,7 +75,9 @@ h2 { margin: 0; color: var(--forest-deep); font-size: 20px; line-height: 1.25; l
 .remi-call-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 7px; }
 .remi-orb-stage { position: relative; display: grid; place-items: center; width: min(224px, 64vw); height: min(224px, 64vw); margin: 8px auto 0; }
 .remi-orb-fallback { position: absolute; width: 38%; aspect-ratio: 1; border: 1px solid #c7a866; border-radius: 50%; background: radial-gradient(circle at 35% 30%, #2f5f48, #1f4433 65%, #193829); box-shadow: 0 0 34px rgba(134,191,156,.24); }
-roomay-orb { position: relative; display: block; width: 100%; height: 100%; --orb-core: #1f4433; --orb-core-light: #2f5f48; --orb-core-shade: #193829; --orb-sage: #a9c3a8; --orb-mist: #d3e0cd; --orb-ring: #7fa88c; --orb-gold: #c7a866; --orb-glow: #86bf9c; }
+roomay-orb { position: relative; display: block; width: 100%; height: 100%; aspect-ratio: 1; contain: content; --orb-core: #1f4433; --orb-core-light: #2f5f48; --orb-core-shade: #193829; --orb-sage: #a9c3a8; --orb-mist: #d3e0cd; --orb-ring: #7fa88c; --orb-gold: #c7a866; --orb-glow: #86bf9c; }
+roomay-orb canvas { display: block; width: 100%; height: 100%; }
+roomay-orb[data-canvas-unavailable] canvas { display: none; }
 .remi-orb-connecting { position: absolute; right: 20%; bottom: 16%; width: 13px; height: 13px; border: 2px solid #c7a866; border-right-color: transparent; border-radius: 50%; opacity: 0; pointer-events: none; }
 .remi-call[data-state="connecting"] .remi-orb-connecting { opacity: 1; animation: remi-connect-spin .9s linear infinite; }
 @keyframes remi-connect-spin { to { transform: rotate(360deg); } }
@@ -309,15 +311,15 @@ roomay-orb { position: relative; display: block; width: 100%; height: 100%; --or
 .call-remi-trigger { flex: 0 0 auto; display: inline-flex; align-items: center; gap: 7px; justify-content: center; white-space: nowrap; }
 .call-remi-icon { font-size: 16px; line-height: 1; }
 body.remi-modal-open { overflow: hidden; }
-.remi-dialog-overlay { position: fixed; inset: 0; z-index: 110; display: grid; place-items: center; padding: 16px; background: rgba(14, 33, 24, .55); backdrop-filter: blur(6px); }
-.remi-dialog { position: relative; width: min(460px, 100%); max-height: calc(100dvh - 32px); overflow-y: auto; overscroll-behavior: contain; margin: 0; padding: 22px; border-radius: 22px; background: #f6faf5; box-shadow: 0 28px 85px rgba(8, 36, 23, .32); }
+.remi-dialog-overlay { position: fixed; inset: 0; z-index: 110; display: grid; place-items: center; overflow-y: auto; overscroll-behavior: contain; padding: max(10px, env(safe-area-inset-top)) max(10px, env(safe-area-inset-right)) max(10px, env(safe-area-inset-bottom)) max(10px, env(safe-area-inset-left)); background: rgba(14, 33, 24, .55); backdrop-filter: blur(6px); }
+.remi-dialog { position: relative; width: min(460px, 100%); max-height: calc(100vh - 32px); max-height: calc(100dvh - 32px); overflow-x: hidden; overflow-y: auto; overscroll-behavior: contain; margin: auto; padding: 22px; border-radius: 22px; background: #f6faf5; box-shadow: 0 28px 85px rgba(8, 36, 23, .32); }
 .remi-dialog .remi-call-top { flex-direction: row; align-items: flex-start; }
 .remi-dialog .remi-call-top h3 { font-size: 20px; }
 .remi-close-button { flex: 0 0 34px; width: 34px; height: 34px; border: 1px solid #cddbcf; border-radius: 50%; background: #fff; color: #335344; font-size: 23px; line-height: 1; }
 .remi-close-button:hover { background: #eaf2ed; }
-.remi-dialog .remi-orb-stage { margin: 12px auto 0; width: min(250px, 62vw); height: min(250px, 62vw); }
+.remi-dialog .remi-orb-stage { margin: 12px auto 0; width: clamp(148px, min(52vw, 250px), 250px); height: clamp(148px, min(52vw, 250px), 250px); }
 .remi-call-duration { margin: 0; text-align: center; color: #204b37; font-size: 19px; letter-spacing: .07em; font-weight: 700; font-variant-numeric: tabular-nums; }
-.remi-dialog .remi-call-status { text-align: center; min-height: 2.9em; font-size: 12px; }
+.remi-dialog .remi-call-status { width: min(100%, 38ch); min-height: 3.6em; margin-right: auto; margin-left: auto; text-align: center; font-size: 12px; }
 .remi-dialog .remi-call-actions { justify-content: center; margin: 13px 0 0; }
 .remi-dialog .remi-call-actions button { min-height: 43px; }
 .remi-dialog .remi-call-disclosure { margin-top: 14px; }
@@ -326,9 +328,15 @@ body.remi-modal-open { overflow: hidden; }
   .chat-heading { gap: 9px; padding: 15px 13px; }
   .chat-heading .assistant-avatar { flex-basis: 36px; height: 36px; }
   .call-remi-trigger { padding: 0 9px; font-size: 10px; }
-  .remi-dialog-overlay { padding: 9px; }
+  .remi-dialog-overlay { padding: max(9px, env(safe-area-inset-top)) max(9px, env(safe-area-inset-right)) max(9px, env(safe-area-inset-bottom)) max(9px, env(safe-area-inset-left)); }
   .remi-dialog { width: 100%; max-height: calc(100dvh - 18px); padding: 18px 14px; border-radius: 17px; }
-  .remi-dialog .remi-orb-stage { width: min(220px, 60vw); height: min(220px, 60vw); }
+  .remi-dialog .remi-orb-stage { width: clamp(144px, 58vw, 220px); height: clamp(144px, 58vw, 220px); }
+}
+@media (max-height: 640px) {
+  .remi-dialog-overlay { align-items: start; }
+  .remi-dialog .remi-orb-stage { width: clamp(120px, 33vh, 190px); height: clamp(120px, 33vh, 190px); margin-top: 5px; }
+  .remi-dialog .remi-call-disclosure { margin-top: 8px; }
+  .remi-dialog .remi-call-captions { max-height: 72px; }
 }
 @media (prefers-reduced-motion: reduce) {
   .remi-dialog-overlay { backdrop-filter: none; }

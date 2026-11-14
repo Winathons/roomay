@@ -939,7 +939,8 @@ def make_server(demo=None, port=PORT_DEFAULT, *, enable_local_qa=False,
             return (origin.scheme == "http" and origin.hostname in allowed_hosts
                     and origin_port == self.server.server_port)
 
-        def _send(self, status, body, *, content_type="application/json; charset=utf-8", extra=()):
+        def _send(self, status, body, *, content_type="application/json; charset=utf-8",
+                  extra=(), allow_vapi_web_call=False):
             if isinstance(body, str):
                 payload = body.encode("utf-8")
             else:
@@ -954,10 +955,24 @@ def make_server(demo=None, port=PORT_DEFAULT, *, enable_local_qa=False,
             for name, value in extra:
                 self.send_header(name, value)
             if content_type.startswith("text/html"):
+                connect_sources = "'self'"
+                frame_sources = "'self'"
+                if allow_vapi_web_call:
+                    # The SDK creates calls through api.vapi.ai and joins a
+                    # Daily room. The browser-reported call-machine assets use
+                    # these exact HTTPS hosts; keep provider origins out of
+                    # pages that do not load Call Remi.
+                    connect_sources += (
+                        " https://api.vapi.ai https://*.daily.co wss://*.daily.co"
+                        " https://c.dailywebrtc.com https://d.dailywebrtc.net"
+                        " https://c.dailywebrtc.net"
+                    )
+                    frame_sources += " https://*.daily.co"
                 self.send_header(
                     "Content-Security-Policy",
                     "default-src 'self'; script-src 'self'; style-src 'self'; "
-                    "connect-src 'self'; img-src 'self'; object-src 'none'; "
+                    f"connect-src {connect_sources}; frame-src {frame_sources}; "
+                    "img-src 'self'; object-src 'none'; "
                     "base-uri 'none'; form-action 'self'; frame-ancestors 'none'",
                 )
             self.end_headers()
@@ -1007,7 +1022,10 @@ def make_server(demo=None, port=PORT_DEFAULT, *, enable_local_qa=False,
                         "<!-- optional-vapi-sdk -->",
                         '<script src="/vapi_sdk.js" defer></script>',
                     )
-                return self._send(200, content, content_type="text/html; charset=utf-8")
+                return self._send(
+                    200, content, content_type="text/html; charset=utf-8",
+                    allow_vapi_web_call=(name == "index.html" and vapi_config is not None),
+                )
             paths = {
                 "/app.css": ("app.css", "text/css; charset=utf-8"),
                 "/voice_intake.js": ("voice_intake.js", "text/javascript; charset=utf-8"),

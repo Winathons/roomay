@@ -19,11 +19,12 @@ class Element {
   append(...values) { this.children.push(...values); }
   removeChild(child) { this.children.splice(this.children.indexOf(child), 1); }
   setAttribute(key, value) { this.attributes[key] = value; }
+  removeAttribute(key) { delete this.attributes[key]; }
 }
 
 function harness({ configStatus = 200, startError = null, sdk = true, configGate = null } = {}) {
   const ids = ['remi-call', 'remi-call-overlay', 'call-remi', 'call-remi-label',
-    'close-remi', 'remi-call-duration', 'end-remi', 'mute-remi', 'remi-call-status',
+    'close-remi', 'remi-call-duration', 'end-remi', 'mute-remi', 'retry-remi', 'remi-call-status',
     'remi-call-captions', 'use-call-transcript', 'remi-orb'];
   const elements = Object.fromEntries(ids.map(id => [id, new Element(id)]));
   elements['remi-call-overlay'].hidden = true;
@@ -38,7 +39,7 @@ function harness({ configStatus = 200, startError = null, sdk = true, configGate
     if (url === '/api/voice/config') {
       if (configGate) await configGate;
       return { ok: configStatus === 200, status: configStatus, json: async () => configStatus === 200
-        ? { enabled: true, publicKey: 'pk_public_test_only', assistantId: 'assistant-test-id', assistantLabel: 'Remi', modelProvider: 'openai', modelName: 'gpt-4o', maxDurationSeconds: 180 }
+        ? { enabled: true, publicKey: 'pk_public_test_only', assistantId: 'assistant-test-id', assistantLabel: 'Remi', modelProvider: 'openai', modelName: 'gpt-4.1', maxDurationSeconds: 180 }
         : { error: 'not_found' } };
     }
     if (url === '/api/voice/claim') return { ok: true, status: 200, json: async () => ({}) };
@@ -98,8 +99,9 @@ test('does not start a provider call until the guest presses Call Remi', async (
   assert.deepEqual(h.calls.map(call => call.url), ['/api/voice/config', '/api/voice/claim']);
   assert.equal(h.clientRef.value.startArgs[0], 'assistant-test-id');
   assert.equal(h.clientRef.value.startArgs[1].maxDurationSeconds, 180);
+  assert.equal(h.clientRef.value.startArgs[1].customerJoinTimeoutSeconds, 45);
   assert.equal(h.clientRef.value.startArgs[1].model.provider, 'openai');
-  assert.equal(h.clientRef.value.startArgs[1].model.model, 'gpt-4o');
+  assert.equal(h.clientRef.value.startArgs[1].model.model, 'gpt-4.1');
   assert.match(h.clientRef.value.startArgs[1].model.messages[0].content, /Never claim a request was submitted/);
   assert.equal(h.clientRef.value.startArgs[1].artifactPlan.recordingEnabled, false);
   assert.equal(h.clientRef.value.startArgs[1].artifactPlan.loggingEnabled, false);
@@ -155,6 +157,37 @@ test('shows listening, speaking, interruption, captions, mute and end states', a
   assert.equal(h.elements['mute-remi'].textContent, 'Mute microphone');
   assert.equal(h.elements['mute-remi'].attributes['aria-pressed'], 'false');
   assert.equal(h.calls.filter(call => call.url === '/api/voice/release').length, 1);
+});
+
+test('per-call join timeout stays separate from the 3-minute maximum duration', async () => {
+  const h = harness();
+  h.elements['call-remi'].emit('click'); await tick();
+  const overrides = h.clientRef.value.startArgs[1];
+  assert.equal(overrides.customerJoinTimeoutSeconds, 45);
+  assert.equal(overrides.maxDurationSeconds, 180);
+  assert.equal(h.timers.length, 0, 'the local duration timer still starts only after call-start');
+  h.clientRef.value.emit('call-start');
+  assert.equal(h.timers[0].duration, 180000);
+});
+
+test('call-start progress is clear, stage-allowlisted, and ignores provider metadata', async () => {
+  const h = harness();
+  h.elements['call-remi'].emit('click'); await tick();
+  const client = h.clientRef.value;
+  client.emit('call-start-progress', {
+    stage: 'initialization', status: 'started',
+    metadata: { callId: 'private-call-id', error: 'authorization=secret' },
+  });
+  assert.match(h.elements['remi-call-status'].textContent, /Requesting microphone access/);
+  client.emit('call-start-progress', { stage: 'web-call-creation', status: 'started' });
+  assert.match(h.elements['remi-call-status'].textContent, /Connecting to Remi/);
+  client.emit('call-start-progress', { stage: 'daily-call-join', status: 'started' });
+  assert.match(h.elements['remi-call-status'].textContent, /Joining the live audio session/);
+  assert.doesNotMatch(h.elements['remi-call-status'].textContent, /private-call-id|authorization=secret/);
+  client.emit('call-start');
+  const connected = h.elements['remi-call-status'].textContent;
+  client.emit('call-start-progress', { stage: 'daily-call-join', status: 'completed' });
+  assert.equal(h.elements['remi-call-status'].textContent, connected, 'late progress cannot replace connected state');
 });
 
 test('unsupported local SDK still allows opening the visual preview without a call', () => {
@@ -296,6 +329,22 @@ test('microphone denial is sanitized and returns to the typed fallback', async (
   assert.equal(h.elements['call-remi'].hidden, false);
 });
 
+test('SDK microphone-preflight failure reports a sanitized diagnostic reference', async () => {
+  const h = harness();
+  h.elements['call-remi'].emit('click'); await tick();
+  h.clientRef.value.emit('call-start-failed', {
+    stage: 'microphone-preflight', error: 'Permission denied',
+    errorStack: 'private stack', context: { callId: 'private-call-id' },
+  });
+  const status = h.elements['remi-call-status'].textContent;
+  assert.match(status, /Microphone access was not granted/);
+  assert.match(status, /Reference: VAPI_MICROPHONE_FAILED/);
+  assert.doesNotMatch(status, /Permission denied|private stack|private-call-id/);
+  assert.equal(h.clientRef.value.stopped, 1);
+  assert.equal(h.elements['remi-orb'].state, 'idle');
+  assert.equal(h.elements['retry-remi'].hidden, false);
+});
+
 test('call-start-failed exposes an allowlisted stage and HTTP status, never provider details', async () => {
   const h = harness();
   h.elements['call-remi'].emit('click'); await tick();
@@ -310,6 +359,9 @@ test('call-start-failed exposes an allowlisted stage and HTTP status, never prov
   assert.match(status, /Reference: VAPI_WEB_CALL_HTTP_403/);
   assert.doesNotMatch(status, /private-value|private stack|request body|private-call-id|status code 403/);
   assert.equal(h.elements['remi-orb'].state, 'idle');
+  assert.equal(h.clientRef.value.stopped, 1, 'failed setup stops and releases the SDK call object');
+  assert.equal(h.elements['retry-remi'].hidden, false);
+  assert.equal(h.elements['remi-orb'].attributes.paused, '');
 });
 
 test('rejected start promises show a safe diagnostic reference and preserve typed fallback', async () => {
@@ -320,13 +372,55 @@ test('rejected start promises show a safe diagnostic reference and preserve type
   assert.doesNotMatch(status, /private-value|provider token|Error/);
   assert.equal(h.elements['call-remi'].hidden, false);
   assert.equal(h.elements['remi-orb'].state, 'idle');
+  assert.equal(h.clientRef.value.stopped, 1, 'a rejected start promise cleans up its SDK client');
+  assert.equal(h.elements['remi-orb'].attributes.paused, '');
+});
+
+test('DNS failure is described as connectivity trouble, cleans up, and allows a safe retry', async () => {
+  const h = harness();
+  h.elements['call-remi'].emit('click'); await tick();
+  const failedClient = h.clientRef.value;
+  failedClient.emit('call-start-failed', {
+    stage: 'web-call-creation',
+    error: 'net::ERR_NAME_NOT_RESOLVED POST https://api.vapi.ai/call/web',
+    errorStack: 'secret=never-display-this',
+  });
+  const status = h.elements['remi-call-status'].textContent;
+  assert.match(status, /internet or DNS connection/);
+  assert.match(status, /VAPI_WEB_CALL_NETWORK_FAILED/);
+  assert.doesNotMatch(status, /ERR_NAME_NOT_RESOLVED|api\.vapi\.ai|secret=|https:/);
+  assert.equal(failedClient.stopped, 1);
+  assert.equal(h.elements['remi-orb'].state, 'idle');
+  assert.equal(h.elements['retry-remi'].hidden, false);
+  assert.equal(h.elements['remi-orb'].attributes.paused, '');
+
+  h.elements['retry-remi'].emit('click'); await tick();
+  assert.notEqual(h.clientRef.value, failedClient);
+  assert.equal(h.clientRef.value.startArgs[0], 'assistant-test-id');
+  assert.equal(h.elements['remi-call-status'].textContent.includes('Connecting'), true);
+  assert.equal(h.elements['remi-orb'].attributes.paused, undefined);
+});
+
+test('failure while speaking terminates animation and leaves a readable retry state', async () => {
+  const h = harness();
+  h.elements['call-remi'].emit('click'); await tick();
+  const client = h.clientRef.value;
+  client.emit('call-start');
+  client.emit('speech-start');
+  assert.equal(h.elements['remi-orb'].state, 'speaking');
+  client.emit('error', { type: 'network-error', message: 'connection lost' });
+  assert.equal(client.stopped, 1);
+  assert.equal(h.elements['remi-orb'].state, 'idle');
+  assert.match(h.elements['remi-call-status'].textContent, /internet or DNS connection/);
+  assert.equal(h.elements['retry-remi'].hidden, false);
+  assert.equal(h.elements['remi-orb'].attributes.paused, '');
 });
 
 test('provider errors do not reveal raw exception details', async () => {
   const h = harness();
   h.elements['call-remi'].emit('click'); await tick();
   h.clientRef.value.emit('error', { type: 'network-error', message: 'token=secret' });
-  assert.match(h.elements['remi-call-status'].textContent, /connection was interrupted/);
+  assert.match(h.elements['remi-call-status'].textContent, /internet or DNS connection/);
   assert.doesNotMatch(h.elements['remi-call-status'].textContent, /token=secret/);
 });
 

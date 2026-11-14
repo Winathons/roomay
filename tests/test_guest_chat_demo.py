@@ -754,6 +754,14 @@ class GuestChatDemoHttpTests(unittest.TestCase):
         self.assertNotIn("FICTIONAL SESSION", text)
         self.assertNotIn("DEMO VIEW", text)
         self.assertIn("default-src 'self'", headers["Content-Security-Policy"])
+        self.assertIn("style-src 'self'", headers["Content-Security-Policy"])
+        self.assertNotIn("unsafe-inline", headers["Content-Security-Policy"])
+        self.assertIn("connect-src 'self'", headers["Content-Security-Policy"])
+        self.assertNotIn("api.vapi.ai", headers["Content-Security-Policy"])
+        self.assertNotIn("daily.co", headers["Content-Security-Policy"])
+        self.assertNotIn("dailywebrtc.com", headers["Content-Security-Policy"])
+        self.assertNotIn("dailywebrtc.net", headers["Content-Security-Policy"])
+        self.assertIn("frame-src 'self'", headers["Content-Security-Policy"])
         self.assertIn('src="/voice_intake.js"', text)
         self.assertIn("aria-live=\"polite\"", text)
         self.assertIn("id=\"voice-button\"", text)
@@ -806,9 +814,17 @@ class GuestChatDemoHttpTests(unittest.TestCase):
         self.assertNotIn("preview/", html.decode("utf-8"))
 
     def test_voice_calls_are_off_by_default_and_sdk_is_not_loaded(self):
-        status, _, html = self.dispatch("/stay")
+        status, headers, html = self.dispatch("/stay")
         self.assertEqual(status, 200)
         self.assertNotIn('<script src="/vapi_sdk.js"', html.decode("utf-8"))
+        csp = headers["Content-Security-Policy"]
+        self.assertIn("connect-src 'self'", csp)
+        self.assertNotIn("api.vapi.ai", csp)
+        self.assertNotIn("daily.co", csp)
+        self.assertNotIn("dailywebrtc.com", csp)
+        self.assertNotIn("dailywebrtc.net", csp)
+        self.assertIn("frame-src 'self'", csp)
+        self.assertNotIn("unsafe-inline", csp)
         status, _, _ = self.dispatch("/api/voice/config", method="POST", body=b"{}")
         self.assertEqual(status, 404)
         status, _, _ = self.dispatch("/vapi_sdk.js")
@@ -820,15 +836,39 @@ class GuestChatDemoHttpTests(unittest.TestCase):
             "ROOMAY_VAPI_TEST_ASSISTANT_ID": "assistant-test-201",
             "ROOMAY_VAPI_TEST_ASSISTANT_VOICE": "remi",
             "ROOMAY_VAPI_TEST_LLM_PROVIDER": "openai",
-            "ROOMAY_VAPI_TEST_LLM_MODEL": "gpt-4o",
+            "ROOMAY_VAPI_TEST_LLM_MODEL": "gpt-4.1",
             "VAPI_PRIVATE_API_KEY": "must-not-be-read-or-returned",
         }
         server = make_server(port=0, enable_local_qa=True,
                              enable_vapi_web_call=True, vapi_environment=env)
         try:
-            status, _, html = self.dispatch("/stay", server=server)
+            status, headers, html = self.dispatch("/stay", server=server)
             self.assertEqual(status, 200)
             self.assertIn('<script src="/vapi_sdk.js" defer></script>', html.decode("utf-8"))
+            csp = headers["Content-Security-Policy"]
+            self.assertIn("style-src 'self'", csp)
+            self.assertNotIn("unsafe-inline", csp)
+            self.assertIn(
+                "connect-src 'self' https://api.vapi.ai https://*.daily.co "
+                "wss://*.daily.co https://c.dailywebrtc.com https://d.dailywebrtc.net "
+                "https://c.dailywebrtc.net",
+                csp,
+            )
+            self.assertIn("frame-src 'self' https://*.daily.co", csp)
+            frame_src = csp.split("frame-src", 1)[1].split(";", 1)[0]
+            self.assertNotIn("dailywebrtc.com", frame_src)
+            self.assertNotIn("dailywebrtc.net", frame_src)
+            self.assertNotIn("unsafe-inline", csp)
+            self.assertIn('id="retry-remi"', html.decode("utf-8"))
+            status, qa_headers, _ = self.dispatch("/__qa/", server=server)
+            self.assertEqual(status, 200)
+            qa_csp = qa_headers["Content-Security-Policy"]
+            self.assertIn("connect-src 'self'", qa_csp)
+            self.assertNotIn("api.vapi.ai", qa_csp)
+            self.assertNotIn("daily.co", qa_csp)
+            self.assertNotIn("dailywebrtc.com", qa_csp)
+            self.assertNotIn("dailywebrtc.net", qa_csp)
+            self.assertNotIn("unsafe-inline", qa_csp)
             status, _, _ = self.dispatch("/api/voice/config", method="POST",
                                          body=b"{}", server=server)
             self.assertEqual(status, 401)
@@ -842,7 +882,7 @@ class GuestChatDemoHttpTests(unittest.TestCase):
             self.assertEqual(config["assistantId"], "assistant-test-201")
             self.assertEqual(config["assistantLabel"], "Remi")
             self.assertEqual(config["modelProvider"], "openai")
-            self.assertEqual(config["modelName"], "gpt-4o")
+            self.assertEqual(config["modelName"], "gpt-4.1")
             self.assertEqual(config["maxDurationSeconds"], 180)
             self.assertEqual(config["publicKey"], env["ROOMAY_VAPI_PUBLIC_KEY"])
             self.assertNotIn("must-not-be-read-or-returned", body.decode("utf-8"))
@@ -877,10 +917,10 @@ class GuestChatDemoHttpTests(unittest.TestCase):
         bad_envs = [
             {"ROOMAY_VAPI_PUBLIC_KEY": "short", "ROOMAY_VAPI_TEST_ASSISTANT_ID": "assistant",
              "ROOMAY_VAPI_TEST_ASSISTANT_VOICE": "remi",
-             "ROOMAY_VAPI_TEST_LLM_PROVIDER": "openai", "ROOMAY_VAPI_TEST_LLM_MODEL": "gpt-4o"},
+             "ROOMAY_VAPI_TEST_LLM_PROVIDER": "openai", "ROOMAY_VAPI_TEST_LLM_MODEL": "gpt-4.1"},
             {"ROOMAY_VAPI_PUBLIC_KEY": "pk_example_0123456789", "ROOMAY_VAPI_TEST_ASSISTANT_ID": "assistant",
              "ROOMAY_VAPI_TEST_ASSISTANT_VOICE": "mary",
-             "ROOMAY_VAPI_TEST_LLM_PROVIDER": "openai", "ROOMAY_VAPI_TEST_LLM_MODEL": "gpt-4o"},
+             "ROOMAY_VAPI_TEST_LLM_PROVIDER": "openai", "ROOMAY_VAPI_TEST_LLM_MODEL": "gpt-4.1"},
             {"ROOMAY_VAPI_PUBLIC_KEY": "pk_example_0123456789", "ROOMAY_VAPI_TEST_ASSISTANT_ID": "assistant",
              "ROOMAY_VAPI_TEST_ASSISTANT_VOICE": "remi"},
         ]
@@ -913,16 +953,30 @@ class GuestChatDemoHttpTests(unittest.TestCase):
             "/api/qa/select", method="POST", body=b'{"role":"reception"}', cookie=guest_cookie)
         self.assertEqual(status, 200)
         self.assertEqual(json.loads(result)["path"], "/staff/reception")
-        status, _, html = self.dispatch("/staff/reception", cookie=guest_cookie)
+        status, staff_headers, html = self.dispatch("/staff/reception", cookie=guest_cookie)
         self.assertEqual(status, 200)
         self.assertIn("Reception Dashboard", html.decode("utf-8"))
+        staff_csp = staff_headers["Content-Security-Policy"]
+        self.assertIn("connect-src 'self'", staff_csp)
+        self.assertIn("frame-src 'self'", staff_csp)
+        self.assertNotIn("api.vapi.ai", staff_csp)
+        self.assertNotIn("daily.co", staff_csp)
+        self.assertNotIn("dailywebrtc.com", staff_csp)
+        self.assertNotIn("dailywebrtc.net", staff_csp)
+        self.assertNotIn("unsafe-inline", staff_csp)
         status, _, _ = self.dispatch("/staff/housekeeping", cookie=guest_cookie)
         self.assertEqual(status, 403)
 
         self.dispatch("/api/qa/select", method="POST", body=b'{"role":"housekeeping"}', cookie=guest_cookie)
-        status, _, html = self.dispatch("/staff/housekeeping", cookie=guest_cookie)
+        status, staff_headers, html = self.dispatch("/staff/housekeeping", cookie=guest_cookie)
         self.assertEqual(status, 200)
         self.assertIn("Housekeeping", html.decode("utf-8"))
+        staff_csp = staff_headers["Content-Security-Policy"]
+        self.assertIn("connect-src 'self'", staff_csp)
+        self.assertIn("frame-src 'self'", staff_csp)
+        self.assertNotIn("dailywebrtc.com", staff_csp)
+        self.assertNotIn("dailywebrtc.net", staff_csp)
+        self.assertNotIn("unsafe-inline", staff_csp)
         self.assertNotIn("href=\"/staff/reception\"", html.decode("utf-8"))
 
     def test_internal_qa_switcher_is_opt_in_and_not_product_navigation(self):
