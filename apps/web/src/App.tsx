@@ -22,7 +22,7 @@ function Dock({ at }: { at: string }) {
   return <nav className="dock" aria-label="Prototype controls">
     {L("#/reception/today", "Front desk", <IconLayoutDashboard />, "reception")}
     {L("#/staff", "Staff phones", <IconBath />, "staff")}
-    {L("#/guest", "Guest phones", <IconUser />, "guest")}
+    {L("#/guest", "Guest", <IconUser />, "guest")}
     {L("#/live", "Follow-through", <IconArrowsSplit2 />, "live")}
     {L("#/manager/overview", "Manager", <IconBriefcase />, "manager")}
     {L("#/docs", "Handoff", <IconFileText />, "docs")}
