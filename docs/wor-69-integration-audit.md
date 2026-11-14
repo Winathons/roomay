@@ -25,7 +25,8 @@ their completed offline/decision phases transferred live blockers to WOR-69.
 Sources read on this date:
 
 - [OIDC guide](https://developers.workpeg.com/docs/latest/sign-in-with-workpeg/),
-  [Tables guide](https://developers.workpeg.com/docs/latest/tables/), and
+  [Tables guide](https://developers.workpeg.com/docs/latest/tables/),
+  [Functions guide](https://developers.workpeg.com/docs/latest/functions/), and
   [Functions explainer](https://blog.workpeg.com/how-functions-work-on-workpeg/).
 - [formnow source](https://gitlab.com/workpeg/formnow), inspected at commit
   `82d07893d6f8712640a2ad6393acca64e0d458c4`: `docs/build-your-own.md`,
@@ -45,10 +46,68 @@ Sources read on this date:
 | formnow external queue → native Peg | Staff signs in through in-page SSO; page-open/manual sync leases items, writes native rows, then acknowledges | Delayed collection, not background delivery or Roomay service-request/audit integration. ACK trusts the collecting Peg's readback. |
 | Optional external inbound key → one table | Current reference documents operator-granted `inbound` scope, own-origin writer minting, binding via `whoami`, encrypted storage, revocation and idempotent add-row calls | Write-only for one table; no read/update/delete or general Tables credential. Not a request+audit transaction, not guest identity, absent helper in 0.152.0. No Roomay key/grant verified or authorized. |
 
-`WORKPEG_PK` is a publishing/development credential, not this standalone
-backend's Tables key. OIDC ID tokens and invocation tokens are not substitutes.
-Inbound keys are a separately documented constrained capability, not an exception
-authorizing developer-token access. Do not generate any credential for this audit.
+### Credential capability versus Roomay authorization
+
+The earlier owner-recorded [WOR-61 support clarification](https://linear.app/workpeg/issue/WOR-61)
+and [Roomay auth decision](wor-61-auth-boundary.md) conservatively rejected
+standalone Tables access using `WORKPEG_PK`. Historical statements that no
+external Tables credential exists must now be qualified: current Tables docs
+and formnow document **write-only, single-table inbound keys**. This does not
+make a developer publishing token a Tables credential. On reinspection for this
+revision, both current Tables and Functions guides explicitly say the dashboard's
+`WORKPEG_PK` is refused by the Tables API; that part now agrees with Roomay's
+decision. Do not preserve older contradictory general backend-token wording as
+permission to retry it, or claim all current docs still contradict the decision.
+
+| Evidence layer | Credential capability and decision |
+| --- | --- |
+| Current documented capability | `WORKPEG_PK` authenticates registry/publishing operations, not Tables. Platform-minted Function tokens allow call-scoped, person/business/Peg-bound operations. Inbound keys separately allow external adds to one bound table after a granted scope; inbound hooks receive no invocation token. OIDC establishes identity, not Tables grants. |
+| Pinned SDK 0.152.0 support | Local source exposes `sso.approve` as a compiler-facing UI stub, but no top-level `create_inbound_key` helper. Newer documentation/reference capability is not proof that this pin can mint or use the full integration safely. A REST endpoint's existence also does not establish an approved Roomay adapter. |
+| Roomay hosted verification | No inbound grant/key, real OIDC callback, authorized external writer or Function-token Tables operation was verified here. Existing owner-reported native readback does not prove those paths or multi-table request/audit consistency. |
+| Owner approval | Roomay retains its conservative rejection of standalone developer-token Tables access. No credential issuance/use, inbound scope adoption, SDK upgrade, Function invocation or deployment is authorized by documented capability or this audit. Any change needs explicit owner approval and separate reviewed implementation plus hosted acceptance. |
+
+Invocation tokens must not be exported or reused by a standalone backend;
+OIDC ID tokens are not substitute Tables credentials. Do not activate an inbound
+key as a workaround for missing guest authorization, status reads, or atomic/
+reconciled request-plus-audit persistence. Keep all current restrictions intact.
+
+### Reproduce pinned SDK source inspection (offline)
+
+From the repository root, use the environment installed from
+`requirements-dev.txt`. This reads local package metadata/source only; it does
+not invoke SSO, mint a key or call WorkPeg. The assertions fail if the environment
+is not the inspected version or exports differ:
+
+```bash
+.venv/bin/python - <<'PYSDK'
+from importlib.metadata import version
+from pathlib import Path
+import inspect
+import workpeg
+from workpeg.ui import sso
+
+assert version("workpeg") == "0.152.0"
+print("workpeg", version("workpeg"))
+print("package:", workpeg.__file__)
+print("SSO source:", inspect.getfile(type(sso)))
+assert callable(getattr(sso, "approve", None))
+print(inspect.getsource(type(sso).approve))
+assert not hasattr(workpeg, "create_inbound_key")
+print("top-level create_inbound_key: absent")
+root = Path(workpeg.__file__).parent
+hits = sorted(str(p.relative_to(root)) for p in root.rglob("*.py")
+              if "create_inbound_key" in p.read_text(encoding="utf-8"))
+print("Python source files mentioning create_inbound_key:", hits)
+PYSDK
+```
+
+On Windows, replace `.venv/bin/python` with the environment's
+`.\.venv\Scripts\python.exe` and run the Python body using a PowerShell
+here-string. In the inspected wheel, `workpeg/ui/__init__.py` exports `sso`,
+`workpeg/ui/app.py::_Sso.approve` calls `_unavailable()` (a compiler-facing stub),
+and the Python source search has no inbound-helper hits. These are source
+observations, not proof of compiler lowering, browser behavior, platform grants
+or endpoint availability; those require separate compatible integration tests.
 
 ## Existing adapters: implemented versus provisional
 
@@ -118,7 +177,19 @@ use SQLite/mocked transports; PostgreSQL results are not claimed here.
 | `PATH="$PWD/.venv/bin:$PATH" python -m unittest tests.test_backend_config tests.test_guest_backend tests.test_workpeg_staff_identity tests.test_workpeg_function_tables tests.test_workpeg_writer tests.test_public_intake -v` | 73 tests passed, no skips |
 | `.venv/bin/python -m pip install 'PyJWT[crypto]'` | Test environment only: PyJWT 2.15.1, cryptography 50.0.2; requirements unchanged |
 | `PYTHONPATH="$PWD" .venv/bin/python /workspace/work/wor69_offline_probe.py` | 6 ad hoc probes passed; scratch harness outside repository, not a committed regression suite |
-| `git diff --check` | Passed |
+| `git diff --check` | Passed, including this revision |
+| Pinned SDK inspection block above | Passed on 0.152.0; SSO stub present, inbound helper absent, no Python source hits |
+| Documentation link checks | Local targets exist; all cited HTTPS targets returned 200 on this revision |
+
+**Probe reproducibility limit:** `/workspace/work/wor69_offline_probe.py` was an
+external scratch script on the audit machine, not a tracked repository file.
+Its six probes are historical, ad hoc observations, not committed reproducible
+security regression tests. A fresh checkout cannot run the recorded scratch
+command without that uncommitted harness; the command is retained for provenance,
+not as a repository verification instruction. They do not add security coverage
+to CI. Reproducible signed-token/callback regression coverage still requires a
+separately reviewed test/runtime change. This documentation revision reruns the
+73 committed tests below, not the external probes.
 
 The six probes checked fresh state/nonce/verifier and S256 challenge; mismatched
 state/missing code before exchange; exchange callback/verifier/grant fields and
