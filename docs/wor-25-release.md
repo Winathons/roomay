@@ -286,9 +286,14 @@ separately.
       or screenshots containing personal data.
 - [ ] Obtain Workpeg's supported complete UI/manifest Peg release and
       approval/install procedure before any hosted release action.
-- [ ] Keep WOR-28, WOR-29, WOR-14, WOR-15, WOR-61 and WOR-62 open until their
-      actual access, authorization, persistence, audit, and staff permission
-      acceptance is independently met.
+- [ ] Verify the outstanding access, authorization, persistence, audit and
+      staff-permission acceptance in WOR-28, WOR-29, WOR-14 and WOR-15 against
+      their current scope and evidence. WOR-61's offline security investigation
+      and WOR-62's architecture-decision/backend-verification phase are Done;
+      do not reopen them for hosted acceptance. Follow the transferred live
+      integration blockers in WOR-69, implementation in WOR-65, and hosted MVP
+      acceptance in WOR-89. Done on WOR-61/WOR-62 does not prove live OIDC,
+      canonical WorkPeg delivery or guest/staff readback.
 
 ## Release gates and deployment approval
 
@@ -297,7 +302,10 @@ is not release approval.
 
 1. Record the reviewed `main` SHA, SDK/Python/Node versions, build results and
    artifact checksum. Inspect the compiled routes, read-only helper allowlist,
-   diagnostic/fixture exclusion and secret scan via the release-candidate tests.
+   diagnostic/fixture exclusion and compiled-artifact credential-marker checks
+   via the release-candidate tests. These checks inspect emitted artifact text
+   for known credential patterns; they are not comprehensive repository-wide
+   secret scanning and do not prove that the repository contains no secrets.
    Do not relax those tests to enable unapproved writes.
 2. Check the GitHub `Workpeg UI build` workflow result and reviewer approval.
    Verify current branch-rule enforcement with the repository owner; historical
