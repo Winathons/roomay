@@ -920,6 +920,7 @@ def make_server(demo=None, port=PORT_DEFAULT, *, enable_local_qa=False,
                     connect_sources += (
                         " https://api.vapi.ai https://*.daily.co wss://*.daily.co"
                         " https://c.dailywebrtc.com https://d.dailywebrtc.net"
+                        " https://c.dailywebrtc.net"
                     )
                     frame_sources += " https://*.daily.co"
                 self.send_header(

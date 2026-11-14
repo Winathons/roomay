@@ -747,7 +747,8 @@ class GuestChatDemoHttpTests(unittest.TestCase):
             self.assertNotIn("unsafe-inline", csp)
             self.assertIn(
                 "connect-src 'self' https://api.vapi.ai https://*.daily.co "
-                "wss://*.daily.co https://c.dailywebrtc.com https://d.dailywebrtc.net",
+                "wss://*.daily.co https://c.dailywebrtc.com https://d.dailywebrtc.net "
+                "https://c.dailywebrtc.net",
                 csp,
             )
             self.assertIn("frame-src 'self' https://*.daily.co", csp)
