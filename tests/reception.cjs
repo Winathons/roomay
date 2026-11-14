@@ -48,7 +48,7 @@ const workspaceTree = JSON.stringify(new WorkspaceHome().build());
 assert.match(workspaceTree, /Reception/);
 assert.match(workspaceTree, /Guest stay access/);
 assert.match(workspaceTree, /chats\/new/);
-assert.match(workspaceTree, /not registered custom AI actions/);
+assert.match(workspaceTree, /Actual handoff and status updates depend on/);
 assert.doesNotMatch(workspaceTree, /create a request|request was submitted|saved successfully/i);
 
 const guestRoute = registeredRoutes.find(route => route.path === '/b/[business_id]/stay');
