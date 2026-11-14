@@ -30,22 +30,22 @@ class GuestSessionError(ValueError):
 
 @dataclass(frozen=True)
 class ChallengeEvidence:
-    """Opaque evidence returned by a future trusted contact-challenge adapter.
+    """Untrusted challenge receipt submitted to a trusted verifier.
 
-    Its fields are not proof by themselves. ``verify_evidence`` must validate
-    provider authenticity, intended contact, challenge expiry, attempt limits,
-    replay protection, and successful possession before any stay is resolved.
+    It deliberately carries no business, hotel, guest, stay, or room identity.
+    The verifier must derive the guest subject from the authoritative challenge
+    record after validating provider authenticity, intended recipient, expiry,
+    attempt limits, replay protection, and possession.
     """
 
     challenge_id: str
-    business_id: str
-    hotel_id: str
-    guest_id: str
     proof: object
 
 
 @dataclass(frozen=True)
 class GuestSubject:
+    """Identity resolved by the trusted challenge verifier, never the browser."""
+
     business_id: str
     hotel_id: str
     guest_id: str
@@ -122,14 +122,13 @@ class GuestSessionAuthority:
         self._lock = threading.RLock()
 
     @staticmethod
-    def _subject(evidence):
-        if not isinstance(evidence, ChallengeEvidence):
+    def _subject(value):
+        if not isinstance(value, GuestSubject):
             raise GuestSessionError("verification_required")
-        if any(not isinstance(value, str) or not value.strip()
-               for value in (evidence.challenge_id, evidence.business_id,
-                             evidence.hotel_id, evidence.guest_id)):
+        if any(not isinstance(item, str) or not item.strip()
+               for item in (value.business_id, value.hotel_id, value.guest_id)):
             raise GuestSessionError("verification_required")
-        return GuestSubject(evidence.business_id, evidence.hotel_id, evidence.guest_id)
+        return value
 
     def _validate_stay(self, subject, value, *, expected=None, actor_id="verified-guest-session"):
         if not isinstance(value, ResolvedGuestStay):
@@ -180,19 +179,33 @@ class GuestSessionAuthority:
             self._sessions.pop(digest, None)
 
     def complete_challenge(self, evidence):
-        """Verify trusted challenge evidence, then issue a one-time opaque token."""
-        subject = self._subject(evidence)
+        """Verify untrusted evidence, derive identity, then issue an opaque token.
+
+        ``verify_evidence`` returns a GuestSubject only after the trusted
+        provider adapter has validated the challenge and enforced its
+        per-recipient/source attempt and replay limits. Client-supplied identity
+        fields are not accepted by this API.
+        """
+        if (not isinstance(evidence, ChallengeEvidence)
+                or not isinstance(evidence.challenge_id, str)
+                or not evidence.challenge_id.strip()
+                or len(evidence.challenge_id) > 256):
+            raise GuestSessionError("verification_required")
         with self._lock:
             now = self._clock()
             self._expire(now)
             if evidence.challenge_id in self._used_challenges:
                 raise GuestSessionError("challenge_replayed")
             try:
-                verified = self._verify_evidence(evidence)
+                subject = self._verify_evidence(evidence)
             except Exception:
                 raise GuestSessionError("verification_failed") from None
-            if verified is not True:
+            if not isinstance(subject, GuestSubject):
                 raise GuestSessionError("verification_failed")
+            # Burn successful one-time evidence before attempting hotel reads;
+            # a provider/store outage must not make a verified receipt reusable.
+            self._used_challenges.add(evidence.challenge_id)
+            subject = self._subject(subject)
             try:
                 resolved = self._resolve_stay(subject)
             except Exception:
@@ -210,8 +223,15 @@ class GuestSessionAuthority:
                 room_id=resolved.room_id, created_at=now,
                 expires_at=now + SESSION_TTL_SECONDS, conversation_id=str(uuid4()),
             )
-            self._used_challenges.add(evidence.challenge_id)
             return token
+
+    def revoke(self, token):
+        """Revoke one server-held session; never accept a browser identity claim."""
+        digest = _hash_token(token)
+        if digest is None:
+            return False
+        with self._lock:
+            return self._sessions.pop(digest, None) is not None
 
     def resolve_for_action(self, token):
         """Return private claims after expiry and fresh stay revalidation."""
@@ -228,9 +248,18 @@ class GuestSessionAuthority:
                 resolved = self._resolve_stay(record.subject)
             except Exception:
                 raise GuestSessionError("stay_unavailable") from None
-            context = self._validate_stay(
-                record.subject, resolved, expected=(record.stay_id, record.room_id),
-                actor_id=record.actor_id)
+            try:
+                context = self._validate_stay(
+                    record.subject, resolved, expected=(record.stay_id, record.room_id),
+                    actor_id=record.actor_id)
+            except GuestSessionError as error:
+                if error.code in {
+                    "active_registered_stay_required", "scope_mismatch", "stay_scope_changed",
+                }:
+                    # Checkout, identity/scope mismatch, or a room/stay change
+                    # permanently invalidates this bearer credential.
+                    self._sessions.pop(digest, None)
+                raise
             # Rebuild scope from the newest validated snapshot, never from client data.
             scope = ConversationScope(
                 business_id=resolved.business_id,
