@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://roomay.example/contracts/guest-mvp/v1",
+  "$id": "urn:roomay:contracts:guest-mvp:v1",
   "title": "Roomay Guest MVP Provider-Neutral Contract",
   "description": "Wire-level contract only. Authentication, Workpeg calls, persistence and delivery are implemented by separately verified adapters.",
   "type": "object",
@@ -83,12 +83,6 @@
     "guest_context": {
       "type": "object",
       "additionalProperties": false,
-      "required": [
-        "state",
-        "stay",
-        "authorized_hotel",
-        "authorized_room"
-      ],
       "properties": {
         "state": {
           "enum": [
@@ -167,7 +161,38 @@
         "failure": {
           "$ref": "#/$defs/failure"
         }
-      }
+      },
+      "oneOf": [
+        {
+          "required": [
+            "state",
+            "stay",
+            "authorized_hotel",
+            "authorized_room"
+          ],
+          "properties": {
+            "state": {
+              "const": "verified"
+            }
+          }
+        },
+        {
+          "required": [
+            "state",
+            "failure"
+          ],
+          "properties": {
+            "state": {
+              "enum": [
+                "unauthenticated",
+                "revoked",
+                "expired",
+                "unavailable"
+              ]
+            }
+          }
+        }
+      ]
     },
     "approved_information": {
       "type": "object",
@@ -325,10 +350,6 @@
     "request_outcome": {
       "type": "object",
       "additionalProperties": false,
-      "required": [
-        "state",
-        "persisted"
-      ],
       "properties": {
         "state": {
           "enum": [
@@ -351,7 +372,44 @@
         "failure": {
           "$ref": "#/$defs/failure"
         }
-      }
+      },
+      "oneOf": [
+        {
+          "required": [
+            "state",
+            "persisted"
+          ],
+          "properties": {
+            "state": {
+              "enum": [
+                "created",
+                "duplicate"
+              ]
+            },
+            "persisted": {
+              "const": true
+            }
+          }
+        },
+        {
+          "required": [
+            "state",
+            "persisted"
+          ],
+          "properties": {
+            "state": {
+              "enum": [
+                "rejected",
+                "unavailable",
+                "uncertain"
+              ]
+            },
+            "persisted": {
+              "const": false
+            }
+          }
+        }
+      ]
     },
     "reception_transition": {
       "type": "object",

@@ -16,7 +16,7 @@ class GuestMvpContractV1Tests(unittest.TestCase):
 
     def test_contract_is_versioned_and_has_all_consumer_messages(self):
         self.assertEqual(self.schema["$schema"], "https://json-schema.org/draft/2020-12/schema")
-        self.assertEqual(self.schema["$id"], "https://roomay.example/contracts/guest-mvp/v1")
+        self.assertEqual(self.schema["$id"], "urn:roomay:contracts:guest-mvp:v1")
         self.assertEqual(self.schema["properties"]["contract_version"]["const"], "roomay.guest-mvp.v1")
         self.assertEqual(set(self.schema["properties"]["message_type"]["enum"]), {
             "guest_context", "hotel_information", "conversation_action",
@@ -30,7 +30,7 @@ class GuestMvpContractV1Tests(unittest.TestCase):
                 definition = self.defs[name]
                 self.assertEqual(definition["type"], "object")
                 self.assertTrue(definition["additionalProperties"] is False)
-                if name == "conversation_action":
+                if name in {"conversation_action", "guest_context", "request_outcome"}:
                     self.assertTrue(definition["oneOf"])
                     for operation in definition["oneOf"]:
                         self.assertTrue(set(operation["required"]) <= set(definition["properties"]))
