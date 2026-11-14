@@ -13,18 +13,9 @@ Design issues: WOR-7, WOR-24 and WOR-35 to WOR-46 in Linear. Each has a handoff 
 | **Staff phones** | **Guest phones** |
 | ![Staff phones](docs/screenshots/staff.png) | ![Guest phones](docs/screenshots/guest.png) |
 
-## Guest MVP implementation (WOR-17)
+## Focused guest preview (WOR-17)
 
-The current focused guest flow is at [`#/guest/mvp`](http://localhost:5173/#/guest/mvp):
-
-1. Enter a stay code (local-only preview fixture `482913`; `000000` exercises expiry).
-2. Enter the Roomay conversation to ask room questions or describe a service problem.
-3. Review an extracted request before deliberately confirming it.
-4. Inspect a simulated request in the synthetic browser store and return to chat.
-
-The UI reuses Roomay's mobile shell and design tokens. The previous broader `#/guest` prototype is retained for comparison only. **This is not a production guest authentication flow.** The browser-only verifier and scripted replies cannot establish a real guest session or call WorkPeg AI, and store writes do not reach WorkPeg Tables or receptionist staff. The screen labels these limitations explicitly.
-
-**Next integration gates:** WOR-15 must provide server-verified stay grants, WOR-77/69 must define the trusted chat/action ingress, Umar's WOR-87 implements verified WorkPeg AI behavior, and Yusuf's WOR-65 must return canonical WorkPeg commit/readback evidence before we replace preview messages with real request success. Never put WorkPeg developer credentials, private hotel facts, or a privileged table writer in browser JavaScript.
+The guest stay-code, conversation, request review, and tracking preview now lives in the independent [`apps/guest-mvp`](../guest-mvp/README.md) package. The broader guest prototypes below remain part of this app; the focused preview is no longer routed through this application or its shared synthetic store.
 
 ## Run it
 

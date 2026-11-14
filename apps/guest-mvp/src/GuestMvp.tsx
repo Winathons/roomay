@@ -3,16 +3,16 @@ import {
   IconAlertTriangle, IconArrowLeft, IconCheck, IconClock,
   IconLock, IconMessageCircle, IconSend, IconShieldCheck,
 } from "@tabler/icons-react";
-import { triage } from "./data";
-import { useStore, type WriteResult } from "./store";
-import { ReqChip } from "./ui";
+import { triage } from "./triage";
+
+type PreviewRequest = { id: string; ref: string; title: string; detail: string; status: "received" };
+type WriteResult = { ok: boolean; kind?: "fail" | "unknown" | "offline"; req?: PreviewRequest };
 
 // WOR-17: frontend-only interaction reference. NEVER use this verifier in a hosted guest flow.
 // Stay verification, WorkPeg AI conversation and canonical writes require trusted adapters
 // owned by WOR-15 / WOR-69 / WOR-65 / WOR-87.
 const DEMO_CODE = "482913";
 const DEMO_EXPIRED = "000000";
-const ROOM_ID = "204";
 
 type Phase = "verify" | "chat" | "review" | "track";
 type Bubble = { id: number; who: "guest" | "roomay"; text: string };
@@ -31,7 +31,6 @@ function DemoNotice() {
 }
 
 export function GuestMvp() {
-  const { db, createRequest, data } = useStore();
   const [phase, setPhase] = useState<Phase>("verify");
   const [code, setCode] = useState("");
   const [error, setError] = useState("");
@@ -39,11 +38,13 @@ export function GuestMvp() {
   const [message, setMessage] = useState("");
   const [messages, setMessages] = useState<Bubble[]>([welcome]);
   const [draft, setDraft] = useState<Draft | null>(null);
-  const [requestId, setRequestId] = useState<string | null>(null);
+  const [request, setRequest] = useState<PreviewRequest | null>(null);
   const [result, setResult] = useState<WriteResult | null>(null);
   const [saving, setSaving] = useState(false);
-  const stay = db.stays.find(s => s.roomId === ROOM_ID && s.status === "in_house");
-  const request = requestId ? db.requests.find(r => r.id === requestId && r.roomId === ROOM_ID) : undefined;
+  const params = new URLSearchParams(window.location.search);
+  const stay = params.get("stay") !== "ended"; // Local fixture only; no actual stay record is read.
+  const saveOutcome = params.get("preview");
+  const data = saveOutcome === "offline" ? "offline" : "synthetic";
 
   const verify = (e: FormEvent) => {
     e.preventDefault();
@@ -72,7 +73,7 @@ export function GuestMvp() {
       setMessages(m => [...m, { id: id + 1, who: "roomay", text: "I can't share another guest's information. Please contact reception." }]);
       return;
     }
-    if (/wifi|wi-fi|password|hotel polic|check.?out|tv remote/.test(lower)) {
+    if (/\b(what|where|when|which|how)\b.*\b(wi-?fi|password|hotel polic|check.?out|tv remote)\b|\b(password|hotel polic)\b.*\b(wi-?fi|internet)\b/.test(lower)) {
       setMessages(m => [...m, {
         id: id + 1, who: "roomay",
         text: "This preview has no verified hotel facts connected yet. Reception can help. WorkPeg AI will retrieve authorized room information after integration.",
@@ -88,6 +89,7 @@ export function GuestMvp() {
       setMessages(m => [...m, { id: id + 1, who: "roomay", text: "Please contact reception directly for sensitive guest or billing matters. No request has been sent." }]);
       return;
     }
+    setResult(null);
     setDraft({
       text: value,
       title: finding.confident ? finding.title : "Guest needs assistance",
@@ -102,18 +104,13 @@ export function GuestMvp() {
     setSaving(true);
     setResult(null);
     try {
-      const response = await createRequest({
-        roomId: ROOM_ID,
-        text: draft.text,
-        title: draft.title,
-        channel: "Chat",
-        guestFirst: "Guest",
-        dept: "Front desk",
-      });
+      // Explicit preview-only save simulation; this never calls WorkPeg.
+      const response: WriteResult = saveOutcome === "fail" || saveOutcome === "unknown" || saveOutcome === "offline"
+        ? { ok: false, kind: saveOutcome }
+        : { ok: true, req: { id: `preview-${Date.now()}`, ref: `DEMO-${String(Date.now()).slice(-4)}`, title: draft.title, detail: draft.text, status: "received" } };
       setResult(response);
       if (response.ok && response.req) {
-        // Only a simulated local store readback, never a WorkPeg delivery receipt.
-        setRequestId(response.req.id);
+        setRequest(response.req);
         setPhase("track");
         setDraft(null);
       }
@@ -122,8 +119,14 @@ export function GuestMvp() {
 
   const restart = () => {
     setPhase("verify"); setCode(""); setError(""); setTries(3);
-    setRequestId(null); setDraft(null); setResult(null);
+    setRequest(null); setDraft(null); setResult(null);
     setMessages([welcome]); setMessage("");
+  };
+
+  const leaveReview = () => {
+    setDraft(null);
+    setResult(null);
+    setPhase("chat");
   };
 
   const heading = phase === "verify" ? "Welcome to Roomay"
@@ -132,7 +135,7 @@ export function GuestMvp() {
 
   return <div className="roomay-guest-mvp" style={{ display: "flex", flexDirection: "column", height: "100%" }}>
     <div className="m-top">
-      {phase !== "verify" && <button className="icon-btn" onClick={() => setPhase(phase === "review" ? "chat" : phase === "track" ? "chat" : "verify")} aria-label="Back"><IconArrowLeft size={19} /></button>}
+      {phase !== "verify" && <button className="icon-btn" onClick={() => phase === "review" ? leaveReview() : setPhase(phase === "track" ? "chat" : "verify")} aria-label="Back"><IconArrowLeft size={19} /></button>}
       <div style={{ flex: 1, minWidth: 0 }}>
         <div className="m-title">{heading}</div>
         <div className="cap">{phase === "verify" ? "Verify your stay" : "Room 204 · simulated guest session"}</div>
@@ -171,11 +174,11 @@ export function GuestMvp() {
         <dt>Suggested team</dt><dd>{draft.department} (not assigned)</dd>
         <dt>Details</dt><dd>{draft.text}</dd></dl>
       {result && !result.ok && <div className="alert err" role="alert"><IconAlertTriangle /><div>
-        {result.kind === "unknown" ? "The save outcome is uncertain. Check your status before trying again."
+        {result.kind === "unknown" ? "The preview could not confirm this request. No local status is available; do not assume hotel staff received it."
           : result.kind === "offline" ? "Offline. Nothing was saved." : "Could not save this preview request."}
       </div></div>}
       <button className="btn primary touch block" onClick={confirm} disabled={saving || data === "offline"}>{saving ? "Checking…" : "Confirm request"}</button>
-      <button className="btn secondary touch block" onClick={() => { setMessage(draft.text); setDraft(null); setPhase("chat"); }}>Edit message</button>
+      <button className="btn secondary touch block" onClick={() => { setMessage(draft.text); setDraft(null); setResult(null); setPhase("chat"); }}>Edit message</button>
     </div>}
     {phase === "track" && <div className="m-scroll" style={{ padding: 18, display: "flex", flexDirection: "column", gap: 15 }}>
       {request ? <>
@@ -183,10 +186,10 @@ export function GuestMvp() {
         <div className="m-card" style={{ padding: 16 }}>
           <div className="cap">Preview reference {request.ref}</div>
           <h2 className="h-sec" style={{ margin: "8px 0" }}>{request.title}</h2>
-          <ReqChip s={request.status} />
+          <span className="chip s-today">Preview · Received</span>
           <p className="ink2" style={{ marginTop: 10 }}>{request.detail}</p>
         </div>
-        <div className="alert neutral"><IconClock /><div>Status is from the synthetic browser store, not WorkPeg Tables. After integration, only committed WorkPeg status can appear here.</div></div>
+        <div className="alert neutral"><IconClock /><div>Status is simulated in this browser preview, not WorkPeg Tables. Only committed WorkPeg status can appear after integration.</div></div>
         <button className="btn secondary touch block" onClick={() => setPhase("chat")}>Back to conversation</button>
       </> : <div role="alert" className="alert warn"><IconAlertTriangle /><div>Preview request unavailable. No status can be confirmed.</div></div>}
     </div>}

@@ -4,7 +4,6 @@ import { StoreProvider, useStore, type Outcome, type DataState } from "./store";
 import { Reception } from "./reception/Reception";
 import type { Page } from "./reception/ctx";
 import { Phone, StaffApp, GuestBooking, GuestStay, GuestChat, WhatsAppStory } from "./mobile";
-import { GuestMvp } from "./GuestMvp";
 import { Toasts, ReqChip, Sla } from "./ui";
 import { Manager } from "./manager";
 import { Docs, DOCS } from "./docs";
@@ -23,7 +22,7 @@ function Dock({ at }: { at: string }) {
   return <nav className="dock" aria-label="Prototype controls">
     {L("#/reception/today", "Front desk", <IconLayoutDashboard />, "reception")}
     {L("#/staff", "Staff phones", <IconBath />, "staff")}
-    {L("#/guest/mvp", "Guest MVP", <IconUser />, "guest")}
+    {L("#/guest", "Guest", <IconUser />, "guest")}
     {L("#/live", "Follow-through", <IconArrowsSplit2 />, "live")}
     {L("#/manager/overview", "Manager", <IconBriefcase />, "manager")}
     {L("#/docs", "Handoff", <IconFileText />, "docs")}
@@ -76,8 +75,7 @@ function Routes() {
       <Flow label="Maintenance" sub="Musa Kabiru"><Phone label="Maintenance app"><StaffApp role="maintenance" /></Phone></Flow>
       <Flow label="Supervisor" sub="Grace Etim, inspections"><Phone label="Supervisor app"><StaffApp role="supervisor" /></Phone></Flow>
     </div>}
-    {area === "guest" && sub === "mvp" && <div className="flows"><Flow label="Roomay Guest MVP" sub="Offline preview · WorkPeg AI integration pending"><Phone label="Roomay guest MVP"><GuestMvp /></Phone></Flow></div>}
-    {area === "guest" && sub !== "mvp" && <div className="flows">
+    {area === "guest" && <div className="flows">
       <Flow label="Book a room" sub="Public, before arrival"><Phone label="Booking request"><GuestBooking /></Phone></Flow>
       <Flow label="Room QR and My Stay" sub="After check-in"><Phone label="My Stay"><GuestStay /></Phone></Flow>
       <Flow label="Ask Roomay" sub="Text and voice"><Phone label="Ask Roomay chat"><GuestChat /></Phone></Flow>
