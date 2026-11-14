@@ -1,4 +1,5 @@
 workpeg==0.152.0
+jsonschema==4.26.0
 
 # Standalone guest-service prototype and PostgreSQL test dependencies.
 -r server-requirements.txt

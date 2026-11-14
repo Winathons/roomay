@@ -1,0 +1,1166 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:roomay:contracts:guest-mvp:v1",
+  "title": "Roomay Guest MVP Provider-Neutral Contract",
+  "description": "Wire-level contract only. Authentication, Workpeg calls, persistence and delivery are implemented by separately verified adapters.",
+  "type": "object",
+  "required": [
+    "contract_version",
+    "message_type",
+    "correlation_id",
+    "payload"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "contract_version": {
+      "const": "roomay.guest-mvp.v1"
+    },
+    "message_type": {
+      "enum": [
+        "guest_context",
+        "hotel_information",
+        "conversation_action",
+        "request_draft",
+        "request_outcome",
+        "reception_transition",
+        "guest_status_readback"
+      ]
+    },
+    "correlation_id": {
+      "$ref": "#/$defs/id"
+    },
+    "payload": {
+      "type": "object"
+    }
+  },
+  "$defs": {
+    "id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 200
+    },
+    "failure_code": {
+      "type": "string",
+      "enum": [
+        "unauthenticated",
+        "membership_unverified",
+        "wrong_business",
+        "wrong_hotel",
+        "wrong_room",
+        "stay_revoked",
+        "stay_expired",
+        "stay_not_active",
+        "duplicate_operation",
+        "idempotency_conflict",
+        "workpeg_unavailable",
+        "persistence_uncertain",
+        "not_found",
+        "forbidden",
+        "invalid_contract",
+        "stale_version"
+      ]
+    },
+    "failure": {
+      "type": "object",
+      "required": [
+        "code",
+        "retryable"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "code": {
+          "$ref": "#/$defs/failure_code"
+        },
+        "retryable": {
+          "type": "boolean"
+        },
+        "message": {
+          "type": "string",
+          "maxLength": 240
+        }
+      }
+    },
+    "guest_context": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "state": {
+          "enum": [
+            "verified",
+            "unauthenticated",
+            "revoked",
+            "expired",
+            "unavailable"
+          ]
+        },
+        "stay": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "verified",
+            "status",
+            "room_id",
+            "valid_until"
+          ],
+          "properties": {
+            "verified": {
+              "const": true
+            },
+            "status": {
+              "const": "checked_in"
+            },
+            "room_id": {
+              "$ref": "#/$defs/id"
+            },
+            "valid_until": {
+              "type": "string",
+              "format": "date-time"
+            }
+          }
+        },
+        "authorized_hotel": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "display_name"
+          ],
+          "properties": {
+            "display_name": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 120
+            },
+            "approved_information": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/approved_information"
+              }
+            }
+          }
+        },
+        "authorized_room": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "display_label"
+          ],
+          "properties": {
+            "display_label": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 40
+            },
+            "approved_information": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/approved_information"
+              }
+            }
+          }
+        },
+        "failure": {
+          "$ref": "#/$defs/failure"
+        }
+      },
+      "oneOf": [
+        {
+          "required": [
+            "state",
+            "stay",
+            "authorized_hotel",
+            "authorized_room"
+          ],
+          "properties": {
+            "state": {
+              "const": "verified"
+            }
+          },
+          "not": {
+            "required": [
+              "failure"
+            ]
+          }
+        },
+        {
+          "required": [
+            "state",
+            "failure"
+          ],
+          "properties": {
+            "state": {
+              "enum": [
+                "unauthenticated",
+                "revoked",
+                "expired",
+                "unavailable"
+              ]
+            }
+          },
+          "not": {
+            "anyOf": [
+              {
+                "required": [
+                  "stay"
+                ]
+              },
+              {
+                "required": [
+                  "authorized_hotel"
+                ]
+              },
+              {
+                "required": [
+                  "authorized_room"
+                ]
+              }
+            ]
+          }
+        }
+      ]
+    },
+    "approved_information": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "topic",
+        "value"
+      ],
+      "properties": {
+        "topic": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 80
+        },
+        "value": {
+          "type": "string",
+          "maxLength": 1200
+        }
+      }
+    },
+    "hotel_information": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "question",
+        "answer_state"
+      ],
+      "properties": {
+        "question": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1000
+        },
+        "answer_state": {
+          "enum": [
+            "answered",
+            "unavailable",
+            "handoff"
+          ]
+        },
+        "answer": {
+          "type": "string",
+          "maxLength": 1200
+        },
+        "failure": {
+          "$ref": "#/$defs/failure"
+        }
+      }
+    },
+    "conversation_action": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "operation": {
+          "enum": [
+            "message",
+            "confirm",
+            "cancel"
+          ]
+        },
+        "interaction_id": {
+          "$ref": "#/$defs/id"
+        },
+        "text": {
+          "type": "string",
+          "maxLength": 1000
+        },
+        "confirmation_handle": {
+          "$ref": "#/$defs/id"
+        }
+      },
+      "oneOf": [
+        {
+          "title": "guest message",
+          "required": [
+            "operation",
+            "interaction_id",
+            "text"
+          ],
+          "properties": {
+            "operation": {
+              "const": "message"
+            }
+          }
+        },
+        {
+          "title": "explicit confirmation",
+          "required": [
+            "operation",
+            "interaction_id",
+            "confirmation_handle"
+          ],
+          "properties": {
+            "operation": {
+              "const": "confirm"
+            }
+          },
+          "not": {
+            "required": [
+              "text"
+            ]
+          }
+        },
+        {
+          "title": "explicit cancellation",
+          "required": [
+            "operation",
+            "interaction_id",
+            "confirmation_handle"
+          ],
+          "properties": {
+            "operation": {
+              "const": "cancel"
+            }
+          },
+          "not": {
+            "required": [
+              "text"
+            ]
+          }
+        }
+      ]
+    },
+    "request_draft": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "draft_id",
+        "description",
+        "category",
+        "department",
+        "confirmation_required",
+        "confirmation_handle",
+        "idempotency_key"
+      ],
+      "properties": {
+        "draft_id": {
+          "$ref": "#/$defs/id"
+        },
+        "description": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1000
+        },
+        "category": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 80
+        },
+        "department": {
+          "enum": [
+            "reception",
+            "housekeeping",
+            "maintenance",
+            "food_and_beverage"
+          ]
+        },
+        "confirmation_required": {
+          "const": true
+        },
+        "confirmation_handle": {
+          "$ref": "#/$defs/id"
+        },
+        "idempotency_key": {
+          "$ref": "#/$defs/id"
+        }
+      }
+    },
+    "request_outcome": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "state": {
+          "enum": [
+            "created",
+            "duplicate",
+            "rejected",
+            "unavailable",
+            "uncertain"
+          ]
+        },
+        "persisted": {
+          "enum": [
+            true,
+            false,
+            "unknown"
+          ]
+        },
+        "idempotency_key": {
+          "$ref": "#/$defs/id"
+        },
+        "request_reference": {
+          "$ref": "#/$defs/id"
+        },
+        "audit_evidence": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "reference",
+            "request_reference",
+            "verified"
+          ],
+          "properties": {
+            "reference": {
+              "$ref": "#/$defs/id"
+            },
+            "request_reference": {
+              "$ref": "#/$defs/id"
+            },
+            "verified": {
+              "const": true
+            }
+          }
+        },
+        "failure": {
+          "$ref": "#/$defs/failure"
+        },
+        "retry_with_same_idempotency_key": {
+          "const": true
+        }
+      },
+      "oneOf": [
+        {
+          "required": [
+            "state",
+            "persisted",
+            "idempotency_key",
+            "request_reference",
+            "audit_evidence"
+          ],
+          "properties": {
+            "state": {
+              "enum": [
+                "created",
+                "duplicate"
+              ]
+            },
+            "persisted": {
+              "const": true
+            }
+          },
+          "not": {
+            "required": [
+              "failure"
+            ]
+          }
+        },
+        {
+          "required": [
+            "state",
+            "persisted",
+            "idempotency_key",
+            "failure"
+          ],
+          "properties": {
+            "state": {
+              "enum": [
+                "rejected",
+                "unavailable"
+              ]
+            },
+            "persisted": {
+              "const": false
+            }
+          },
+          "not": {
+            "anyOf": [
+              {
+                "required": [
+                  "request_reference"
+                ]
+              },
+              {
+                "required": [
+                  "audit_evidence"
+                ]
+              },
+              {
+                "required": [
+                  "retry_with_same_idempotency_key"
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "required": [
+            "state",
+            "persisted",
+            "idempotency_key",
+            "failure",
+            "retry_with_same_idempotency_key"
+          ],
+          "properties": {
+            "state": {
+              "const": "uncertain"
+            },
+            "persisted": {
+              "const": "unknown"
+            },
+            "failure": {
+              "properties": {
+                "code": {
+                  "const": "persistence_uncertain"
+                }
+              }
+            }
+          },
+          "not": {
+            "anyOf": [
+              {
+                "required": [
+                  "request_reference"
+                ]
+              },
+              {
+                "required": [
+                  "audit_evidence"
+                ]
+              }
+            ]
+          }
+        }
+      ]
+    },
+    "reception_transition": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "request_reference",
+        "operation_id",
+        "expected_version",
+        "action",
+        "from_status",
+        "target_status"
+      ],
+      "properties": {
+        "request_reference": {
+          "$ref": "#/$defs/id"
+        },
+        "operation_id": {
+          "$ref": "#/$defs/id"
+        },
+        "expected_version": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "action": {
+          "enum": [
+            "assign",
+            "acknowledge",
+            "start_work",
+            "resolve",
+            "escalate"
+          ]
+        },
+        "target_status": {
+          "enum": [
+            "received",
+            "assigned",
+            "acknowledged",
+            "in_progress",
+            "resolved",
+            "reopened",
+            "escalated",
+            "cancelled"
+          ]
+        },
+        "assignee_reference": {
+          "$ref": "#/$defs/id"
+        },
+        "reason": {
+          "type": "string",
+          "maxLength": 1000
+        },
+        "from_status": {
+          "enum": [
+            "received",
+            "assigned",
+            "acknowledged",
+            "in_progress",
+            "resolved",
+            "reopened",
+            "escalated",
+            "cancelled"
+          ]
+        }
+      },
+      "oneOf": [
+        {
+          "required": [
+            "action",
+            "from_status",
+            "target_status",
+            "assignee_reference"
+          ],
+          "properties": {
+            "action": {
+              "const": "assign"
+            },
+            "from_status": {
+              "const": "received"
+            },
+            "target_status": {
+              "const": "assigned"
+            }
+          },
+          "not": {
+            "required": [
+              "reason"
+            ]
+          }
+        },
+        {
+          "required": [
+            "action",
+            "from_status",
+            "target_status",
+            "assignee_reference"
+          ],
+          "properties": {
+            "action": {
+              "const": "assign"
+            },
+            "from_status": {
+              "const": "reopened"
+            },
+            "target_status": {
+              "const": "assigned"
+            }
+          },
+          "not": {
+            "required": [
+              "reason"
+            ]
+          }
+        },
+        {
+          "required": [
+            "action",
+            "from_status",
+            "target_status",
+            "assignee_reference"
+          ],
+          "properties": {
+            "action": {
+              "const": "assign"
+            },
+            "from_status": {
+              "const": "escalated"
+            },
+            "target_status": {
+              "const": "assigned"
+            }
+          },
+          "not": {
+            "required": [
+              "reason"
+            ]
+          }
+        },
+        {
+          "required": [
+            "action",
+            "from_status",
+            "target_status"
+          ],
+          "properties": {
+            "action": {
+              "const": "acknowledge"
+            },
+            "from_status": {
+              "const": "assigned"
+            },
+            "target_status": {
+              "const": "acknowledged"
+            }
+          },
+          "not": {
+            "required": [
+              "assignee_reference"
+            ]
+          }
+        },
+        {
+          "required": [
+            "action",
+            "from_status",
+            "target_status"
+          ],
+          "properties": {
+            "action": {
+              "const": "start_work"
+            },
+            "from_status": {
+              "const": "acknowledged"
+            },
+            "target_status": {
+              "const": "in_progress"
+            }
+          },
+          "not": {
+            "required": [
+              "assignee_reference"
+            ]
+          }
+        },
+        {
+          "required": [
+            "action",
+            "from_status",
+            "target_status"
+          ],
+          "properties": {
+            "action": {
+              "const": "resolve"
+            },
+            "from_status": {
+              "const": "in_progress"
+            },
+            "target_status": {
+              "const": "resolved"
+            }
+          },
+          "not": {
+            "required": [
+              "assignee_reference"
+            ]
+          }
+        },
+        {
+          "required": [
+            "action",
+            "from_status",
+            "target_status",
+            "reason"
+          ],
+          "properties": {
+            "action": {
+              "const": "escalate"
+            },
+            "from_status": {
+              "const": "received"
+            },
+            "target_status": {
+              "const": "escalated"
+            }
+          },
+          "not": {
+            "required": [
+              "assignee_reference"
+            ]
+          }
+        },
+        {
+          "required": [
+            "action",
+            "from_status",
+            "target_status",
+            "reason"
+          ],
+          "properties": {
+            "action": {
+              "const": "escalate"
+            },
+            "from_status": {
+              "const": "assigned"
+            },
+            "target_status": {
+              "const": "escalated"
+            }
+          },
+          "not": {
+            "required": [
+              "assignee_reference"
+            ]
+          }
+        },
+        {
+          "required": [
+            "action",
+            "from_status",
+            "target_status",
+            "reason"
+          ],
+          "properties": {
+            "action": {
+              "const": "escalate"
+            },
+            "from_status": {
+              "const": "acknowledged"
+            },
+            "target_status": {
+              "const": "escalated"
+            }
+          },
+          "not": {
+            "required": [
+              "assignee_reference"
+            ]
+          }
+        },
+        {
+          "required": [
+            "action",
+            "from_status",
+            "target_status",
+            "reason"
+          ],
+          "properties": {
+            "action": {
+              "const": "escalate"
+            },
+            "from_status": {
+              "const": "in_progress"
+            },
+            "target_status": {
+              "const": "escalated"
+            }
+          },
+          "not": {
+            "required": [
+              "assignee_reference"
+            ]
+          }
+        },
+        {
+          "required": [
+            "action",
+            "from_status",
+            "target_status",
+            "reason"
+          ],
+          "properties": {
+            "action": {
+              "const": "escalate"
+            },
+            "from_status": {
+              "const": "reopened"
+            },
+            "target_status": {
+              "const": "escalated"
+            }
+          },
+          "not": {
+            "required": [
+              "assignee_reference"
+            ]
+          }
+        }
+      ]
+    },
+    "guest_status_readback": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "state"
+      ],
+      "properties": {
+        "state": {
+          "enum": [
+            "available",
+            "unavailable",
+            "not_found",
+            "forbidden"
+          ]
+        },
+        "request_reference": {
+          "$ref": "#/$defs/id"
+        },
+        "status": {
+          "enum": [
+            "received",
+            "assigned",
+            "acknowledged",
+            "in_progress",
+            "resolved",
+            "reopened",
+            "cancelled",
+            "escalated"
+          ]
+        },
+        "updated_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "guest_message": {
+          "type": "string",
+          "maxLength": 240
+        },
+        "failure": {
+          "$ref": "#/$defs/failure"
+        }
+      },
+      "oneOf": [
+        {
+          "required": [
+            "state",
+            "request_reference",
+            "status",
+            "updated_at"
+          ],
+          "properties": {
+            "state": {
+              "const": "available"
+            }
+          },
+          "not": {
+            "required": [
+              "failure"
+            ]
+          }
+        },
+        {
+          "required": [
+            "state",
+            "failure"
+          ],
+          "properties": {
+            "state": {
+              "enum": [
+                "unavailable",
+                "not_found",
+                "forbidden"
+              ]
+            }
+          },
+          "not": {
+            "anyOf": [
+              {
+                "required": [
+                  "request_reference"
+                ]
+              },
+              {
+                "required": [
+                  "status"
+                ]
+              },
+              {
+                "required": [
+                  "updated_at"
+                ]
+              },
+              {
+                "required": [
+                  "guest_message"
+                ]
+              }
+            ]
+          }
+        }
+      ]
+    },
+    "envelope_guest_context": {
+      "type": "object",
+      "required": [
+        "contract_version",
+        "message_type",
+        "correlation_id",
+        "payload"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "contract_version": {
+          "const": "roomay.guest-mvp.v1"
+        },
+        "message_type": {
+          "const": "guest_context"
+        },
+        "correlation_id": {
+          "$ref": "#/$defs/id"
+        },
+        "payload": {
+          "$ref": "#/$defs/guest_context"
+        }
+      }
+    },
+    "envelope_hotel_information": {
+      "type": "object",
+      "required": [
+        "contract_version",
+        "message_type",
+        "correlation_id",
+        "payload"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "contract_version": {
+          "const": "roomay.guest-mvp.v1"
+        },
+        "message_type": {
+          "const": "hotel_information"
+        },
+        "correlation_id": {
+          "$ref": "#/$defs/id"
+        },
+        "payload": {
+          "$ref": "#/$defs/hotel_information"
+        }
+      }
+    },
+    "envelope_conversation_action": {
+      "type": "object",
+      "required": [
+        "contract_version",
+        "message_type",
+        "correlation_id",
+        "payload"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "contract_version": {
+          "const": "roomay.guest-mvp.v1"
+        },
+        "message_type": {
+          "const": "conversation_action"
+        },
+        "correlation_id": {
+          "$ref": "#/$defs/id"
+        },
+        "payload": {
+          "$ref": "#/$defs/conversation_action"
+        }
+      }
+    },
+    "envelope_request_draft": {
+      "type": "object",
+      "required": [
+        "contract_version",
+        "message_type",
+        "correlation_id",
+        "payload"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "contract_version": {
+          "const": "roomay.guest-mvp.v1"
+        },
+        "message_type": {
+          "const": "request_draft"
+        },
+        "correlation_id": {
+          "$ref": "#/$defs/id"
+        },
+        "payload": {
+          "$ref": "#/$defs/request_draft"
+        }
+      }
+    },
+    "envelope_request_outcome": {
+      "type": "object",
+      "required": [
+        "contract_version",
+        "message_type",
+        "correlation_id",
+        "payload"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "contract_version": {
+          "const": "roomay.guest-mvp.v1"
+        },
+        "message_type": {
+          "const": "request_outcome"
+        },
+        "correlation_id": {
+          "$ref": "#/$defs/id"
+        },
+        "payload": {
+          "$ref": "#/$defs/request_outcome"
+        }
+      }
+    },
+    "envelope_reception_transition": {
+      "type": "object",
+      "required": [
+        "contract_version",
+        "message_type",
+        "correlation_id",
+        "payload"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "contract_version": {
+          "const": "roomay.guest-mvp.v1"
+        },
+        "message_type": {
+          "const": "reception_transition"
+        },
+        "correlation_id": {
+          "$ref": "#/$defs/id"
+        },
+        "payload": {
+          "$ref": "#/$defs/reception_transition"
+        }
+      }
+    },
+    "envelope_guest_status_readback": {
+      "type": "object",
+      "required": [
+        "contract_version",
+        "message_type",
+        "correlation_id",
+        "payload"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "contract_version": {
+          "const": "roomay.guest-mvp.v1"
+        },
+        "message_type": {
+          "const": "guest_status_readback"
+        },
+        "correlation_id": {
+          "$ref": "#/$defs/id"
+        },
+        "payload": {
+          "$ref": "#/$defs/guest_status_readback"
+        }
+      }
+    }
+  },
+  "oneOf": [
+    {
+      "$ref": "#/$defs/envelope_guest_context"
+    },
+    {
+      "$ref": "#/$defs/envelope_hotel_information"
+    },
+    {
+      "$ref": "#/$defs/envelope_conversation_action"
+    },
+    {
+      "$ref": "#/$defs/envelope_request_draft"
+    },
+    {
+      "$ref": "#/$defs/envelope_request_outcome"
+    },
+    {
+      "$ref": "#/$defs/envelope_reception_transition"
+    },
+    {
+      "$ref": "#/$defs/envelope_guest_status_readback"
+    }
+  ]
+}
