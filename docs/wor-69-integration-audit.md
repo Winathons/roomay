@@ -5,6 +5,11 @@
 Baseline: `origin/main` at `4aa081a`; isolated branch
 `WOR-69-integration-audit`. No runtime, contracts, manifest or permissions changed.
 
+The later [WOR-69 Phase 1 OIDC verification](wor-69-oidc-phase1.md) pins the
+previously missing SDK crypto dependencies and adds committed offline tests.
+The historical observations and commands below remain the audit snapshot;
+Phase 1 does not establish hosted OIDC registration or live membership refresh.
+
 ## Decision and evidence boundary
 
 The [approved 14 November project](https://linear.app/workpeg/project/roomay-workpeg-hospitality-hackathon-7b7a7ce4b3b9)
