@@ -26,7 +26,7 @@ class RoomaySkillOfferTests(unittest.TestCase):
             {"name", "version", "title", "description", "command", "message", "instructions"},
         )
         self.assertEqual(self.offer["name"], "roomay-service-intake")
-        self.assertEqual(self.offer["version"], "0.4.0")
+        self.assertEqual(self.offer["version"], "0.5.0")
         self.assertLessEqual(len(self.offer["command"]), 48)
         self.assertLessEqual(len(self.offer["message"]), 400)
 
@@ -63,6 +63,13 @@ class RoomaySkillOfferTests(unittest.TestCase):
                        "status and audit", "if there is no verified source",
                        "do not imply background monitoring"):
             self.assertIn(phrase, guidance)
+
+    def test_housekeeping_attending_claim_requires_verified_in_progress(self):
+        guidance = self.instructions.lower()
+        self.assertIn("housekeeping team is attending to your request", guidance)
+        self.assertIn("verified committed in_progress event", guidance)
+        self.assertIn("do not use that sentence", guidance)
+        self.assertIn("no authorized status read exists", guidance)
 
     def test_hazard_and_privacy_guards(self):
         text = self.instructions.lower()
