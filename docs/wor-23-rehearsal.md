@@ -25,22 +25,7 @@ The existing fictional inventory factory creates **ten rooms (201–210), not ei
 
 ### Human browser walkthrough — local QA only
 
-Start the sample server:
-
-```bash
-python -m tools.guest_chat_demo --port 8765 --enable-local-qa
-```
-
-Open **http://127.0.0.1:8765/__qa/** on the same computer (do not publish or tunnel this local role-picker). The sample app uses a **single local role in one session cookie**; choose the correct workspace on `/__qa/` before following each route:
-
-1. **Guest / My Stay**: choose **Open My Stay**. The fictional guest is staying in Room 205. Type `Please bring extra towels to room 205.`, review the suggestion and press confirm. The new request should display `Received`. UI text explicitly states it has **not been sent to hotel staff**.
-2. **Reception**: return to `/__qa/`, select Reception. The same synthetic ticket should appear in the service requests queue. Assign it to Housekeeping; its status becomes `Assigned`.
-3. **Housekeeping**: return to `/__qa/`, select Housekeeping. On the assigned ticket, take **Acknowledge → Start → Resolve** in order. The ticket should pass through `Acknowledged`, `In Progress`, and `Resolved`.
-4. **Guest readback**: return to `/__qa/` and explicitly select **Open My Stay**. Reload the page; the original guest should see **Resolved** on their request.
-5. **Negative-case demonstration**: opening `/stay` directly while the *same demo cookie* is in Housekeeping role should return **403**, not leak guest data or silently switch roles. Recover via `/__qa/`, select Guest, then verify status again. A new independent QA session does **not** inherit the first session's tickets.
-6. Show the synthetic banner. Do not suggest a real hotel received a request; do not expose the role-switcher to external users.
-
-If browsers are unavailable, run the automated command instead and capture the local console output or prepare a **clearly labeled synthetic screencast**. Neither is equivalent to hosted acceptance.
+The local harness now supports independent browser cookies joined to one expiring, process-memory synthetic scenario. Follow the Windows commands, Chrome profile setup and Guest → Reception → Housekeeping procedure in [`local-multibrowser-acceptance.md`](local-multibrowser-acceptance.md). The QA role selector is not authentication. Restarting the process clears all example state. Do not publish or tunnel the app, and do not imply that a request reached hotel staff.
 
 ## Acceptance / regression matrix
 
