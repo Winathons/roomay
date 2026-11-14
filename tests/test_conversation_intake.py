@@ -66,6 +66,80 @@ class ConversationIntakeTests(unittest.TestCase):
             with self.subTest(phrase=phrase):
                 self.assertIsNone(classify_text(phrase)["room_number"])
 
+    def test_current_mvp_examples_use_catalog_routes_and_unclear_text_stays_unrouted(self):
+        examples = (
+            ("Please bring extra towels.", "extra_towels", "housekeeping"),
+            ("My AC isn't cooling.", "air_conditioning", "maintenance"),
+            ("My room socket isn't working.", "electrical", "maintenance"),
+            ("Can I order food?", "room_service", "food_and_beverage"),
+            ("I have a billing question.", "billing_question", "reception"),
+        )
+        for text, category, department in examples:
+            with self.subTest(text=text):
+                intent = classify_text(text)
+                self.assertEqual(intent["intent"], "service_request")
+                self.assertEqual(intent["category"], category)
+                self.assertEqual(intent["department"], department)
+                # Confirmation previews routing only; they do not assign a staff
+                # member or submit a request.
+                output = {key: intent[key] for key in (
+                    "intent", "category", "department", "urgency", "room_number")}
+                preview = self.turn(text, classifier_output=output)
+                self.assertEqual(preview["state"], "awaiting_confirmation")
+                self.assertIn(department.replace("_", " ").title(), preview["message"])
+                self.assertNotIn("request_plan", preview["internal"])
+                self.assertFalse(preview["submitted"])
+                self.assertFalse(preview["persisted"])
+                prepared = self.turn(
+                    text, classifier_output=output, confirmed=True,
+                    turn_id="confirmed-" + category,
+                )
+                request = prepared["internal"]["request_plan"]["target_request"]
+                self.assertEqual(request["department"], department)
+                self.assertEqual(request["status"], "received")
+                self.assertIsNone(request["assigned_staff_id"])
+                self.assertFalse(prepared["submitted"])
+                self.assertFalse(prepared["persisted"])
+
+        unclear = "I need help but I'm not sure who to contact."
+        intent = classify_text(unclear)
+        self.assertEqual(intent["intent"], "unknown")
+        self.assertEqual(intent["category"], "unknown")
+        self.assertEqual(intent["department"], "reception")
+        result = self.turn(unclear)
+        self.assertEqual(result["state"], "needs_clarification")
+        self.assertNotIn("request_plan", result["internal"])
+
+    def test_hazardous_socket_issue_hands_off_instead_of_routine_maintenance(self):
+        for text in (
+            "My room socket is sparking.",
+            "There is smoke from the outlet and it smells like burning.",
+        ):
+            with self.subTest(text=text):
+                result = self.turn(text, confirmed=True)
+                self.assertEqual(result["state"], "handoff")
+                self.assertTrue(result["handoff_required"])
+                self.assertNotIn("request_plan", result["internal"])
+                self.assertIn("has not contacted anyone", result["message"])
+
+    def test_structured_ai_cannot_turn_greeting_or_vague_help_into_department_action(self):
+        candidate = {
+            "intent": "service_request", "category": "extra_towels",
+            "department": "housekeeping", "urgency": "normal",
+            "room_number": None,
+        }
+        for text in ("Hey Hi", "I need help but I'm not sure who to contact"):
+            with self.subTest(text=text):
+                result = self.turn(text, classifier_output=candidate, confirmed=True)
+                self.assertEqual(result["state"], "unavailable")
+                self.assertEqual(
+                    result["internal"]["failure_code"],
+                    "invalid_classifier_output",
+                )
+                self.assertNotIn("request_plan", result["internal"])
+                self.assertFalse(result["submitted"])
+                self.assertFalse(result["persisted"])
+
     def test_water_delivery_and_plumbing_are_separate_canonical_requests(self):
         for text in (
             "Please bring me drinking water.",
@@ -381,7 +455,7 @@ class ConversationIntakeTests(unittest.TestCase):
             "room_number": "205",
         }
         result = self.turn(
-            "The pipe has a problem in room 205.", classifier_output=candidate,
+            "The pipe is leaking in room 205.", classifier_output=candidate,
             confirmed=True,
         )
         self.assertEqual(result["state"], "handoff")

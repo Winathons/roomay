@@ -26,7 +26,11 @@ _ROOM_IN_TEXT = re.compile(
 )
 _EMERGENCY_TERMS = (
     "emergency", "fire", "smoke", "medical emergency", "someone is hurt",
-    "someone is injured", "electric shock", "sparking", "gas smell",
+    "someone is injured", "electric shock", "sparking", "socket sparks",
+    "outlet sparks", "burning socket", "burning outlet",
+    "smoke from the socket", "smoke from an outlet", "electrical fire",
+    "burning smell from the socket", "burning smell from the outlet",
+    "gas smell",
 )
 _URGENT_TERMS = ("urgent", "urgently", "asap", "immediately", "right now")
 _PLUMBING_TERMS = (
@@ -224,6 +228,15 @@ def classify_text(text):
     urgency = _urgency(original)
     if _hotel_information_question(lowered):
         return _intent("room_enquiry", "general_help", urgency, room_number)
+    billing_cues = (
+        "billing question", "billing issue", "question about my bill",
+        "question about the bill", "question about my invoice",
+        "wrong bill", "incorrect bill", "bill looks wrong", "bill is wrong",
+        "incorrect charge", "unexpected charge", "charged twice",
+        "billing problem", "my room charge", "my room charges",
+    )
+    if any(cue in lowered for cue in billing_cues):
+        return _intent("service_request", "billing_question", urgency, room_number)
     mentions_ac = bool(re.search(
         r"\b(?:ac|a/c|air conditioning|air conditioner|aircon)\b", lowered))
     ac_problem = any(term in lowered for term in (
@@ -254,11 +267,23 @@ def classify_text(text):
         return _intent("service_request", "room_cleaning", urgency, room_number)
     if any(term in lowered for term in ("toiletries", "toothbrush", "toothpaste", "shampoo", "body wash")):
         return _intent("service_request", "toiletries", urgency, room_number)
-    if any(term in lowered for term in ("light is not working", "light stopped working",
-                                        "power socket", "electrical", "sparking")):
+    socket_or_outlet = bool(re.search(
+        r"\b(?:socket|power outlet|outlet|plug point)\b", lowered))
+    socket_problem = any(term in lowered for term in (
+        "not working", "isn't working", "is not working", "faulty", "broken",
+        "no power", "stopped working", "won't work", "doesn't work",
+    ))
+    if (any(term in lowered for term in (
+            "light is not working", "light stopped working", "power socket",
+            "electrical", "sparking"))
+            or (socket_or_outlet and socket_problem)):
         return _intent("service_request", "electrical", urgency, room_number)
     if ("room service" in lowered and any(term in lowered for term in
             ("order", "send", "bring", "food", "menu"))):
+        return _intent("service_request", "room_service", urgency, room_number)
+    if any(term in lowered for term in (
+            "order food", "order a meal", "get food delivered", "send me food",
+            "bring me food", "order something to eat")):
         return _intent("service_request", "room_service", urgency, room_number)
     if any(term in lowered for term in ("bring breakfast", "send breakfast", "order breakfast",
                                         "bring food", "send food", "order food")):
@@ -307,6 +332,13 @@ def validate_intent_output(text, candidate):
     if (deterministic["intent"] in {"service_request", "room_enquiry"}
             and (kind != deterministic["intent"]
                  or canonical != deterministic["category"])):
+        raise IntakeError("classifier_conflicts_with_supported_signal")
+    # A structured model result may refine language, but it cannot upgrade an
+    # unsupported/generic message into a known department action. Only the
+    # deterministic classifier's catalog-backed signal may select a category;
+    # explicit but uncategorized complaints remain Reception triage.
+    if (deterministic["intent"] == "unknown"
+            and (kind != "unknown" or category != "unknown")):
         raise IntakeError("classifier_conflicts_with_supported_signal")
     if kind == "service_request" and (category == "unknown" or triage):
         raise IntakeError("invalid_classifier_output")
