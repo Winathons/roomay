@@ -14,18 +14,18 @@ class Home(Scaffold):
 
 class Main(Router):
     theme = Theme(
-        primary="#2d6a4f",
+        primary="#181a1a",
         primary_fg="#ffffff",
-        fg="#111827",
-        muted="#5b6670",
-        page="#f7f9f6",
+        fg="#181a1a",
+        muted="#737976",
+        page="#f8f9f7",
         bg="#ffffff",
-        border="#dce7e2",
-        radius="14px",
-        font='"Plus Jakarta Sans", sans-serif',
+        border="#e8ebe8",
+        radius="12px",
+        font='"Inter", sans-serif',
     )
     fonts = [
-        "https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap",
+        "https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap",
     ]
     routes = [
         Route("/", Home),
