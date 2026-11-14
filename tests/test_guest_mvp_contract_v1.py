@@ -3,8 +3,9 @@ import json
 from pathlib import Path
 import unittest
 
-from jsonschema import Draft202012Validator
+from jsonschema import Draft202012Validator, FormatChecker
 
+from domain.guest_mvp_contract import ContractValidationError, validate_rfc3339
 from domain.service_requests import DEPARTMENTS, STATUSES, TRANSITIONS
 from domain.staff_actions import ACTION_TARGETS
 
@@ -19,7 +20,11 @@ class GuestMvpContractV1Tests(unittest.TestCase):
         cls.schema = json.loads(SCHEMA_PATH.read_text(encoding="utf-8"))
         cls.defs = cls.schema["$defs"]
         Draft202012Validator.check_schema(cls.schema)
-        cls.validator = Draft202012Validator(cls.schema)
+        cls.format_checker = FormatChecker()
+        cls.format_checker.checks("date-time", raises=ContractValidationError)(
+            validate_rfc3339)
+        cls.validator = Draft202012Validator(
+            cls.schema, format_checker=cls.format_checker)
 
     def envelope(self, message_type, payload, **overrides):
         message = {
@@ -86,6 +91,30 @@ class GuestMvpContractV1Tests(unittest.TestCase):
         self.assertEqual(draft["properties"]["confirmation_required"]["const"], True)
         self.assertIn("confirmation_handle", draft["required"])
 
+    def test_hotel_information_has_exclusive_success_failure_states(self):
+        self.assert_valid_message(self.envelope("hotel_information", {
+            "question": "Where is breakfast?",
+            "answer_state": "answered",
+            "answer": "In the lobby.",
+        }))
+        self.assert_valid_message(self.envelope("hotel_information", {
+            "question": "Is the pool open?",
+            "answer_state": "handoff",
+            "answer": "Reception can confirm the current status.",
+        }))
+        self.assert_valid_message(self.envelope("hotel_information", {
+            "question": "Where is breakfast?",
+            "answer_state": "unavailable",
+            "failure": {"code": "workpeg_unavailable", "retryable": True},
+        }))
+        self.assert_invalid_message(self.envelope("hotel_information", {
+            "question": "Q", "answer_state": "answered",
+        }))
+        self.assert_invalid_message(self.envelope("hotel_information", {
+            "question": "Q", "answer_state": "unavailable", "answer": "A",
+            "failure": {"code": "workpeg_unavailable", "retryable": True},
+        }))
+
     def test_failure_and_persistence_states_are_explicitly_distinguished(self):
         failures = set(self.defs["failure_code"]["enum"])
         self.assertTrue({
@@ -141,6 +170,25 @@ class GuestMvpContractV1Tests(unittest.TestCase):
             "authorized_room": verified["authorized_room"],
         }))
         self.assert_invalid_message(self.envelope("guest_context", {**verified, "failure": failure["failure"]}))
+
+    def test_date_time_formats_are_strict_rfc3339(self):
+        valid = self.envelope("guest_context", {
+            "state": "verified",
+            "stay": {"verified": True, "status": "checked_in", "room_id": "room-1",
+                     "valid_until": "2026-11-14T18:00:00Z"},
+            "authorized_hotel": {"display_name": "Hotel"},
+            "authorized_room": {"display_label": "101"},
+        })
+        self.assert_valid_message(valid)
+        for timestamp in (
+            "2026-11-14",
+            "2026-11-14T18:00:00",
+            "2026-02-30T18:00:00Z",
+        ):
+            with self.subTest(timestamp=timestamp):
+                invalid = json.loads(json.dumps(valid))
+                invalid["payload"]["stay"]["valid_until"] = timestamp
+                self.assert_invalid_message(invalid)
 
     def test_draft_2020_12_validates_confirmation_and_versioned_envelopes(self):
         self.assert_valid_message(self.envelope("conversation_action", {

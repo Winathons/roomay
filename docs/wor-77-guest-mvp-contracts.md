@@ -17,7 +17,7 @@ The wire contract is versioned as `roomay.guest-mvp.v1` in [`contracts/roomay.gu
 | Versioned message | Existing implementation |
 | --- | --- |
 | Verified guest/stay context | `domain.guest_access.GuestSessionAuthority`, `ResolvedGuestStay`, and `domain.access_control` |
-| Authorized hotel/room information | `domain.hotel_facts` and `domain.access_control.project_guest_view`; only configured, reviewed sources may be returned |
+| Authorized hotel/room information | `domain.hotel_facts.resolve_hotel_fact` plus the existing `domain.access_control` authorization and room projections; only configured, reviewed sources may be returned |
 | AI conversation actions | `domain.guest_actions.GuestActionGateway` and `domain.conversation_intake.handle_conversation_turn` |
 | Request draft and explicit confirmation | Guest action confirmation handle plus `domain.service_requests.create_request` |
 | Canonical request and audit | `domain.service_requests` request plans and `reconcile_write`; `domain.workpeg_writer.NativeRequestWriter` is disabled by default and not constructed by production code |
@@ -30,9 +30,9 @@ This schema is the transport contract, not a parallel request/status model or so
 
 `failure_code` makes unauthenticated access, unverified membership, wrong business/hotel/room, revoked or expired stay, duplicate or conflicting operation, unavailable Workpeg service, uncertain persistence, stale version, and forbidden/not-found results explicit. Public adapters must map internal errors to these fixed codes and safe messages; never return exception or SDK error text.
 
-`request_outcome.state` distinguishes `created`, `duplicate`, `rejected`, `unavailable`, and `uncertain`. Success requires `persisted: true`, a canonical request reference, and verified audit evidence that echoes the linked request reference. The adapter must verify the references match; JSON Schema cannot compare values across fields. A rejection/unavailable result has `persisted: false`; uncertain persistence has `persisted: "unknown"`, a `persistence_uncertain` failure, and `retry_with_same_idempotency_key: true`. Reconcile the original key before deciding whether the canonical request and audit event committed.
+`request_outcome.state` distinguishes `created`, `duplicate`, `rejected`, `unavailable`, and `uncertain`. Success requires `persisted: true`, a canonical request reference, and verified audit evidence that echoes the linked request reference. The `verified` field is an output of an authorized adapter, never proof supplied by a caller: `domain.guest_mvp_contract.TrustedPersistenceReadback.from_reconciled_result` first runs the existing `reconcile_write` and row serializers, then checks the idempotency key and reference links. The adapter must verify the references match; JSON Schema cannot compare values across fields. A rejection result has `persisted: false`; an outage after an attempted or ambiguous write is `uncertain` with `persisted: "unknown"`, a `persistence_uncertain` failure, and `retry_with_same_idempotency_key: true`. Use `unavailable` with `persisted: false` only when a trusted adapter has proved that no write was attempted. Reconcile the original key before deciding whether the canonical request and audit event committed.
 
-`guest_status_readback` is a tagged success/failure union. Failure results use the shared fixed failure vocabulary and cannot contain request status or timestamps. Reception transitions require a gateway-supported action plus a legal `from_status`/`target_status` edge; the expected version remains a stale-read guard, not an atomic compare-and-swap.
+`guest_status_readback` is a tagged success/failure union. Failure results use the shared fixed failure vocabulary and cannot contain request status or timestamps. `hotel_information` is also a tagged union: answered and handoff require a safe answer and cannot carry a failure; unavailable requires a failure and cannot carry an answer. Reception transitions require a gateway-supported action plus a legal `from_status`/`target_status` edge; the expected version remains a stale-read guard, not an atomic compare-and-swap.
 
 ## Platform dependencies and non-goals
 
@@ -42,4 +42,4 @@ No public endpoint, Workpeg SDK API, hosted AI action, service deployment, secre
 
 ## Validation
 
-Run `python -m unittest tests.test_guest_mvp_contract_v1 -v` for Draft 2020-12 instance validation, negative wire examples, and vocabulary/transition drift checks against the Python domain. The development requirements install `jsonschema`; the tests use only checked-in contracts and synthetic examples and do not perform authentication or provider calls.
+Run `python -m unittest tests.test_guest_mvp_contract_v1 tests.test_guest_mvp_contract_runtime -v` for Draft 2020-12 instance validation, strict RFC3339 negative examples, request/audit reconciliation checks, receptionist gateway mapping, and vocabulary/transition drift checks against the Python domain. Consumers must configure the schema validator with the strict `date-time` checker used by `validate_rfc3339`; the generic library checker alone is not sufficient. The tests use only checked-in contracts and synthetic examples and do not perform authentication or provider calls.
