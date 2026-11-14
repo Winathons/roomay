@@ -14,7 +14,7 @@ const output = process.argv[2];
 const releaseHtml = fs.readFileSync(path.join(output, 'index.html'), 'utf8');
 const compiledApp = fs.readFileSync(path.join(output, 'app.js'), 'utf8');
 const compiledIcons = fs.readFileSync(path.join(output, 'icons.css'), 'utf8');
-assert.match(releaseHtml, /fonts\.googleapis\.com\/css2\?family=Plus\+Jakarta\+Sans/);
+assert.match(releaseHtml, /fonts\.googleapis\.com\/css2\?family=Inter/);
 assert.match(compiledApp, /--color-brand-primary/);
 assert.match(compiledApp, /--font-base/);
 for (const icon of ['layout-dashboard', 'bed', 'clipboard-list', 'eye', 'refresh', 'brush']) {
@@ -96,8 +96,7 @@ assert.match(todayMarkup, /outline-gray/);
 assert.doesNotMatch(todayMarkup, /outline-color/);
 assert.match(todayMarkup, /font-size/);
 assert.match(todayMarkup, /38px/);
-assert.match(todayMarkup, /box-shadow/);
-assert.match(todayMarkup, /#f7f8f3/);
+assert.match(todayMarkup, /#f8f9f7/);
 const navButtons = visit(tree, node => node.type === 'button' &&
   ['Today', 'Rooms & availability', 'Service requests'].includes(node.props.label));
 assert.equal(navButtons.length, 3);
@@ -105,14 +104,14 @@ assert.deepEqual(navButtons.map(node => node.props.icon),
   ['layout-dashboard', 'bed', 'clipboard-list']);
 for (const [index, button] of navButtons.entries()) {
   assert.equal(button.props.variant, 'ghost-gray');
-  assert.equal(button.props.style[':rest'].color, index === 0 ? '#174c3d' : '#53675c');
-  assert.equal(button.props.style[':rest']['background-color'], index === 0 ? '#e5efe8' : 'transparent');
-  assert.equal(button.props.style[':hover'].color, '#103a30');
-  assert.equal(button.props.style[':hover']['background-color'], '#eaf2ed');
-  assert.equal(button.props.style[':focus-visible'].color, '#103a30');
-  assert.equal(button.props.style[':focus-visible']['background-color'], '#eaf2ed');
-  assert.equal(button.props.style[':focus-visible'].outline, '2px solid #174c3d');
-  assert.equal(button.props.style[':active'].color, '#103a30');
+  assert.equal(button.props.style[':rest'].color, index === 0 ? '#181a1a' : '#515653');
+  assert.equal(button.props.style[':rest']['background-color'], index === 0 ? '#f0f1ef' : 'transparent');
+  assert.equal(button.props.style[':hover'].color, '#181a1a');
+  assert.equal(button.props.style[':hover']['background-color'], index === 0 ? '#e8eae7' : '#f0f1ef');
+  assert.equal(button.props.style[':focus-visible'].color, '#181a1a');
+  assert.equal(button.props.style[':focus-visible']['background-color'], index === 0 ? '#e8eae7' : '#f0f1ef');
+  assert.equal(button.props.style[':focus-visible'].outline, '2px solid #181a1a');
+  assert.equal(button.props.style[':active'].color, '#181a1a');
 }
 assert.match(todayMarkup, /WORKPEG SNAPSHOT/);
 assert.match(todayMarkup, /READ ONLY/);
@@ -212,7 +211,13 @@ sliceApp.state.service_requests = [{request_id: id(107), hotel_id: id(108), stay
   description: 'Synthetic WOR-60 extra-towels request for Room 205.', urgency: 'normal',
   department: 'housekeeping', status: 'received', last_event_id: id(109),
   version: 1, updated_at: '2026-11-08T15:01:00+00:00',
-  last_operation_signature: 'PRIVATE-SIGNATURE-CANARY', triage_required: false}];
+  last_operation_signature: 'PRIVATE-SIGNATURE-CANARY', triage_required: false},
+  {request_id: id(113), hotel_id: id(108), stay_id: id(105), room_id: id(102),
+   guest_id: id(103), origin: 'reception_desk', category: 'plumbing',
+   description: 'Synthetic WOR-60 plumbing request for Room 205.', urgency: 'high',
+   department: 'maintenance', status: 'in_progress', last_event_id: id(114),
+   version: 2, updated_at: '2026-11-08T15:02:00+00:00',
+   last_operation_signature: 'PRIVATE-SECOND-SIGNATURE-CANARY', triage_required: false}];
 sliceApp.state.request_audit = [{event_id: id(109), hotel_id: id(108), request_id: id(107),
   sequence: 1, event_type: 'created', from_status: null, to_status: 'received',
   actor_id: 'PRIVATE-ACTOR-CANARY', actor_kind: 'staff', actor_department: 'reception',
@@ -233,6 +238,20 @@ assert.equal(sliceApp.state.request_cards[0].department_label, 'Housekeeping');
 assert.equal(sliceApp.state.request_cards[0].category_label, 'Extra towels');
 assert.equal(sliceApp.state.request_cards[0].status_label, 'Received');
 assert.match(sliceApp.state.request_cards[0].audit_status, /delivery is not represented/);
+assert.deepEqual(sliceApp.state.request_summary.map(item => [item.label, item.value]), [
+  ['Open requests', 2], ['New requests', 1], ['In progress', 1], ['Resolved today', 0],
+]);
+const overviewTree = sliceApp.build();
+const overviewMarkup = JSON.stringify(overviewTree);
+assert.match(overviewMarkup, /Recent guest requests/);
+assert.match(overviewMarkup, /Latest requests from the validated WorkPeg snapshot/);
+const overviewRequests = visit(overviewTree, node => node.type === 'button' &&
+  node.props.label.includes('Synthetic WOR-60') && node.props.label.includes('request for Room 205.'));
+assert.equal(overviewRequests.length, 2, 'overview preview links to both existing requests');
+overviewRequests[1].props.handler();
+assert.equal(sliceApp.state.selected_request, id(113), 'each row opens its own request');
+assert.equal(sliceApp.state.active_view, 'Requests');
+sliceApp.clear_selected_request();
 sliceApp.state.active_view = 'Rooms';
 const roomsSliceTree = JSON.stringify(sliceApp.build());
 assert.match(roomsSliceTree, /Roomay TEST Room Type/);
@@ -240,15 +259,41 @@ assert.match(roomsSliceTree, /overflow-wrap/);
 assert.match(roomsSliceTree, /Presidential Family Suite With A Long Label/);
 assert.match(roomsSliceTree, /Room details/);
 assert.match(roomsSliceTree, /WOR-60 Fictional Guest \(Synthetic\)/);
-assert.match(roomsSliceTree, /Reservation: confirmed/);
+assert.match(roomsSliceTree, /Reservation/);
+assert.match(roomsSliceTree, /confirmed/);
+assert.match(roomsSliceTree, /Room guidance is not included in the authorized hotel table contract/);
 sliceApp.state.active_view = 'Requests';
-const sliceTree = JSON.stringify(sliceApp.build());
-assert.match(sliceTree, /Request category: Extra towels/);
-assert.match(sliceTree, /Housekeeping/);
-assert.match(sliceTree, /Received/);
-assert.match(sliceTree, /Audit 1: created - start/);
-assert.match(sliceTree, /delivery is not represented/);
-assert.doesNotMatch(sliceTree, /PRIVATE-ACTOR-CANARY|PRIVATE-REASON-CANARY|PRIVATE-OPERATION-CANARY|PRIVATE-SIGNATURE-CANARY/);
+const requestsTree = sliceApp.build();
+const requestsMarkup = JSON.stringify(requestsTree);
+assert.match(requestsMarkup, /Guest requests/);
+assert.match(requestsMarkup, /REQUEST/);
+assert.match(requestsMarkup, /DEPARTMENT/);
+assert.match(requestsMarkup, /Search requests, rooms or guests/);
+assert.match(requestsMarkup, /Synthetic WOR-60 extra-towels request for Room 205/);
+assert.match(requestsMarkup, /Staff assignment not configured/);
+assert.match(requestsMarkup, /Open requests/);
+assert.match(requestsMarkup, /Resolved today/);
+const requestButton = visit(requestsTree, node => node.type === 'button' &&
+  node.props.label === 'Synthetic WOR-60 extra-towels request for Room 205.');
+assert.equal(requestButton.length, 1, 'request can be opened from the native table');
+requestButton[0].props.handler();
+assert.equal(sliceApp.state.selected_request, id(107));
+const selectedRequestTree = sliceApp.build();
+const selectedRequestMarkup = JSON.stringify(selectedRequestTree);
+assert.match(selectedRequestMarkup, /Request details/);
+assert.match(selectedRequestMarkup, /Issue details/);
+assert.match(selectedRequestMarkup, /Audit history/);
+assert.match(selectedRequestMarkup, /delivery is not represented/);
+assert.match(selectedRequestMarkup, /Assignment, acknowledgement, status changes and guest messaging are unavailable/);
+assert.doesNotMatch(selectedRequestMarkup, /PRIVATE-ACTOR-CANARY|PRIVATE-REASON-CANARY|PRIVATE-OPERATION-CANARY|PRIVATE-SIGNATURE-CANARY/);
+const requestDetailBack = visit(selectedRequestTree, node => node.type === 'button' &&
+  node.props.label === 'Back to requests');
+assert.equal(requestDetailBack.length, 1);
+assert.equal(requestDetailBack[0].props.handler, 'clear_selected_request');
+sliceApp.clear_selected_request();
+assert.equal(sliceApp.state.selected_request, '');
+assert.doesNotMatch(JSON.stringify(sliceApp.build()), /Save changes|Send guest update|Acknowledge request|Mark resolved/,
+  'request actions remain unavailable without an authorized write path');
 sliceApp.state.rooms.push({entity_id: id(111), number: '206', room_type_id: id(101),
   enabled: true, housekeeping: 'dirty'});
 sliceApp.state.room_blocks.push({entity_id: id(112), room_id: id(111),
