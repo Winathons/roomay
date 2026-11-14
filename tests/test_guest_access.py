@@ -6,7 +6,7 @@ import unittest
 from domain.fixtures import synthetic_hotel, uid
 from domain.guest_access import (
     ChallengeEvidence, GuestSessionAuthority, GuestSessionError,
-    ResolvedGuestStay, SESSION_TTL_SECONDS,
+    GuestSubject, ResolvedGuestStay, SESSION_TTL_SECONDS,
 )
 from domain.guest_actions import GuestActionError, GuestActionGateway
 from domain.guest_actions import MAX_SESSION_INTERACTIONS
@@ -32,15 +32,16 @@ class GuestAccessTests(unittest.TestCase):
         self.clock = FakeClock()
         self.snapshot = synthetic_hotel()
         self.evidence = ChallengeEvidence(
-            challenge_id="challenge-1", business_id=BUSINESS,
-            hotel_id=HOTEL, guest_id=GUEST, proof="synthetic-proof",
+            challenge_id="challenge-1", proof="synthetic-proof",
         )
         self.verifications = []
         self.resolutions = []
 
         def verify(evidence):
             self.verifications.append(evidence.challenge_id)
-            return evidence.proof == "synthetic-proof"
+            if evidence.proof != "synthetic-proof":
+                return False
+            return GuestSubject(business_id=BUSINESS, hotel_id=HOTEL, guest_id=GUEST)
 
         def resolve(subject):
             self.resolutions.append(subject)
@@ -76,10 +77,86 @@ class GuestAccessTests(unittest.TestCase):
             self.authority.complete_challenge(forged)
         self.assertEqual(error.exception.code, "verification_failed")
 
+    def test_challenge_identity_is_derived_by_verifier_not_client_fields(self):
+        with self.assertRaises(TypeError):
+            ChallengeEvidence(
+                challenge_id="forged-scope", proof="synthetic-proof",
+                guest_id=uid("attacker-guest"),
+            )
+
+        for field, value in (
+            ("business_id", uid("other-business")),
+            ("hotel_id", uid("other-hotel")),
+            ("guest_id", uid("other-guest")),
+        ):
+            with self.subTest(field=field):
+                self.authority._verify_evidence = lambda evidence, field=field, value=value: GuestSubject(
+                    **{ "business_id": BUSINESS, "hotel_id": HOTEL, "guest_id": GUEST, field: value }
+                )
+                with self.assertRaises(GuestSessionError) as error:
+                    self.authority.complete_challenge(replace(
+                        self.evidence, challenge_id=f"wrong-{field}"))
+                self.assertEqual(error.exception.code, "scope_mismatch")
+
+    def test_expired_challenge_is_refused_by_trusted_verifier(self):
+        expires_at = self.clock.value - 1
+
+        def verify(evidence):
+            if self.clock.value >= expires_at:
+                return False
+            return GuestSubject(BUSINESS, HOTEL, GUEST)
+
+        self.authority._verify_evidence = verify
+        with self.assertRaises(GuestSessionError) as error:
+            self.authority.complete_challenge(replace(self.evidence, challenge_id="expired"))
+        self.assertEqual(error.exception.code, "verification_failed")
+
+    def test_attempt_limit_blocks_brute_force_at_trusted_challenge_adapter(self):
+        attempts = {}
+        initial_sessions = len(self.authority._sessions)
+
+        def verify(evidence):
+            attempts[evidence.challenge_id] = attempts.get(evidence.challenge_id, 0) + 1
+            if attempts[evidence.challenge_id] > 3:
+                raise RuntimeError("rate limited")
+            if evidence.proof != "correct-proof":
+                return False
+            return GuestSubject(BUSINESS, HOTEL, GUEST)
+
+        self.authority._verify_evidence = verify
+        for attempt in range(1, 4):
+            with self.subTest(attempt=attempt):
+                with self.assertRaises(GuestSessionError):
+                    self.authority.complete_challenge(replace(
+                        self.evidence, challenge_id="rate-limited", proof=f"guess-{attempt}"))
+        with self.assertRaises(GuestSessionError) as error:
+            self.authority.complete_challenge(replace(
+                self.evidence, challenge_id="rate-limited", proof="correct-proof"))
+        self.assertEqual(error.exception.code, "verification_failed")
+        self.assertEqual(attempts["rate-limited"], 4)
+        self.assertEqual(len(self.authority._sessions), initial_sessions)
+
     def test_challenge_replay_cannot_issue_second_session(self):
         with self.assertRaises(GuestSessionError) as error:
             self.authority.complete_challenge(self.evidence)
         self.assertEqual(error.exception.code, "challenge_replayed")
+
+    def test_verified_challenge_is_burned_when_stay_lookup_is_unavailable(self):
+        self.authority._resolve_stay = lambda subject: (_ for _ in ()).throw(RuntimeError("down"))
+        with self.assertRaises(GuestSessionError) as unavailable:
+            self.authority.complete_challenge(replace(self.evidence, challenge_id="lookup-down"))
+        self.assertEqual(unavailable.exception.code, "stay_unavailable")
+        with self.assertRaises(GuestSessionError) as replay:
+            self.authority.complete_challenge(replace(self.evidence, challenge_id="lookup-down"))
+        self.assertEqual(replay.exception.code, "challenge_replayed")
+
+    def test_logout_revokes_only_the_supplied_server_session(self):
+        self.assertTrue(self.authority.revoke(self.token))
+        self.assertFalse(self.authority.revoke(self.token))
+        with self.assertRaises(GuestSessionError) as denied:
+            self.authority.resolve_for_action(self.token)
+        self.assertEqual(denied.exception.code, "invalid_or_expired_session")
+        self.assertFalse(self.authority.revoke(None))
 
     def test_forged_or_missing_session_token_fails_closed(self):
         for token in (None, "forged-token", {"role": "guest", "guest_id": GUEST}):
@@ -94,12 +171,11 @@ class GuestAccessTests(unittest.TestCase):
         self.assertEqual(error.exception.code, "invalid_or_expired_session")
 
     def test_wrong_business_scope_fails_closed(self):
-        forged_business = replace(
-            self.evidence, challenge_id="challenge-other-business",
-            business_id=uid("other-business"),
-        )
+        self.authority._verify_evidence = lambda evidence: GuestSubject(
+            business_id=uid("other-business"), hotel_id=HOTEL, guest_id=GUEST)
         with self.assertRaises(GuestSessionError) as issue_error:
-            self.authority.complete_challenge(forged_business)
+            self.authority.complete_challenge(replace(
+                self.evidence, challenge_id="challenge-other-business"))
         self.assertEqual(issue_error.exception.code, "scope_mismatch")
 
         self.resolve_stay = lambda subject: ResolvedGuestStay(
@@ -115,6 +191,10 @@ class GuestAccessTests(unittest.TestCase):
         self.assertEqual(error.exception.code, "scope_mismatch")
 
     def test_room_or_stay_change_requires_reverification(self):
+        self.snapshot["stays"][0]["room_id"] = uid("204")
+        in_house = next(row for row in self.snapshot["reservations"]
+                        if row["entity_id"] == uid("in-house"))
+        in_house["room_id"] = uid("204")
         self.authority._resolve_stay = lambda subject: ResolvedGuestStay(
             business_id=BUSINESS, record_business_id=BUSINESS,
             hotel_id=HOTEL, trusted_snapshot_hotel_id=HOTEL, guest_id=GUEST,
@@ -123,34 +203,60 @@ class GuestAccessTests(unittest.TestCase):
         )
         with self.assertRaises(GuestSessionError) as error:
             self.authority.resolve_for_action(self.token)
-        self.assertEqual(error.exception.code, "active_registered_stay_required")
+        self.assertEqual(error.exception.code, "stay_scope_changed")
+        with self.assertRaisesRegex(GuestSessionError, "invalid_or_expired_session"):
+            self.authority.resolve_for_action(self.token)
 
     def test_missing_stay_and_checked_out_stay_are_denied(self):
+        token_sequence = 0
+
+        def extra_token():
+            nonlocal token_sequence
+            token_sequence += 1
+            return f"extra-session-token-with-sufficient-entropy-{token_sequence}"
+
+        self.authority._token_factory = extra_token
+
         def checked_out(data):
             data["stays"][0].update(
                 status="checked_out", checked_out_at="2026-11-08T12:00:00+01:00")
             data["stay_guests"][0]["left_at"] = "2026-11-08T12:00:00+01:00"
 
-        for mutate in (
+        for index, mutate in enumerate((
             lambda data: data["stays"].clear(),
             checked_out,
-        ):
+        )):
             self.snapshot = synthetic_hotel()
+            token = self.authority.complete_challenge(replace(
+                self.evidence, challenge_id=f"checkout-{index}"))
             mutate(self.snapshot)
             with self.subTest(snapshot=self.snapshot["stays"]):
                 with self.assertRaises(GuestSessionError) as error:
-                    self.authority.resolve_for_action(self.token)
+                    self.authority.resolve_for_action(token)
                 self.assertEqual(error.exception.code, "active_registered_stay_required")
+                with self.assertRaisesRegex(GuestSessionError, "invalid_or_expired_session"):
+                    self.authority.resolve_for_action(token)
 
     def test_occupant_who_left_or_unregistered_guest_is_denied(self):
-        for mutate in (
+        token_sequence = 0
+
+        def extra_token():
+            nonlocal token_sequence
+            token_sequence += 1
+            return f"occupant-session-token-with-sufficient-entropy-{token_sequence}"
+
+        self.authority._token_factory = extra_token
+
+        for index, mutate in enumerate((
             lambda data: data["stay_guests"][0].update(left_at="2026-11-07T10:00:00+01:00"),
             lambda data: data["stay_guests"].clear(),
-        ):
+        )):
             self.snapshot = synthetic_hotel()
+            token = self.authority.complete_challenge(replace(
+                self.evidence, challenge_id=f"occupant-{index}"))
             mutate(self.snapshot)
             with self.assertRaises(GuestSessionError):
-                self.authority.resolve_for_action(self.token)
+                self.authority.resolve_for_action(token)
 
     def test_invalid_or_mismatched_trusted_mapping_is_denied(self):
         self.authority._resolve_stay = lambda subject: ResolvedGuestStay(
@@ -168,8 +274,7 @@ class GuestActionGatewayTests(unittest.TestCase):
         self.clock = FakeClock()
         self.snapshot = synthetic_hotel()
         self.evidence = ChallengeEvidence(
-            challenge_id="challenge-1", business_id=BUSINESS,
-            hotel_id=HOTEL, guest_id=GUEST, proof="valid",
+            challenge_id="challenge-1", proof="valid",
         )
 
         def resolve(subject):
@@ -187,7 +292,8 @@ class GuestActionGatewayTests(unittest.TestCase):
             return f"offline-session-token-with-sufficient-entropy-{self.session_sequence}"
 
         self.authority = GuestSessionAuthority(
-            verify_evidence=lambda evidence: evidence.proof == "valid",
+            verify_evidence=lambda evidence: GuestSubject(BUSINESS, HOTEL, GUEST)
+            if evidence.proof == "valid" else False,
             resolve_stay=resolve, clock=self.clock,
             token_factory=session_token,
         )
