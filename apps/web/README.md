@@ -13,6 +13,10 @@ Design issues: WOR-7, WOR-24 and WOR-35 to WOR-46 in Linear. Each has a handoff 
 | **Staff phones** | **Guest phones** |
 | ![Staff phones](docs/screenshots/staff.png) | ![Guest phones](docs/screenshots/guest.png) |
 
+## Focused guest preview (WOR-17)
+
+The guest stay-code, conversation, request review, and tracking preview now lives in the independent [`apps/guest-mvp`](../guest-mvp/README.md) package. The broader guest prototypes below remain part of this app; the focused preview is no longer routed through this application or its shared synthetic store.
+
 ## Run it
 
 Needs Node 20 or later. From the repo root:
