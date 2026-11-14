@@ -32,6 +32,22 @@ _EMERGENCY_TERMS = (
     "burning smell from the socket", "burning smell from the outlet",
     "gas smell",
 )
+_ELECTRICAL_HAZARD_PATTERNS = (
+    # Treat these specific electrical warning signs as human handoff cases,
+    # without turning every routine socket failure into an emergency.
+    re.compile(
+        r"\b(?:socket|power\s+outlet|outlet|plug(?:\s+point)?)\b"
+        r".{0,48}\b(?:buzz(?:ing|es)?|very\s+hot|hot\s+to\s+touch|"
+        r"overheating|smells?\s+(?:burnt|like\s+burning)|burning\s+smell|"
+        r"smoke|sparks?|sparking)\b", re.I,
+    ),
+    re.compile(
+        r"\b(?:buzz(?:ing|es)?|very\s+hot|hot\s+to\s+touch|overheating|"
+        r"smells?\s+(?:burnt|like\s+burning)|burning\s+smell|smoke|"
+        r"sparks?|sparking)\b.{0,48}\b(?:socket|power\s+outlet|outlet|"
+        r"plug(?:\s+point)?)\b", re.I,
+    ),
+)
 _URGENT_TERMS = ("urgent", "urgently", "asap", "immediately", "right now")
 _PLUMBING_TERMS = (
     "plumbing", "leak", "leaking", "pipe burst", "burst pipe",
@@ -127,7 +143,10 @@ def _room_number(text):
 
 def _is_emergency(text):
     lowered = text.lower()
-    return any(term in lowered for term in _EMERGENCY_TERMS)
+    return (
+        any(term in lowered for term in _EMERGENCY_TERMS)
+        or any(pattern.search(text) for pattern in _ELECTRICAL_HAZARD_PATTERNS)
+    )
 
 
 def _urgency(text):

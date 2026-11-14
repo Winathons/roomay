@@ -12,6 +12,13 @@ clarification or Reception triage. Hazardous electrical wording is handed off
 with safety guidance; the response does not claim Reception or emergency
 services were contacted.
 
+This is conservative deterministic classification for supported phrase
+patterns, including electrical hazard cues such as a buzzing, hot,
+burnt-smelling, or sparking socket. It is not broad natural-language
+understanding. Wider coverage needs a separately verified AI integration
+whose structured proposals remain subject to the same domain and safety
+policies.
+
 A structured classifier may not choose a department: the domain recomputes it
 from the canonical catalog and rejects a model category when the deterministic
 classifier has no matching supported signal. The original guest wording remains

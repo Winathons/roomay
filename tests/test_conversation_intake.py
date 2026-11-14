@@ -114,6 +114,10 @@ class ConversationIntakeTests(unittest.TestCase):
         for text in (
             "My room socket is sparking.",
             "There is smoke from the outlet and it smells like burning.",
+            "The socket is buzzing.",
+            "My power outlet is very hot.",
+            "The socket smells burnt.",
+            "Sparks are coming from the plug.",
         ):
             with self.subTest(text=text):
                 result = self.turn(text, confirmed=True)
@@ -121,6 +125,30 @@ class ConversationIntakeTests(unittest.TestCase):
                 self.assertTrue(result["handoff_required"])
                 self.assertNotIn("request_plan", result["internal"])
                 self.assertIn("has not contacted anyone", result["message"])
+
+    def test_ordinary_socket_failures_remain_confirmable_maintenance_requests(self):
+        for text in (
+            "My room socket isn't working.",
+            "The power outlet has no power.",
+            "The plug point is broken.",
+        ):
+            with self.subTest(text=text):
+                preview = self.turn(text)
+                self.assertEqual(preview["state"], "awaiting_confirmation")
+                self.assertIn("Maintenance", preview["message"])
+                self.assertFalse(preview["submitted"])
+                self.assertFalse(preview["persisted"])
+                self.assertNotIn("request_plan", preview["internal"])
+
+                confirmed = self.turn(
+                    text, confirmed=True, turn_id="ordinary-electrical-" + text[:8],
+                )
+                plan = confirmed["internal"]["request_plan"]["target_request"]
+                self.assertEqual(plan["category"], "electrical")
+                self.assertEqual(plan["department"], "maintenance")
+                self.assertIsNone(plan["assigned_staff_id"])
+                self.assertFalse(confirmed["submitted"])
+                self.assertFalse(confirmed["persisted"])
 
     def test_structured_ai_cannot_turn_greeting_or_vague_help_into_department_action(self):
         candidate = {
