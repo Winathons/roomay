@@ -5,7 +5,6 @@ actually invoked a tool, sent an email, saved a Workpeg row or verified a stay.
 """
 import json
 from pathlib import Path
-import re
 import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -27,7 +26,7 @@ class RoomaySkillOfferTests(unittest.TestCase):
             {"name", "version", "title", "description", "command", "message", "instructions"},
         )
         self.assertEqual(self.offer["name"], "roomay-service-intake")
-        self.assertEqual(self.offer["version"], "0.3.0")
+        self.assertEqual(self.offer["version"], "0.4.0")
         self.assertLessEqual(len(self.offer["command"]), 48)
         self.assertLessEqual(len(self.offer["message"]), 400)
 
@@ -43,18 +42,27 @@ class RoomaySkillOfferTests(unittest.TestCase):
         for word in ("reception", "maintenance", "housekeeping", "food & beverage", "confirmation"):
             self.assertIn(word, guidance)
 
-    def test_delivery_claim_requires_verified_send(self):
-        text = self.instructions.lower()
-        self.assertIn("genuine successful tool result", text)
-        self.assertIn("trusted hotel directory", text)
-        self.assertIn("do not claim it was sent", text)
-        self.assertIn("complete creation-audit readback", text)
-        self.assertIn("no real send action", text) if "no real send action" in text else self.assertIn("no verified sending tool", text)
+    def test_no_guest_homework_after_confirmation(self):
+        guidance = self.instructions.lower()
+        self.assertIn("thanks! i've noted your air-conditioning request here", guidance)
+        self.assertIn("do not tell the guest to share it with the front desk", guidance)
+        self.assertIn("end the message there", guidance)
+        self.assertIn("no real authorized send/save", guidance)
 
-    def test_status_updates_require_trusted_audit(self):
-        text = self.instructions.lower()
-        for token in ("complete", "audit", "in progress", "resolved", "status", "stay-scoped"):
-            self.assertIn(token, text)
+    def test_no_false_delivery_or_status(self):
+        guidance = self.instructions.lower()
+        self.assertIn("only after a successful actual tool result", guidance)
+        self.assertIn("do not call it a committed roomay service ticket", guidance)
+        self.assertIn("complete committed audit history", guidance)
+        self.assertIn("never manufacture delivery", guidance)
+        self.assertIn("no verified source", guidance)
+
+    def test_status_updates_are_guest_scoped_and_evidence_based(self):
+        guidance = self.instructions.lower()
+        for phrase in ("active stay", "trusted session identity", "actual request",
+                       "status and audit", "if there is no verified source",
+                       "do not imply background monitoring"):
+            self.assertIn(phrase, guidance)
 
     def test_hazard_and_privacy_guards(self):
         text = self.instructions.lower()
