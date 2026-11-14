@@ -220,6 +220,14 @@ roomay-orb { position: relative; display: block; width: 100%; height: 100%; --or
 .qa-card { margin-top: 38px; padding: clamp(21px, 5vw, 38px); }
 .qa-card > p:not(.eyebrow) { max-width: 580px; color: var(--muted); font-size: 13px; line-height: 1.6; }
 .qa-role-actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 22px; }
+.qa-card .field-group { display: grid; gap: 8px; margin-top: 22px; }
+.qa-card .field-group label { color: var(--forest-deep); font-size: 12px; font-weight: 740; }
+.qa-card .field-group input { width: 100%; min-width: 0; min-height: 42px; padding: 10px 12px; border: 1px solid #dce5dd; border-radius: 10px; background: #fbfcfa; color: #24382e; font: 12px/1.4 ui-monospace, SFMono-Regular, Consolas, monospace; }
+.qa-card .field-group input:focus-visible { outline: 3px solid #8cae95; outline-offset: 2px; }
+.qa-card .field-group .inline-actions { display: flex; gap: 9px; }
+.qa-card .field-group .inline-actions button { flex: 0 0 auto; min-height: 42px; padding: 0 14px; border: 1px solid var(--forest); border-radius: 10px; background: white; color: var(--forest); font-size: 11px; font-weight: 740; }
+.qa-card .field-group .inline-actions button:hover:not(:disabled) { background: #eff5ef; }
+.qa-card .field-group .session-note { margin: 0; }
 
 @media (max-width: 1000px) {
   .app-shell { padding-right: 25px; padding-left: 25px; }
@@ -288,6 +296,8 @@ roomay-orb { position: relative; display: block; width: 100%; height: 100%; --or
   .page-footer { flex-direction: column; }
   .qa-role-actions { flex-direction: column; }
   .qa-role-actions button { width: 100%; min-height: 46px; }
+  .qa-card .field-group .inline-actions { flex-direction: column; }
+  .qa-card .field-group .inline-actions button { min-height: 46px; }
 }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { scroll-behavior: auto !important; transition-duration: .01ms !important; }

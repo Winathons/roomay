@@ -4,6 +4,7 @@ from dataclasses import replace
 import http.client
 import io
 import json
+import shutil
 import subprocess
 import sys
 import threading
@@ -42,6 +43,54 @@ class GuestChatDemoFlowTests(unittest.TestCase):
                 self.assertTrue(any(value in result["messages"][-1]["text"]
                                     for value in ("Hello!", "You're welcome", "I’m here")))
         self.assertEqual(self.demo._sessions[self.session_id].scope.existing_requests, [])
+
+    def test_independent_browser_roles_share_one_expiring_synthetic_scenario(self):
+        scenario_code = self.demo.create_qa_scenario()["scenario_code"]
+        guest_id, _ = self.demo.create_session(role="guest", scenario_code=scenario_code)
+        reception_id, _ = self.demo.create_session(role="reception", scenario_code=scenario_code)
+        housekeeping_id, _ = self.demo.create_session(
+            role="housekeeping", scenario_code=scenario_code)
+        self.assertEqual(len({guest_id, reception_id, housekeeping_id}), 3)
+
+        proposal = self.demo.send_message(
+            guest_id, "Please bring extra towels to my room.")
+        revision = proposal["pending"]["revision"]
+        self.demo.confirm(guest_id, revision)
+        self.demo.confirm(guest_id, revision)
+        guest = self.demo.role_view(guest_id)
+        self.assertEqual(len(guest["requests"]), 1)
+        request_id = self.demo._sessions[guest_id].demo_requests[0]["request_id"]
+
+        reception = self.demo.role_view(reception_id)
+        self.assertEqual(len(reception["requests"]), 1)
+        self.assertEqual(reception["requests"][0]["status"], "received")
+        self.demo.assign_latest_to_housekeeping(reception_id, request_id)
+        self.assertEqual(len(self.demo.role_view(housekeeping_id)["requests"]), 1)
+        for action in ("acknowledge", "start", "resolve"):
+            self.demo.department_action(housekeeping_id, action, request_id)
+        self.assertEqual(self.demo.role_view(guest_id)["requests"][0]["status"], "resolved")
+
+        with self.assertRaises(DemoError) as denied:
+            self.demo.assign_latest_to_housekeeping(guest_id, request_id)
+        self.assertEqual(denied.exception.status, 403)
+        with self.assertRaises(DemoError) as denied:
+            self.demo.department_action(reception_id, "resolve", request_id)
+        self.assertEqual(denied.exception.status, 403)
+        wrong_room = self.demo.send_message(guest_id, "Send towels to room 120 instead.")
+        self.assertEqual(wrong_room["state"], "handoff")
+
+    def test_shared_scenario_expiry_and_invalid_join_fail_closed(self):
+        now = [100.0]
+        demo = GuestChatDemo(clock=lambda: now[0])
+        code = demo.create_qa_scenario()["scenario_code"]
+        session_id, _ = demo.create_session(role="guest", scenario_code=code)
+        with self.assertRaises(DemoError) as invalid:
+            demo.create_session(role="reception", scenario_code="not-a-scenario")
+        self.assertEqual(invalid.exception.status, 401)
+        now[0] += 20 * 60 + 1
+        with self.assertRaises(DemoError) as expired:
+            demo.role_view(session_id)
+        self.assertEqual(expired.exception.status, 401)
 
     def test_greeting_prefix_does_not_mask_real_service_problems(self):
         for text, department in (("Hi, my AC isn't cooling", "Maintenance"),
@@ -421,6 +470,15 @@ class GuestChatDemoFlowTests(unittest.TestCase):
 
 
 class GuestChatDemoHttpTests(unittest.TestCase):
+    def test_qa_selector_controller_sends_only_explicit_shared_scenario_code(self):
+        node = shutil.which("node")
+        self.assertIsNotNone(node, "Node is required for the QA selector controller test")
+        result = subprocess.run(
+            [node, str(ROOT / "tests" / "qa_workspace_selector.cjs")],
+            capture_output=True, text=True, check=False, timeout=20,
+        )
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
     def test_documented_module_launch_imports_from_repository_root(self):
         # The module entrypoint resolves sibling domain imports without PYTHONPATH.
         repository_root = Path(__file__).resolve().parents[1]
@@ -482,6 +540,51 @@ class GuestChatDemoHttpTests(unittest.TestCase):
             server.shutdown()
             server.server_close()
             thread.join(timeout=2)
+
+    def test_qa_join_code_creates_independent_cookies_with_shared_http_state(self):
+        status, _, raw = self.dispatch("/api/qa/scenario", method="POST", body=b"{}")
+        self.assertEqual(status, 200)
+        code = json.loads(raw)["scenario_code"]
+
+        def join(role):
+            status, headers, body = self.dispatch(
+                "/api/qa/select", method="POST",
+                body=json.dumps({"role": role, "scenario_code": code}).encode())
+            self.assertEqual(status, 200, body.decode())
+            self.assertIn("Set-Cookie", headers)
+            return headers["Set-Cookie"].split(";", 1)[0]
+
+        guest_cookie, reception_cookie, housekeeping_cookie = map(
+            join, ("guest", "reception", "housekeeping"))
+        self.assertEqual(len({guest_cookie, reception_cookie, housekeeping_cookie}), 3)
+
+        def act(path, data, cookie):
+            status, _, raw_result = self.dispatch(
+                path, method="POST", body=json.dumps(data).encode(), cookie=cookie)
+            self.assertEqual(status, 200, raw_result.decode())
+            return json.loads(raw_result)
+
+        proposal = act("/api/message", {"text": "Please bring extra towels."}, guest_cookie)
+        self.assertEqual(proposal["chat"]["state"], "awaiting_confirmation")
+        act("/api/confirm", {"revision": proposal["chat"]["pending"]["revision"]}, guest_cookie)
+        reception = act("/api/session", {}, reception_cookie)
+        self.assertEqual(reception["workspace"], "reception")
+        self.assertEqual(reception["requests"][0]["status"], "received")
+        request_id = reception["requests"][0]["request_id"]
+        act("/api/assign", {"request_id": request_id}, reception_cookie)
+        housekeeping = act("/api/session", {}, housekeeping_cookie)
+        self.assertEqual(housekeeping["workspace"], "housekeeping")
+        self.assertEqual(housekeeping["requests"][0]["status"], "assigned")
+        for action in ("acknowledge", "start", "resolve"):
+            act("/api/staff-action", {"action": action, "request_id": request_id},
+                housekeeping_cookie)
+        guest_after_reload = act("/api/session", {}, guest_cookie)
+        self.assertEqual(guest_after_reload["requests"][0]["status"], "resolved")
+        denied, _, _ = self.dispatch(
+            "/api/staff-action", method="POST",
+            body=json.dumps({"action": "resolve", "request_id": request_id}).encode(),
+            cookie=guest_cookie)
+        self.assertEqual(denied, 403)
 
     def test_real_http_greeting_prefix_still_creates_guarded_ac_proposal(self):
         server = make_server(port=0, enable_local_qa=True)

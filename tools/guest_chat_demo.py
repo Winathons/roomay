@@ -216,6 +216,9 @@ class GuestChatDemo:
         self.clock = clock
         self.chat_provider = chat_provider
         self._sessions = {}
+        # Shared scenarios are short-lived, process-memory-only fixtures. The
+        # join code is an internal QA convenience, never an authentication token.
+        self._scenarios = {}
         self._lock = threading.RLock()
 
     def claim_vapi_call(self, session_id, *, max_duration=MAX_VAPI_CALL_SECONDS):
@@ -246,19 +249,53 @@ class GuestChatDemo:
 
     def _expire_sessions(self):
         now = self.clock()
+        expired_scenarios = [code for code, scenario in self._scenarios.items()
+                             if now - scenario["last_activity"] > SESSION_TTL_SECONDS]
+        for code in expired_scenarios:
+            self._scenarios.pop(code, None)
         expired = [key for key, session in self._sessions.items()
-                   if now - session.last_activity > SESSION_TTL_SECONDS]
+                   if (now - session.last_activity > SESSION_TTL_SECONDS
+                       or session.qa_scenario_code not in self._scenarios)]
         for key in expired:
             self._sessions.pop(key, None)
 
-    def create_session(self):
+    def create_qa_scenario(self):
+        """Create a synthetic shared scenario and return its local-only join code."""
+        with self._lock:
+            self._expire_sessions()
+            if len(self._scenarios) >= self.max_sessions:
+                raise DemoError("demo_capacity_reached", 429)
+            code = secrets.token_urlsafe(24)
+            context, scope = _new_synthetic_scope()
+            self._scenarios[code] = {
+                "context": context, "scope": scope, "requests": [], "audit": [],
+                "last_activity": self.clock(), "lock": threading.RLock(),
+            }
+            return {"scenario_code": code, "expires_in_seconds": SESSION_TTL_SECONDS,
+                    "persistence": "process_memory_only"}
+
+    def create_session(self, *, role="guest", scenario_code=None):
         with self._lock:
             self._expire_sessions()
             if len(self._sessions) >= self.max_sessions:
                 raise DemoError("demo_capacity_reached", 429)
             session_id = secrets.token_urlsafe(32)
-            context, scope = _new_synthetic_scope()
+            if scenario_code is None:
+                scenario_code = self.create_qa_scenario()["scenario_code"]
+            scenario = self._scenarios.get(scenario_code)
+            if scenario is None:
+                raise DemoError("demo_scenario_expired", 401)
+            if role not in {"guest", "reception", "housekeeping"}:
+                raise DemoError("invalid_demo_role")
+            context, scope = scenario["context"], scenario["scope"]
             session = DemoSession(context, scope, str(uuid4()))
+            session.active_role = role
+            session.qa_scenario_code = scenario_code
+            session.demo_requests = scenario["requests"]
+            session.demo_audit = scenario["audit"]
+            # All independent browser sessions in one QA scenario serialize
+            # their local transitions through the same in-process lock.
+            session.lock = scenario["lock"]
             session.ai_chat_status = "available" if self.chat_provider is not None else "disabled"
             session.messages.append({
                 "role": "assistant",
@@ -281,6 +318,11 @@ class GuestChatDemo:
             if session is None:
                 raise DemoError("demo_session_expired", 401)
             session.last_activity = self.clock()
+            scenario = self._scenarios.get(session.qa_scenario_code)
+            if scenario is None:
+                self._sessions.pop(session_id, None)
+                raise DemoError("demo_session_expired", 401)
+            scenario["last_activity"] = self.clock()
             return session
 
     @staticmethod
@@ -355,11 +397,14 @@ class GuestChatDemo:
             elif step == "complete":
                 if current is None:
                     raise DemoError("demo_reconciliation_failed", 409)
-                session.demo_requests = [row for row in session.demo_requests
-                                         if row["request_id"] != request_id]
+                # These lists are shared by every independent browser session
+                # joined to the same local scenario. Mutate in place so all
+                # workspace projections observe the verified transition.
+                session.demo_requests[:] = [row for row in session.demo_requests
+                                            if row["request_id"] != request_id]
                 session.demo_requests.append(deepcopy(current))
-                session.demo_audit = [event for event in session.demo_audit
-                                      if event["request_id"] != request_id]
+                session.demo_audit[:] = [event for event in session.demo_audit
+                                         if event["request_id"] != request_id]
                 session.demo_audit.extend(deepcopy(events))
                 retained = [row for row in session.scope.existing_requests
                             if row["request_id"] != request_id]
@@ -1031,7 +1076,7 @@ def make_server(demo=None, port=PORT_DEFAULT, *, enable_local_qa=False,
             if vapi_config is not None:
                 allowed_api.update({"/api/voice/config", "/api/voice/claim", "/api/voice/release"})
             if enable_local_qa:
-                allowed_api.add("/api/qa/select")
+                allowed_api.update({"/api/qa/select", "/api/qa/scenario"})
             if self.path not in allowed_api:
                 return self._send(404, {"error": "not_found"})
             try:
@@ -1084,8 +1129,17 @@ def make_server(demo=None, port=PORT_DEFAULT, *, enable_local_qa=False,
                     return self._send(200, demo.set_ai_chat_consent(session_id, body["enabled"]))
 
                 if self.path == "/api/qa/select":
-                    if set(body) != {"role"} or body["role"] not in {"guest", "reception", "housekeeping"}:
+                    if (set(body) not in ({"role"}, {"role", "scenario_code"})
+                            or body["role"] not in {"guest", "reception", "housekeeping"}
+                            or ("scenario_code" in body and not isinstance(body["scenario_code"], str))):
                         raise DemoError("invalid_workspace")
+                    if "scenario_code" in body:
+                        session_id, _ = demo.create_session(
+                            role=body["role"], scenario_code=body["scenario_code"])
+                        target = {"guest": "/stay", "reception": "/staff/reception",
+                                  "housekeeping": "/staff/housekeeping"}[body["role"]]
+                        return self._send(200, {"path": target}, extra=(
+                            ("Set-Cookie", self._session_cookie(session_id)),))
                     session_id = _decode_cookie(self.headers.get("Cookie", ""))
                     set_cookie = None
                     try:
@@ -1098,6 +1152,12 @@ def make_server(demo=None, port=PORT_DEFAULT, *, enable_local_qa=False,
                               "housekeeping": "/staff/housekeeping"}[body["role"]]
                     extra = (("Set-Cookie", set_cookie),) if set_cookie else ()
                     return self._send(200, {"path": target}, extra=extra)
+
+                if self.path == "/api/qa/scenario":
+                    if body:
+                        raise DemoError("invalid_request")
+                    scenario = demo.create_qa_scenario()
+                    return self._send(200, scenario)
 
                 session_id = _decode_cookie(self.headers.get("Cookie", ""))
                 if session_id is None:

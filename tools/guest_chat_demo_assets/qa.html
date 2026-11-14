@@ -6,7 +6,8 @@
   <main class="qa-shell">
     <header class="topbar"><a class="brand" href="/__qa/" aria-label="ROOMAY internal workspace selector"><span class="brand-mark" aria-hidden="true">R</span><span class="brand-name">roomay<span class="brand-period">.</span></span></a><span class="property-kind">Internal QA only</span></header>
     <section class="qa-card"><p class="eyebrow">LOCAL ACCEPTANCE TEST</p><h1>Open a workspace</h1>
-      <p>This internal tool selects an example role for local browser testing. It does not sign you in or verify hotel access.</p>
+      <p>This loopback-only tool creates synthetic browser sessions. Choosing a role does not sign you in or verify hotel access.</p>
+      <div class="field-group"><label for="scenario-code">Shared local test scenario</label><div class="inline-actions"><input id="scenario-code" autocomplete="off" spellcheck="false" aria-describedby="scenario-help"><button id="create-scenario" type="button">Create scenario</button></div><p id="scenario-help" class="session-note">Create one scenario, then copy its code into the other private browser sessions. The code expires after 20 minutes of inactivity.</p></div>
       <div class="qa-role-actions"><button type="button" data-role="guest">Open My Stay</button><button type="button" data-role="reception">Open Reception</button><button type="button" data-role="housekeeping">Open Housekeeping</button></div>
       <p id="qa-feedback" class="workspace-feedback" role="status" aria-live="polite"></p>
     </section>
