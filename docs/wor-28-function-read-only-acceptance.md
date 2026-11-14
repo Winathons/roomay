@@ -52,13 +52,24 @@ this Function.
 
 The [Manifest action contract](https://developers.workpeg.com/docs/latest/manifest/)
 has a phase form: `via: {"table": "<alias>", "phase": "post_save_hook"}`.
-The table alias is authorized before Workpeg invokes `/invoke`. **The phase
-is a label, not a save trigger:** the action directly calls the Function when
-Workpeg AI invokes that tool, even if the table has no save hook. This makes
-the documented action route read-only without saving or changing any row. Do
-not attach an actual hook. A `pre_save_hook` return may replace row data, and a
-post-save hook runs only because a row was already committed; neither is
-needed here. See the official [Save hooks documentation](https://developers.workpeg.com/docs/latest/hooks/).
+On a supported installed/released action path, the phase is an invocation
+label, not a request to save a row; the handler's fixed metadata GETs are
+read-only. Do not attach an actual table save hook. A `pre_save_hook` return
+may replace row data, and an actual post-save hook runs only after a row was
+committed; neither is appropriate for this check. See the official [Save
+hooks documentation](https://developers.workpeg.com/docs/latest/hooks/).
+
+**Development-runner limitation:** the current official [dev-install
+documentation](https://developers.workpeg.com/docs/latest/dev-install/)
+explicitly lists phase actions and the agent envelope with a real token under
+“Cannot be tested in dev.” The presence of `workpeg project serve` and
+`workpeg function test --envelope action` in SDK 0.162.0 does not make this
+specific phase action runnable in a dev install. The CLI fixture uses a
+synthetic token and cannot establish platform authorization. Do not start a
+listener or follow the hosted-action acceptance steps below expecting a real
+phase-action context from the development runner. A real installed action
+would require a separately approved supported Workpeg path; no such invocation
+is authorized or verified by this PR.
 
 The Function sends exactly two HTTPS `GET` requests using the platform token,
 to the fixed Workpeg Tables API host and the platform-provided business UUID,
@@ -94,7 +105,7 @@ compares these files byte-for-byte with canonical source modules. Run
 `tools/sync_function_domain.py` after changing those source modules. No
 credentials or other application code are copied into the image.
 
-## Prepared manifest action — not registered
+## Prepared manifest action — not registered or development-testable
 
 This is a review snippet only. It is not in the production manifest, not in
 `ui/dist/manifest.json`, and has not been uploaded. An owner must separately
@@ -150,61 +161,55 @@ image now uses `pegfn-base:0.162.0`, which satisfies this runner's
 invoke-key requirement. This compatibility was inspected locally but not
 exercised in a Docker container because Docker Desktop was unavailable.
 
-The 0.162.0 `function test --envelope action` fixture uses
-`phase=pre_save`/`post_save` and placeholder token `test-token`; it cannot
-prove a real Function context or authorization. The registered manifest
-action uses `phase=post_save_hook`, so the CLI fixture is not a positive test
-of the real action path. The unit suite tests the handler with a mocked Tables
-port instead.
+The 0.162.0 `function test --envelope action` fixture uses a synthetic token
+and action-shaped context. It cannot prove a real Function context or
+authorization. The registered manifest snippet uses `phase=post_save_hook`,
+but the current dev-install docs explicitly say phase actions and real-token
+agent envelopes cannot be tested in the dev runner. Unit tests exercise the
+handler with a mocked Tables port only.
 
-The current official Functions documentation also says a `dev` Function
-version is not installed or run on Workpeg. Only a `main:<version>` release
-is reviewed and installed. This task does not submit one. Therefore an actual
-test needs Workpeg to confirm its supported development listener/action path
-for the Roomay AI business, plus owner approval for that path.
+Do not treat `workpeg function test`, `workpeg project serve --fake-cloud`,
+or a local Function container smoke as evidence of an authenticated hosted
+phase action. The official dev-install guide says the engine path required to
+run a dev install's Function is not available yet. This PR does not submit a
+`main:<version>` Function release, install a Function, invoke an action, or
+claim that a development-only phase-action route exists. Workpeg must confirm
+the supported, owner-approved way to invoke this read-only action in the
+Roomay AI development business without exposing a Peg-wide CDN action.
 
-## Owner-controlled acceptance procedure — not yet authorized
+## Owner-controlled acceptance procedure — blocked, not authorized
 
-Before running anything that contacts the Workpeg dev API, the owner must
-separately approve: (a) using the development Function listener; (b) any
-temporary manifest action or CDN update; (c) any testing installation or
-Function activation required by Workpeg; and (d) one read-only invocation.
-No hook change, table permission change, record write, Function release, or
-table-row inspection is part of this procedure.
+This procedure cannot currently be executed through the documented
+development Function runner: phase actions are explicitly unsupported there.
+The owner must first obtain Workpeg confirmation of a supported invocation
+route for this read-only action in Roomay AI, with its visibility scope
+understood. Separately authorize any manifest/CDN update, Function release or
+installation, and one hosted invocation. Until those decisions are complete,
+do not start a Function listener, publish an action, or invoke the Function.
+No hook change, table permission change, record write, or table-row inspection
+is part of the proposed acceptance.
 
-1. Confirm the approved Peg is installed for testing in Roomay AI. For a
-   future listener run, use an isolated Workpeg 0.162.0-or-newer environment
-   and the Function base at the same version or newer. Keep the repository's
-   UI SDK pin at 0.152.0.
-2. Ask whether a local development manifest action can be used without
-   uploading `manifest.json` to the Peg CDN. If it cannot, stop for separate
-   release/security approval; do not upload it as part of this test.
-3. In Workpeg, select the approved Peg in the **Roomay AI development
-   business** and privately confirm the owner account and business label. Do
-   not use another business as a fallback.
-4. In the owner's private PowerShell environment, configure `WORKPEG_PK`
-   only if the documented dev listener requires it. Do not paste, print, log,
-   or share it. It authenticates listener registration only; the Function
-   must use `context.token` for the Tables GETs. Never put a token in a
-   command argument or Function payload.
-5. Do not proceed until the manifest action's visibility scope is approved.
-   If approved, start the listener from a disposable clean project copy using
-   `workpeg project serve <peg> --fake-cloud --with docker --concurrency 1`.
-   Supply `WORKPEG_PK` through the owner's private process environment only;
-   never place it in shell history or command arguments. `--fake-cloud`
-   contacts real Workpeg services; it is not a cloud mock. This procedure has
-   not been run.
-6. Invoke the exact action with empty arguments `{}` from a Workpeg AI turn.
-   Do not invoke a table operation and do not save a row. Record the sanitized
-   token-acceptance, inventory, scope and actor-presence flags separately. The
-   owner verifies that the active business was Roomay AI. An unverified actor
-   field does not satisfy actor or staff-role verification.
-7. On denial, unverified scope, incomplete inventory, timeout or malformed
-   result, stop. Do not retry automatically, fall back to a developer token
-   for Tables, inspect rows, change permissions, or repair the pending audit.
-   Retain only the sanitized flags and an owner-held timestamp.
-8. Stop the local listener using that SDK's documented procedure and remove
-   the private developer credential from the process environment.
+1. Ask Workpeg to identify the supported way to invoke a read-only phase
+   action in a dev install, since the current guide says phase actions cannot
+   be tested there. Ask whether this can be scoped to the Roomay AI test
+   business without a Peg-wide CDN manifest update.
+2. Review Workpeg's answer and the exact action exposure with the owner. Obtain
+   separate approval for any required manifest change, release/installation,
+   and one read-only invocation. Do not use `WORKPEG_PK` or start the local
+   Function runner as a workaround for the documented limitation.
+3. If Workpeg documents an approved invocation path, select the approved Peg
+   and **Roomay AI development business** in the owner account, then follow
+   only that documented procedure. The Function must use the platform-provided
+   `context.token` for its two metadata GETs; never use a publishing key as a
+   Tables credential or pass credentials in payloads.
+4. Invoke only with empty arguments `{}`. Do not save rows or call table
+   operations. Record sanitized token-acceptance, inventory, scope and
+   actor-presence flags. The owner independently verifies active business
+   scope. `actor_presence=unverified` does not establish staff identity.
+5. On denial, unverified scope, incomplete inventory, timeout or malformed
+   result, stop. Do not retry automatically, inspect rows, change permissions,
+   or repair the pending audit. Retain only sanitized flags and an
+   owner-held timestamp.
 
 ## What acceptance proves and leaves open
 
