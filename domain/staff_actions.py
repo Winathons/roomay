@@ -60,7 +60,7 @@ def _uuid(value):
         return False
 
 
-def _audit_history_is_consistent(request, events):
+def audit_history_is_consistent(request, events):
     """Require the complete, committed audit chain for the current request.
 
     Audit rows can omit nullable Workpeg columns, so normalize only those
@@ -171,6 +171,10 @@ def _audit_history_is_consistent(request, events):
         and latest["to_status"] == request["status"]
         and updated_at_matches
     )
+
+
+# Keep the existing internal import used by the backend and writer adapters.
+_audit_history_is_consistent = audit_history_is_consistent
 
 
 def project_staff_inbox(context, requests, *, business_id, record_business_id):
@@ -310,7 +314,7 @@ class StaffActionGateway:
                 or not loaded["fingerprint"]
                 or not isinstance(loaded["events"], list)):
             raise StaffActionError("service_request_scope_or_shape_mismatch")
-        if not _audit_history_is_consistent(request, loaded["events"]):
+        if not audit_history_is_consistent(request, loaded["events"]):
             raise StaffActionError("unreconciled_request_audit")
 
         actor = {"actor_id": identity["actor_id"], "hotel_id": identity["hotel_id"],

@@ -80,6 +80,11 @@
         }
       }
     },
+    "rfc3339_date_time": {
+      "type": "string",
+      "format": "date-time",
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d+)?(?:Z|[+-]\\d{2}:\\d{2})$"
+    },
     "guest_context": {
       "type": "object",
       "additionalProperties": false,
@@ -113,8 +118,7 @@
               "$ref": "#/$defs/id"
             },
             "valid_until": {
-              "type": "string",
-              "format": "date-time"
+              "$ref": "#/$defs/rfc3339_date_time"
             }
           }
         },
@@ -259,12 +263,39 @@
         },
         "answer": {
           "type": "string",
+          "minLength": 1,
           "maxLength": 1200
         },
         "failure": {
           "$ref": "#/$defs/failure"
         }
-      }
+      },
+      "oneOf": [
+        {
+          "title": "answered hotel information",
+          "required": ["answer_state", "answer"],
+          "properties": {
+            "answer_state": {"const": "answered"}
+          },
+          "not": {"required": ["failure"]}
+        },
+        {
+          "title": "unavailable hotel information",
+          "required": ["answer_state", "failure"],
+          "properties": {
+            "answer_state": {"const": "unavailable"}
+          },
+          "not": {"required": ["answer"]}
+        },
+        {
+          "title": "hotel information handoff",
+          "required": ["answer_state", "answer"],
+          "properties": {
+            "answer_state": {"const": "handoff"}
+          },
+          "not": {"required": ["failure"]}
+        }
+      ]
     },
     "conversation_action": {
       "type": "object",
@@ -900,8 +931,7 @@
           ]
         },
         "updated_at": {
-          "type": "string",
-          "format": "date-time"
+          "$ref": "#/$defs/rfc3339_date_time"
         },
         "guest_message": {
           "type": "string",

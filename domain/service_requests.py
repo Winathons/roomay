@@ -118,6 +118,32 @@ def _signature(value):
     return sha256(encoded).hexdigest()
 
 
+def creation_event_identity(request):
+    """Return the deterministic identity of a request's original creation event."""
+    if not isinstance(request, dict):
+        raise RequestError("invalid_request_record")
+    request_id = _uuid(request.get("request_id"), "invalid_request_record")
+    hotel_id = _uuid(request.get("hotel_id"), "invalid_request_record")
+    idempotency_key = _text(
+        request.get("idempotency_key"), "invalid_request_record", 200)
+    operation_id = _operation_id(
+        hotel_id, request_id, "create:" + idempotency_key)
+    operation_signature = _signature({
+        "kind": "create", "idempotency_key": idempotency_key,
+        "request": {field: request.get(field) for field in (
+            "hotel_id", "stay_id", "room_id", "guest_id", "origin", "category",
+            "category_detail", "department", "description", "urgency", "sensitive",
+        )},
+    })
+    return {
+        "event_id": _event_id(operation_id),
+        "operation_id": operation_id,
+        "operation_signature": operation_signature,
+        "request_id": request_id,
+        "hotel_id": hotel_id,
+    }
+
+
 def route_category(category):
     """Return canonical category, department and explicit triage flag."""
     normalized = category.strip().lower() if isinstance(category, str) else ""
@@ -299,18 +325,19 @@ def create_request(snapshot, draft, actor, staff_directory, existing_requests, *
         validate_request(existing)
         if existing["hotel_id"] == hotel_id and existing["idempotency_key"] == idempotency_key:
             if _same_creation(existing, candidate):
-                return {"kind": "duplicate", "request": deepcopy(existing), "plan": None}
+                identity_source = dict(candidate, request_id=existing["request_id"])
+                return {
+                    "kind": "duplicate",
+                    "request": deepcopy(existing),
+                    "plan": None,
+                    "creation_event_identity": creation_event_identity(identity_source),
+                }
             raise ConflictError("idempotency_conflict")
         if existing["request_id"] == candidate["request_id"]:
             raise ConflictError("duplicate_request_id")
-    operation_id = _operation_id(hotel_id, candidate["request_id"], "create:" + idempotency_key)
-    operation_signature = _signature({
-        "kind": "create", "idempotency_key": idempotency_key,
-        "request": {field: candidate.get(field) for field in (
-            "hotel_id", "stay_id", "room_id", "guest_id", "origin", "category",
-            "category_detail", "department", "description", "urgency", "sensitive",
-        )},
-    })
+    identity = creation_event_identity(candidate)
+    operation_id = identity["operation_id"]
+    operation_signature = identity["operation_signature"]
     event = _base_event(candidate, trusted, operation_id, "created", None,
                         "received", created.isoformat(), operation_signature)
     plan = _plan(None, candidate, event)
