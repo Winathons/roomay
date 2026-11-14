@@ -115,6 +115,7 @@ class HotelFactResolutionTests(unittest.TestCase):
     def test_unverified_guest_stay_wrong_guest_and_revoked_membership_deny(self):
         for changes in (
             {"guest_id": uid("Guest A")},
+            {"authenticated": False},
             {"membership_verified": False},
             {"business_binding_verified": False},
         ):
