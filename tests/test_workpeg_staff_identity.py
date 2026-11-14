@@ -82,6 +82,19 @@ def build_resolver(*, sessions=None, membership=None, hotels=None, roster=None):
 
 
 class WorkpegStaffIdentityTests(unittest.TestCase):
+    def test_authoritative_membership_is_refreshed_on_every_resolve(self):
+        membership = Membership(True)
+        resolver = build_resolver(membership=membership)
+
+        self.assertTrue(resolver.resolve("proof")["membership_verified"])
+        membership.result = False  # membership revoked after the first lookup
+        with self.assertRaisesRegex(TrustedStaffIdentityError,
+                                    "staff_membership_unverified"):
+            resolver.resolve("proof")
+
+        self.assertEqual(membership.calls, [(SUBJECT, BUSINESS),
+                                             (SUBJECT, BUSINESS)])
+
     def test_valid_member_bound_by_verified_business_subject_and_private_roster(self):
         sessions, member, hotels, roster = Sessions(), Membership(), Hotels(), Roster()
         resolver = build_resolver(sessions=sessions, membership=member,
@@ -175,6 +188,12 @@ class WorkpegStaffIdentityTests(unittest.TestCase):
         with self.assertRaisesRegex(TrustedStaffIdentityError,
                                     "staff_directory_unverified"):
             build_resolver(hotels=Hotels(OTHER_HOTEL)).resolve("proof")
+
+        mismatched_roster = fixture_roster()
+        mismatched_roster[0]["hotel_id"] = OTHER_HOTEL
+        with self.assertRaisesRegex(TrustedStaffIdentityError,
+                                    "staff_directory_unverified"):
+            build_resolver(roster=Roster(mismatched_roster)).resolve("proof")
 
     def test_duplicate_roster_subject_actor_and_privileges_denied(self):
         for entries in (
