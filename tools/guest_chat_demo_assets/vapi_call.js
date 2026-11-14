@@ -161,6 +161,29 @@
       return "VAPI_" + (stages[stage] || "CALL_START") + (status ? "_HTTP_" + status : "_FAILED");
     }
 
+    function safeCallStartProgress(event) {
+      if (!event || typeof event !== "object") return null;
+      const stage = event.stage;
+      const status = event.status;
+      const messages = {
+        initialization: { started: "Requesting microphone access. Approve the browser prompt to continue." },
+        "web-call-creation": {
+          started: "Connecting to Remi’s voice service…",
+          completed: "Voice service connected. Preparing the audio session…",
+        },
+        "daily-call-object-creation": {
+          started: "Preparing your microphone and audio session…",
+          completed: "Audio session ready. Joining Remi…",
+        },
+        "mobile-permissions": { started: "Checking device audio permissions…" },
+        "daily-call-join": {
+          started: "Joining the live audio session…",
+          completed: "Audio session joined. Waiting for Remi…",
+        },
+      };
+      return messages[stage]?.[status] || null;
+    }
+
     function isNetworkFailure(error) {
       const details = [error?.type, error?.name, error?.code, error?.message,
         typeof error?.error === "string" ? error.error : error?.error?.message]
@@ -312,6 +335,11 @@
         const vapi = new sdk.Vapi(config.publicKey);
         client = vapi;
         const isCurrentCall = () => active && client === vapi;
+        vapi.on("call-start-progress", (event) => {
+          if (client !== vapi || !busy || active || attempt !== startAttempt) return;
+          const copy = safeCallStartProgress(event);
+          if (copy) setState("connecting", copy);
+        });
         vapi.on("call-start", () => {
           if (client !== vapi || active) return;
           busy = false;
@@ -361,6 +389,7 @@
         // second bound if the provider-side max duration is not honored.
         const overrides = {
           maxDurationSeconds: MAX_SECONDS,
+          customerJoinTimeoutSeconds: 45,
           firstMessageInterruptionsEnabled: true,
           model: {
             provider: config.modelProvider,

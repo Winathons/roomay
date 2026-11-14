@@ -99,6 +99,7 @@ test('does not start a provider call until the guest presses Call Remi', async (
   assert.deepEqual(h.calls.map(call => call.url), ['/api/voice/config', '/api/voice/claim']);
   assert.equal(h.clientRef.value.startArgs[0], 'assistant-test-id');
   assert.equal(h.clientRef.value.startArgs[1].maxDurationSeconds, 180);
+  assert.equal(h.clientRef.value.startArgs[1].customerJoinTimeoutSeconds, 45);
   assert.equal(h.clientRef.value.startArgs[1].model.provider, 'openai');
   assert.equal(h.clientRef.value.startArgs[1].model.model, 'gpt-4.1');
   assert.match(h.clientRef.value.startArgs[1].model.messages[0].content, /Never claim a request was submitted/);
@@ -156,6 +157,37 @@ test('shows listening, speaking, interruption, captions, mute and end states', a
   assert.equal(h.elements['mute-remi'].textContent, 'Mute microphone');
   assert.equal(h.elements['mute-remi'].attributes['aria-pressed'], 'false');
   assert.equal(h.calls.filter(call => call.url === '/api/voice/release').length, 1);
+});
+
+test('per-call join timeout stays separate from the 3-minute maximum duration', async () => {
+  const h = harness();
+  h.elements['call-remi'].emit('click'); await tick();
+  const overrides = h.clientRef.value.startArgs[1];
+  assert.equal(overrides.customerJoinTimeoutSeconds, 45);
+  assert.equal(overrides.maxDurationSeconds, 180);
+  assert.equal(h.timers.length, 0, 'the local duration timer still starts only after call-start');
+  h.clientRef.value.emit('call-start');
+  assert.equal(h.timers[0].duration, 180000);
+});
+
+test('call-start progress is clear, stage-allowlisted, and ignores provider metadata', async () => {
+  const h = harness();
+  h.elements['call-remi'].emit('click'); await tick();
+  const client = h.clientRef.value;
+  client.emit('call-start-progress', {
+    stage: 'initialization', status: 'started',
+    metadata: { callId: 'private-call-id', error: 'authorization=secret' },
+  });
+  assert.match(h.elements['remi-call-status'].textContent, /Requesting microphone access/);
+  client.emit('call-start-progress', { stage: 'web-call-creation', status: 'started' });
+  assert.match(h.elements['remi-call-status'].textContent, /Connecting to Remi/);
+  client.emit('call-start-progress', { stage: 'daily-call-join', status: 'started' });
+  assert.match(h.elements['remi-call-status'].textContent, /Joining the live audio session/);
+  assert.doesNotMatch(h.elements['remi-call-status'].textContent, /private-call-id|authorization=secret/);
+  client.emit('call-start');
+  const connected = h.elements['remi-call-status'].textContent;
+  client.emit('call-start-progress', { stage: 'daily-call-join', status: 'completed' });
+  assert.equal(h.elements['remi-call-status'].textContent, connected, 'late progress cannot replace connected state');
 });
 
 test('unsupported local SDK still allows opening the visual preview without a call', () => {
@@ -295,6 +327,22 @@ test('microphone denial is sanitized and returns to the typed fallback', async (
   assert.match(h.elements['remi-call-status'].textContent, /Microphone access was not granted/);
   assert.doesNotMatch(h.elements['remi-call-status'].textContent, /private stack|NotAllowedError/);
   assert.equal(h.elements['call-remi'].hidden, false);
+});
+
+test('SDK microphone-preflight failure reports a sanitized diagnostic reference', async () => {
+  const h = harness();
+  h.elements['call-remi'].emit('click'); await tick();
+  h.clientRef.value.emit('call-start-failed', {
+    stage: 'microphone-preflight', error: 'Permission denied',
+    errorStack: 'private stack', context: { callId: 'private-call-id' },
+  });
+  const status = h.elements['remi-call-status'].textContent;
+  assert.match(status, /Microphone access was not granted/);
+  assert.match(status, /Reference: VAPI_MICROPHONE_FAILED/);
+  assert.doesNotMatch(status, /Permission denied|private stack|private-call-id/);
+  assert.equal(h.clientRef.value.stopped, 1);
+  assert.equal(h.elements['remi-orb'].state, 'idle');
+  assert.equal(h.elements['retry-remi'].hidden, false);
 });
 
 test('call-start-failed exposes an allowlisted stage and HTTP status, never provider details', async () => {
