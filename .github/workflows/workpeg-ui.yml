@@ -83,25 +83,30 @@ jobs:
       - name: Build inactive Workpeg Function with no build-step network (WOR-71)
         run: docker build --network=none --pull --progress=plain -t roomay-function-smoke:ci ./function
 
-      - name: Verify packaged Function refuses synthetic invocations (WOR-71)
+      - name: Verify packaged Function rejects untrusted invocation envelopes (WOR-71)
         run: |
           docker run --rm --network none --entrypoint python roomay-function-smoke:ci -c '
           import inspect
           from app.main import main
 
           assert tuple(inspect.signature(main).parameters) == ("context", "payload")
-          cases = [
-              ({}, {}),
+          try:
+              main({}, {})
+          except RuntimeError as exc:
+              assert str(exc) == "roomay_readonly_action_context_invalid"
+          else:
+              raise AssertionError("Function accepted a context without the action phase")
+
+          for context, payload in [
               ({"actor": "agent", "business": "synthetic"}, {"status": "confirmed"}),
               ({"business": "synthetic", "token": "placeholder-not-a-secret"},
                {"request": "fictional"}),
-          ]
-          for context, payload in cases:
+          ]:
               try:
                   main(context, payload)
-              except RuntimeError as exc:
-                  assert str(exc) == "roomay_function_not_configured"
+              except ValueError as exc:
+                  assert str(exc) == "invalid_workpeg_function_envelope"
               else:
-                  raise AssertionError("Function unexpectedly accepted an invocation")
-          print("PASS: packaged Function entrypoint is fail-closed")
+                  raise AssertionError("Function accepted caller-supplied identity or payload")
+          print("PASS: packaged Function rejects untrusted invocation envelopes without network")
           '
