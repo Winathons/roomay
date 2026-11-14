@@ -58,8 +58,9 @@ class HotelFactResolutionTests(unittest.TestCase):
 
     def test_valid_source_backed_room_answer_is_verbatim_and_minimal(self):
         result = self.resolve()
-        self.assertEqual((result.status, result.answer, result.code),
-                         ("answered", TEST_VALUE, "verified_fact"))
+        self.assertEqual((result.status, result.answer, result.message),
+                         ("answered", TEST_VALUE, TEST_VALUE))
+        self.assertFalse(hasattr(result, "code"))
         self.assertNotIn(BUSINESS, repr(result))
         self.assertNotIn(HOTEL, repr(result))
         self.assertNotIn(ROOM, repr(result))
@@ -159,9 +160,34 @@ class HotelFactResolutionTests(unittest.TestCase):
         result = resolve_hotel_fact_from_reader(
             broken_reader, FactTopic.WIFI, **self.kwargs)
         self.assertEqual(result.status, "unavailable")
-        self.assertEqual(result.code, "fact_source_unavailable")
         self.assertEqual(result.message, FACT_UNAVAILABLE_MESSAGE)
+        self.assertFalse(hasattr(result, "code"))
         self.assertNotIn("MUST_NOT_LEAK", repr(result))
+
+    def test_reader_is_not_invoked_for_denied_or_unconfigured_preflight(self):
+        calls = []
+
+        def reader(**kwargs):
+            calls.append(kwargs)
+            return [self.fact], OBSERVED
+
+        denied_scopes = (
+            {"context": replace(self.guest, authenticated=False)},
+            {"context": replace(self.guest, membership_verified=False)},
+            {"business_id": uid("other-business")},
+            {"hotel_id": uid("other-hotel")},
+            {"room_id": uid("120")},
+            {"stay_id": uid("other-stay")},
+            {"approved_sources": {}},
+        )
+        for changes in denied_scopes:
+            with self.subTest(changes=changes):
+                result = resolve_hotel_fact_from_reader(
+                    reader, FactTopic.WIFI, **{**self.kwargs, **changes})
+                self.assertEqual(result.status, "unavailable")
+                self.assertEqual(result.message, FACT_UNAVAILABLE_MESSAGE)
+                self.assertNotIn("code", vars(result))
+        self.assertEqual(calls, [])
 
     def test_reader_receives_only_trusted_scope_not_guest_text(self):
         seen = {}
@@ -173,6 +199,7 @@ class HotelFactResolutionTests(unittest.TestCase):
         result = resolve_hotel_fact_from_reader(
             reader, FactTopic.WIFI, **self.kwargs)
         self.assertEqual(result.status, "answered")
+        self.assertEqual(result.answer, TEST_VALUE)
         self.assertEqual(set(seen), {"topic", "business_id", "hotel_id", "room_id"})
         self.assertNotIn("question", seen)
         self.assertNotIn("guest_id", seen)

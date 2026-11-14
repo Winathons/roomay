@@ -12,6 +12,11 @@ registered-stay authorization checks. A room number or AI-supplied room claim
 cannot establish that scope. The result excludes Workpeg row/table IDs, guest
 identifiers, source metadata, and exception text.
 
+The read-through wrapper performs authorization and source-policy preflight
+before invoking its injected reader, then validates returned records against
+the same scope before producing an answer. Denial details are not part of the
+public result shape.
+
 The test source mapping and value in `tests/test_hotel_facts.py` are opaque
 contract sentinels only. They are not hotel content, an example password, a
 seed, or a claim about the Roomay AI business.

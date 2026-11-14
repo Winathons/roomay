@@ -78,7 +78,6 @@ class FactResolution:
     status: str
     answer: str | None
     message: str
-    code: str
 
 
 def _parse_utc(value):
@@ -93,10 +92,10 @@ def _parse_utc(value):
     return parsed.astimezone(timezone.utc)
 
 
-def _unavailable(code="fact_unavailable"):
+def _unavailable():
     # All denials, missing facts, and bad sources have the same guest-visible
-    # text so callers cannot probe another room or property's records.
-    return FactResolution("unavailable", None, FACT_UNAVAILABLE_MESSAGE, code)
+    # result so callers cannot probe another room or property's records.
+    return FactResolution("unavailable", None, FACT_UNAVAILABLE_MESSAGE)
 
 
 def _authorize_scope(*, context, business_id, record_business_id, hotel_id,
@@ -130,6 +129,92 @@ def _authorize_scope(*, context, business_id, record_business_id, hotel_id,
     return indexes
 
 
+@dataclass(frozen=True)
+class _FactPreflight:
+    topic: FactTopic
+    policy: FactSourcePolicy
+    room_index: dict
+    business_id: str
+    hotel_id: str
+    room_id: str | None
+    current: datetime
+    max_age: timedelta
+
+
+def _preflight(*, topic, context, business_id, record_business_id, hotel_id,
+               trusted_snapshot_hotel_id, snapshot, stay_id, room_id,
+               approved_sources, max_age, now):
+    """Establish trusted scope and source policy before any provider read."""
+    try:
+        normalized_topic = FactTopic(topic)
+        if not isinstance(max_age, timedelta) or max_age <= timedelta(0):
+            return _unavailable()
+        policy = (approved_sources or {}).get(normalized_topic)
+        if (not isinstance(policy, FactSourcePolicy)
+                or not isinstance(policy.scope, FactScope)
+                or any(not isinstance(part, str) or not part.strip()
+                       for part in (policy.namespace, policy.table, policy.field_id))):
+            return _unavailable()
+        indexes = _authorize_scope(
+            context=context, business_id=business_id,
+            record_business_id=record_business_id, hotel_id=hotel_id,
+            trusted_snapshot_hotel_id=trusted_snapshot_hotel_id,
+            snapshot=snapshot, stay_id=stay_id, room_id=room_id,
+        )
+        current = _parse_utc(now)
+        if current is None:
+            return _unavailable()
+        return _FactPreflight(normalized_topic, policy, indexes["rooms"],
+                              business_id, hotel_id, room_id, current, max_age)
+    except (AccessDenied, KeyError, TypeError, ValueError, AttributeError):
+        return _unavailable()
+
+
+def _resolve_preflight(records, observed_at, preflight):
+    """Resolve only after preflight; never copy source metadata to the result."""
+    if not isinstance(records, (list, tuple)):
+        return _unavailable()
+    snapshot_time = _parse_utc(observed_at)
+    if (snapshot_time is None or preflight.current < snapshot_time
+            or preflight.current - snapshot_time > preflight.max_age):
+        return _unavailable()
+
+    matching = []
+    for record in records:
+        if not isinstance(record, HotelFactRecord):
+            return _unavailable()
+        if record.topic != preflight.topic:
+            continue
+        if (record.business_id != preflight.business_id
+                or record.hotel_id != preflight.hotel_id):
+            return _unavailable()
+        if (record.source_namespace != preflight.policy.namespace
+                or record.source_table != preflight.policy.table
+                or record.source_field != preflight.policy.field_id
+                or record.scope != preflight.policy.scope):
+            return _unavailable()
+        value = record.value
+        if (not isinstance(value, str) or not value.strip()
+                or len(value) > MAX_FACT_TEXT):
+            return _unavailable()
+        fact_time = _parse_utc(record.observed_at)
+        if (fact_time is None or fact_time > preflight.current
+                or preflight.current - fact_time > preflight.max_age):
+            return _unavailable()
+        if preflight.policy.scope == FactScope.ROOM:
+            if (not preflight.room_id or record.room_id != preflight.room_id
+                    or record.room_id not in preflight.room_index):
+                return _unavailable()
+        elif record.room_id is not None:
+            return _unavailable()
+        matching.append(record)
+
+    if len(matching) != 1:
+        return _unavailable()
+    answer = matching[0].value.strip()
+    return FactResolution("answered", answer, answer)
+
+
 def resolve_hotel_fact(topic, records, *, context, business_id,
                        record_business_id, hotel_id,
                        trusted_snapshot_hotel_id, snapshot,
@@ -143,71 +228,16 @@ def resolve_hotel_fact(topic, records, *, context, business_id,
     accepts no free-form question, model-generated filter, or caller-selected
     source. Guest facts require the existing active registered-stay checks.
     """
-    try:
-        topic = FactTopic(topic)
-        if not isinstance(max_age, timedelta) or max_age <= timedelta(0):
-            return _unavailable("invalid_fact_policy")
-        sources = approved_sources or {}
-        policy = sources.get(topic)
-        if (not isinstance(policy, FactSourcePolicy)
-                or not isinstance(policy.scope, FactScope)
-                or any(not isinstance(part, str) or not part.strip()
-                       for part in (policy.namespace, policy.table, policy.field_id))):
-            return _unavailable("fact_source_not_configured")
-        if not isinstance(records, (list, tuple)):
-            return _unavailable("fact_source_invalid")
-
-        indexes = _authorize_scope(
-            context=context, business_id=business_id,
-            record_business_id=record_business_id, hotel_id=hotel_id,
-            trusted_snapshot_hotel_id=trusted_snapshot_hotel_id,
-            snapshot=snapshot, stay_id=stay_id, room_id=room_id,
-        )
-        current = _parse_utc(now)
-        snapshot_time = _parse_utc(observed_at)
-        if (current is None or snapshot_time is None or current < snapshot_time
-                or current - snapshot_time > max_age):
-            return _unavailable("fact_snapshot_stale")
-
-        matching = []
-        for record in records:
-            if not isinstance(record, HotelFactRecord):
-                return _unavailable("fact_source_invalid")
-            if record.topic != topic:
-                continue
-            if (record.business_id != business_id or record.hotel_id != hotel_id):
-                return _unavailable("fact_scope_mismatch")
-            if (record.source_namespace != policy.namespace
-                    or record.source_table != policy.table
-                    or record.source_field != policy.field_id
-                    or record.scope != policy.scope):
-                return _unavailable("fact_source_mismatch")
-            value = record.value
-            if (not isinstance(value, str) or not value.strip()
-                    or len(value) > MAX_FACT_TEXT):
-                return _unavailable("fact_source_invalid")
-            fact_time = _parse_utc(record.observed_at)
-            if (fact_time is None or fact_time > current
-                    or current - fact_time > max_age):
-                return _unavailable("fact_snapshot_stale")
-            if policy.scope == FactScope.ROOM:
-                if (not room_id or record.room_id != room_id
-                        or record.room_id not in indexes["rooms"]):
-                    return _unavailable("fact_scope_mismatch")
-            elif record.room_id is not None:
-                return _unavailable("fact_source_invalid")
-            matching.append(record)
-
-        if not matching:
-            return _unavailable("fact_not_found")
-        if len(matching) != 1:
-            return _unavailable("fact_ambiguous")
-        # Never include the source row, guest, room, business or Workpeg IDs in
-        # the returned object. The configured value itself is the only answer.
-        return FactResolution("answered", matching[0].value.strip(),
-                              matching[0].value.strip(), "verified_fact")
-    except (AccessDenied, KeyError, TypeError, ValueError, AttributeError):
-        return _unavailable("fact_scope_unverified")
+    preflight = _preflight(
+        topic=topic, context=context, business_id=business_id,
+        record_business_id=record_business_id, hotel_id=hotel_id,
+        trusted_snapshot_hotel_id=trusted_snapshot_hotel_id,
+        snapshot=snapshot, stay_id=stay_id, room_id=room_id,
+        approved_sources=approved_sources, max_age=max_age, now=now,
+    )
+    if isinstance(preflight, FactResolution):
+        return preflight
+    return _resolve_preflight(records, observed_at, preflight)
 
 
 def resolve_hotel_fact_from_reader(reader, topic, **scope):
@@ -220,15 +250,24 @@ def resolve_hotel_fact_from_reader(reader, topic, **scope):
     filters are passed to it. This adapter is not wired to a live Workpeg
     reader until an approved facts source and guest scope exist.
     """
-    try:
-        normalized_topic = FactTopic(topic)
-    except (TypeError, ValueError):
-        return _unavailable("unsupported_fact_topic")
     if not callable(reader):
-        return _unavailable("fact_source_unavailable")
+        return _unavailable()
+    preflight = _preflight(
+        topic=topic, context=scope.get("context"),
+        business_id=scope.get("business_id"),
+        record_business_id=scope.get("record_business_id"),
+        hotel_id=scope.get("hotel_id"),
+        trusted_snapshot_hotel_id=scope.get("trusted_snapshot_hotel_id"),
+        snapshot=scope.get("snapshot"), stay_id=scope.get("stay_id"),
+        room_id=scope.get("room_id"),
+        approved_sources=scope.get("approved_sources"),
+        max_age=scope.get("max_age", MAX_FACT_AGE), now=scope.get("now"),
+    )
+    if isinstance(preflight, FactResolution):
+        return preflight
     try:
         records, observed_at = reader(
-            topic=normalized_topic,
+            topic=preflight.topic,
             business_id=scope.get("business_id"),
             hotel_id=scope.get("hotel_id"),
             room_id=scope.get("room_id"),
@@ -236,9 +275,9 @@ def resolve_hotel_fact_from_reader(reader, topic, **scope):
     except Exception:
         # Provider errors may contain URLs, row data, or credentials. Never
         # include them in a guest-facing result or ordinary logs.
-        return _unavailable("fact_source_unavailable")
-    # A caller-provided observation time is not authoritative; use only the
-    # timestamp returned alongside this reader's snapshot.
+        return _unavailable()
+    # Revalidate authorization after I/O as well. The reader's returned
+    # timestamp, never a caller-provided timestamp, controls fact freshness.
     scope.pop("observed_at", None)
-    return resolve_hotel_fact(normalized_topic, records,
+    return resolve_hotel_fact(preflight.topic, records,
                               observed_at=observed_at, **scope)
