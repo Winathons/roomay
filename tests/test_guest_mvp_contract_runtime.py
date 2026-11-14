@@ -260,6 +260,56 @@ class GuestMvpContractRuntimeTests(unittest.TestCase):
                 },
             })
 
+    def test_duplicate_rejects_incomplete_or_uncommitted_audit_history(self):
+        _, _, request, created_event, draft, staff, hotel = self.trusted_readback()
+        actor = {"actor_id": "front", "hotel_id": request["hotel_id"],
+                 "kind": "staff"}
+        assigned = transition_request(
+            request, "assigned", actor, staff, at="2026-11-06T13:00:00+01:00",
+            operation_key="assign-1", assignee_id="housekeeper")
+        actor = {"actor_id": "housekeeper", "hotel_id": request["hotel_id"],
+                 "kind": "staff"}
+        acknowledged = transition_request(
+            assigned["request"], "acknowledged", actor, staff,
+            at="2026-11-06T13:30:00+01:00", operation_key="acknowledge-1")
+        in_progress = transition_request(
+            acknowledged["request"], "in_progress", actor, staff,
+            at="2026-11-06T14:00:00+01:00", operation_key="progress-1")
+        duplicate = create_request(
+            hotel, draft,
+            {"actor_id": "guest-session-c", "hotel_id": request["hotel_id"],
+             "kind": "guest", "guest_id": request["guest_id"]},
+            staff, [in_progress["request"]], at="2026-11-06T15:00:00+01:00",
+            request_id=uid("ignored-retry-id"))
+        events = [
+            dict(created_event, commit_state="committed"),
+            dict(assigned["plan"]["event"], commit_state="committed"),
+            dict(acknowledged["plan"]["event"], commit_state="committed"),
+            dict(in_progress["plan"]["event"], commit_state="committed"),
+        ]
+        self.assertEqual(duplicate["kind"], "duplicate")
+        valid_proof = TrustedPersistenceReadback.from_reconciled_result(
+            duplicate, in_progress["request"], events, idempotency_key="idem-1")
+        self.assertEqual(map_request_persistence_outcome(
+            duplicate, idempotency_key="idem-1", reconciliation="complete",
+            trusted_readback=valid_proof)["state"], "duplicate")
+
+        invalid_histories = {
+            "missing creation": events[1:],
+            "missing intermediate": [events[0], events[1], events[3]],
+            "sequence gap": [events[0], {**events[1], "sequence": 5}, events[2], events[3]],
+            "duplicate event id": [events[0], {**events[1], "event_id": events[0]["event_id"]}, *events[2:]],
+            "duplicate operation id": [events[0], {**events[1], "operation_id": events[0]["operation_id"]}, *events[2:]],
+            "pending creation": [{**events[0], "commit_state": "pending"}, *events[1:]],
+            "pending transition": [events[0], events[1], {**events[2], "commit_state": "pending"}, events[3]],
+        }
+        for label, history in invalid_histories.items():
+            with self.subTest(history=label):
+                with self.assertRaises(ContractValidationError):
+                    TrustedPersistenceReadback.from_reconciled_result(
+                        duplicate, in_progress["request"], history,
+                        idempotency_key="idem-1")
+
     def test_reception_transition_maps_to_trusted_gateway_command(self):
         request_id = str(uuid4())
         payload = {
