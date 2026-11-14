@@ -361,8 +361,57 @@ assert.match(selectedRequestMarkup, /Request details/);
 assert.match(selectedRequestMarkup, /Issue details/);
 assert.match(selectedRequestMarkup, /Audit history/);
 assert.match(selectedRequestMarkup, /delivery is not represented/);
-assert.match(selectedRequestMarkup, /Assignment, acknowledgement, status changes and guest messaging are unavailable/);
+assert.match(selectedRequestMarkup, /Staff actions/);
+for (const action of ['Assign request', 'Acknowledge', 'Mark in progress', 'Resolve request']) {
+  assert.match(selectedRequestMarkup, new RegExp(action));
+  const actionButton = visit(selectedRequestTree, node => node.type === 'button' &&
+    node.props.label === action);
+  assert.equal(actionButton.length, 0, `${action} is not a no-op button`);
+}
+assert.equal(visit(selectedRequestTree, node => node.type === 'tag' &&
+  node.props.label === 'Unavailable').length, 4,
+  'each staff operation is visibly unavailable until the trusted writer is verified');
+assert.match(selectedRequestMarkup, /Staff identity, role permissions, serialized request and audit writes, and independent Workpeg readback must be verified/);
 assert.doesNotMatch(selectedRequestMarkup, /PRIVATE-ACTOR-CANARY|PRIVATE-REASON-CANARY|PRIVATE-OPERATION-CANARY|PRIVATE-SIGNATURE-CANARY/);
+const refreshApp = new ReceptionTest();
+for (const field of ['room_types', 'rooms', 'guests', 'reservations', 'stays',
+  'stay_guests', 'room_blocks', 'service_requests', 'request_audit']) {
+  refreshApp.state[field] = structuredClone(sliceApp.state[field]);
+}
+refreshApp.state.operational_date = '2026-11-08';
+refreshApp.state.active_view = 'Requests';
+refreshApp.project_records();
+refreshApp.select_request(id(107));
+const refreshTree = refreshApp.build();
+const refreshStatus = visit(refreshTree, node => node.type === 'button' &&
+  node.props.label === 'Refresh status');
+assert.equal(refreshStatus.length, 1, 'request detail offers a read-only status refresh');
+assert.equal(refreshStatus[0].props.handler, 'load_snapshot',
+  'status refresh reuses the complete authenticated Workpeg snapshot read');
+let refreshRequested = false;
+refreshApp.load_snapshot = () => {
+  refreshRequested = true;
+  const request = refreshApp.state.service_requests.find(item => item.request_id === id(107));
+  const created = refreshApp.state.request_audit.find(item => item.request_id === id(107));
+  created.commit_state = 'committed';
+  const acknowledged = {...created, event_id: id(114), operation_id: id(115),
+    operation_signature: 'ACKNOWLEDGED-READBACK', sequence: 2,
+    event_type: 'status_changed', from_status: 'received', to_status: 'acknowledged',
+    occurred_at: '2026-11-08T15:04:00+00:00', commit_state: 'committed'};
+  request.status = 'acknowledged';
+  request.version = 2;
+  request.last_event_id = acknowledged.event_id;
+  request.last_operation_signature = acknowledged.operation_signature;
+  request.updated_at = acknowledged.occurred_at;
+  refreshApp.state.request_audit.push(acknowledged);
+  refreshApp.project_records();
+};
+refreshApp[refreshStatus[0].props.handler]();
+assert.equal(refreshRequested, true, 'refresh status requests a new full snapshot');
+assert.equal(refreshApp.state.selected_request_card.status, 'acknowledged',
+  'selected request follows the refreshed snapshot rather than local optimistic state');
+assert.match(JSON.stringify(refreshApp.build()), /Acknowledged/,
+  'the refreshed status is rendered from the fixture snapshot');
 const requestDetailBack = visit(selectedRequestTree, node => node.type === 'button' &&
   node.props.label === 'Back to requests');
 assert.equal(requestDetailBack.length, 1);
@@ -370,7 +419,7 @@ assert.equal(requestDetailBack[0].props.handler, 'clear_selected_request');
 sliceApp.clear_selected_request();
 assert.equal(sliceApp.state.selected_request, '');
 assert.doesNotMatch(JSON.stringify(sliceApp.build()), /Save changes|Send guest update|Acknowledge request|Mark resolved/,
-  'request actions remain unavailable without an authorized write path');
+  'request mutations remain unavailable without an authorized write path');
 sliceApp.state.rooms.push({entity_id: id(111), number: '206', room_type_id: id(101),
   enabled: true, housekeeping: 'dirty'});
 sliceApp.state.room_blocks.push({entity_id: id(112), room_id: id(111),

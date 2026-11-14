@@ -1358,8 +1358,13 @@ class HotelData(App):
 
         return Container(Column(
             Row(Text("Request details", variant="subheading", weight="bold"),
-                Button("Back to requests", on_click=self.clear_selected_request,
-                       variant="text", size="sm"),
+                Wrap(
+                    Button("Refresh status", on_click=self.load_snapshot,
+                           variant="outline-gray", size="sm"),
+                    Button("Back to requests", on_click=self.clear_selected_request,
+                           variant="text", size="sm"),
+                    spacing=6, run_spacing=6,
+                ),
                 justify="space_between", align="center", gap=8),
             Row(self._request_status_tag(request),
                 Tag(request["urgency_label"], tone="warning", size="sm"),
@@ -1385,13 +1390,34 @@ class HotelData(App):
                           variant="caption", tone="muted",
                           style={"overflow-wrap": "anywhere", "word-break": "break-word"})
                      for event in request["audit_history"]], gap=6),
-            Container(Text("Assignment, acknowledgement, status changes and guest messaging are unavailable until authorized persistence is verified.",
-                           variant="caption", tone="muted"), padding=12, radius=10,
-                      color="#f3f5f2", style={"border": "1px solid #e8ebe8"}),
+            self._request_action_readiness(),
             gap=12,
         ), padding=22, width=360, radius=12, color="#ffffff",
             style={"flex": "0 1 360px", "min-width": "260px", "max-width": "100%",
                    "border": "1px solid #e8ebe8"})
+
+    def _request_action_readiness(self):
+        """Show the planned staff workflow without presenting no-op controls."""
+        return Container(Column(
+            Text("Staff actions", variant="label", weight="semibold"),
+            Row(Text("Assign request", variant="caption"),
+                Tag("Unavailable", tone="neutral", size="sm"),
+                justify="space_between", align="center", gap=8),
+            Row(Text("Acknowledge", variant="caption"),
+                Tag("Unavailable", tone="neutral", size="sm"),
+                justify="space_between", align="center", gap=8),
+            Row(Text("Mark in progress", variant="caption"),
+                Tag("Unavailable", tone="neutral", size="sm"),
+                justify="space_between", align="center", gap=8),
+            Row(Text("Resolve request", variant="caption"),
+                Tag("Unavailable", tone="neutral", size="sm"),
+                justify="space_between", align="center", gap=8),
+            Text("Staff identity, role permissions, serialized request and audit writes, and independent Workpeg readback must be verified before these actions can be enabled.",
+                 variant="caption", tone="muted",
+                 style={"overflow-wrap": "anywhere", "word-break": "break-word"}),
+            gap=8,
+        ), padding=12, radius=10, color="#f3f5f2",
+            style={"border": "1px solid #e8ebe8"})
 
     def _audit_note(self, request):
         if request["audit_tone"] == "warning":
