@@ -111,6 +111,13 @@ class GuestMvpContractV1Tests(unittest.TestCase):
             "question": "Q", "answer_state": "answered",
         }))
         self.assert_invalid_message(self.envelope("hotel_information", {
+            "answer_state": "answered", "answer": "In the lobby.",
+        }))
+        self.assert_invalid_message(self.envelope("hotel_information", {
+            "question": "Where is breakfast?", "answer_state": "answered",
+            "answer": "In the lobby.", "debug": "unexpected",
+        }))
+        self.assert_invalid_message(self.envelope("hotel_information", {
             "question": "Q", "answer_state": "unavailable", "answer": "A",
             "failure": {"code": "workpeg_unavailable", "retryable": True},
         }))

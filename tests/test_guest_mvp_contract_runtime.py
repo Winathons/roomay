@@ -12,14 +12,14 @@ from domain.guest_mvp_contract import (
     validate_request_outcome,
     validate_rfc3339,
 )
-from domain.service_requests import create_request
+from domain.service_requests import create_request, transition_request
 
 
 class GuestMvpContractRuntimeTests(unittest.TestCase):
     @staticmethod
-    def trusted_readback():
+    def trusted_readback(*, hotel_label="request-hotel", request_label="request"):
         hotel = synthetic_hotel()
-        hotel_id = uid("request-hotel")
+        hotel_id = uid(hotel_label)
         guest = {
             "actor_id": "guest-session-c", "hotel_id": hotel_id,
             "kind": "guest", "guest_id": uid("Guest C"),
@@ -32,17 +32,21 @@ class GuestMvpContractRuntimeTests(unittest.TestCase):
             "urgency": "normal", "idempotency_key": "idem-1",
             "sensitive": False,
         }
-        staff = [{"actor_id": "front", "hotel_id": hotel_id,
-                  "department": "reception", "roles": [], "active": True}]
+        staff = [
+            {"actor_id": "front", "hotel_id": hotel_id,
+             "department": "reception", "roles": [], "active": True},
+            {"actor_id": "housekeeper", "hotel_id": hotel_id,
+             "department": "housekeeping", "roles": [], "active": True},
+        ]
         planned = create_request(
             hotel, draft, guest, staff, [],
-            at="2026-11-06T12:00:00+01:00", request_id=uid("request"),
+            at="2026-11-06T12:00:00+01:00", request_id=uid(request_label),
         )
         request = planned["request"]
         event = dict(planned["plan"]["event"], commit_state="committed")
         trusted = TrustedPersistenceReadback.from_reconciled_result(
             planned, request, [event], idempotency_key="idem-1")
-        return trusted, request, event
+        return planned, trusted, request, event, draft, staff, hotel
 
     def test_rfc3339_requires_timezone_and_strict_datetime_shape(self):
         self.assertEqual(validate_rfc3339("2026-11-14T18:00:00Z"),
@@ -75,6 +79,10 @@ class GuestMvpContractRuntimeTests(unittest.TestCase):
             "failure": {"code": "workpeg_unavailable", "retryable": True},
         })
         invalid = (
+            {"answer_state": "answered", "answer": "A"},
+            {"question": "Q", "answer_state": "answered", "answer": "A",
+             "extra": "caller supplied"},
+            {"question": " ", "answer_state": "answered", "answer": "A"},
             {"question": "Q", "answer_state": "answered"},
             {"question": "Q", "answer_state": "answered",
              "answer": "A", "failure": {"code": "not_found", "retryable": False}},
@@ -89,7 +97,7 @@ class GuestMvpContractRuntimeTests(unittest.TestCase):
                 validate_hotel_information(payload)
 
     def test_request_outcome_requires_matching_verified_audit_evidence(self):
-        trusted, _, _ = self.trusted_readback()
+        _, trusted, _, _, _, _, _ = self.trusted_readback()
         success = {
             "state": "created",
             "persisted": True,
@@ -101,14 +109,21 @@ class GuestMvpContractRuntimeTests(unittest.TestCase):
                 "verified": True,
             },
         }
-        validate_request_outcome(success, trusted_readback=trusted)
+        result, _, _, _, _, _, _ = self.trusted_readback()
+        validate_request_outcome(
+            success, result=result, trusted_readback=trusted)
         with self.assertRaisesRegex(ContractValidationError, "trusted_readback"):
             validate_request_outcome(success)
+        with self.assertRaisesRegex(ContractValidationError, "trusted_readback"):
+            validate_request_outcome(
+                {**success, "state": "duplicate"}, result=result,
+                trusted_readback=trusted)
 
         mismatch = copy.deepcopy(success)
         mismatch["audit_evidence"]["request_reference"] = str(uuid4())
         with self.assertRaisesRegex(ContractValidationError, "reference"):
-            validate_request_outcome(mismatch, trusted_readback=trusted)
+            validate_request_outcome(
+                mismatch, result=result, trusted_readback=trusted)
 
         for state, persisted, extra in (
             ("pending", True, {}),
@@ -124,10 +139,10 @@ class GuestMvpContractRuntimeTests(unittest.TestCase):
                 validate_request_outcome(payload)
 
     def test_persistence_mapping_never_reports_partial_write_as_success(self):
-        trusted, request, event = self.trusted_readback()
+        result, trusted, request, event, draft, staff, hotel = self.trusted_readback()
 
         created = map_request_persistence_outcome(
-            {"kind": "created"}, idempotency_key="idem-1",
+            result, idempotency_key="idem-1",
             reconciliation="complete", trusted_readback=trusted,
         )
         self.assertEqual(created["state"], "created")
@@ -137,7 +152,7 @@ class GuestMvpContractRuntimeTests(unittest.TestCase):
                          trusted.request_reference)
 
         uncertain = map_request_persistence_outcome(
-            {"kind": "created"}, idempotency_key="idem-1",
+            result, idempotency_key="idem-1",
             reconciliation="commit_event",
         )
         self.assertEqual(uncertain, {
@@ -150,24 +165,88 @@ class GuestMvpContractRuntimeTests(unittest.TestCase):
 
         with self.assertRaises(ContractValidationError):
             TrustedPersistenceReadback.from_reconciled_result(
-                {"kind": "created", "plan": {
-                    "base_request": request,
-                    "target_request": request,
-                    "event": event,
-                }}, request, [{**event, "request_id": str(uuid4())}],
+                result, request, [{**event, "request_id": str(uuid4())}],
                 idempotency_key="idem-1")
 
         with self.assertRaises(ContractValidationError):
             TrustedPersistenceReadback.from_reconciled_result(
-                {"kind": "duplicate", "request": request}, request,
+                {"kind": "duplicate", "request": request,
+                 "creation_event_identity": {}}, request,
                 [{**event, "sequence": event["sequence"] + 1}],
                 idempotency_key="idem-1")
 
         unavailable = map_request_persistence_outcome(
-            {"kind": "created"}, idempotency_key="idem-1",
+            result, idempotency_key="idem-1",
             reconciliation="unavailable",
         )
         self.assertEqual(unavailable["persisted"], "unknown")
+
+        with self.assertRaises(ContractValidationError):
+            map_request_persistence_outcome(
+                {"kind": "duplicate", "request": request},
+                idempotency_key="idem-1", reconciliation="complete",
+                trusted_readback=trusted)
+
+        for hotel_label, request_label in (
+                ("request-hotel", "another-request"),
+                ("another-hotel", "another-request")):
+            other_result, _, _, _, _, _, _ = self.trusted_readback(
+                hotel_label=hotel_label, request_label=request_label)
+            with self.subTest(hotel_label=hotel_label):
+                with self.assertRaises(ContractValidationError):
+                    map_request_persistence_outcome(
+                        other_result, idempotency_key="idem-1",
+                        reconciliation="complete", trusted_readback=trusted)
+
+        unrelated_operation = copy.deepcopy(result)
+        unrelated_operation["plan"]["event"]["operation_id"] = str(uuid4())
+        with self.assertRaises(ContractValidationError):
+            map_request_persistence_outcome(
+                unrelated_operation, idempotency_key="idem-1",
+                reconciliation="complete", trusted_readback=trusted)
+
+    def test_duplicate_reconciles_original_creation_and_preserves_status_history(self):
+        result, _, request, created_event, draft, staff, hotel = self.trusted_readback()
+        assigned = transition_request(
+            request, "assigned",
+            {"actor_id": "front", "hotel_id": request["hotel_id"], "kind": "staff"},
+            staff, at="2026-11-06T13:00:00+01:00", operation_key="assign-1",
+            assignee_id="housekeeper")
+        assigned_request = assigned["request"]
+        assignment_event = dict(assigned["plan"]["event"], commit_state="committed")
+        duplicate = create_request(
+            hotel, draft,
+            {"actor_id": "guest-session-c", "hotel_id": request["hotel_id"],
+             "kind": "guest", "guest_id": request["guest_id"]},
+            staff, [assigned_request], at="2026-11-06T14:00:00+01:00",
+            request_id=uid("ignored-retry-id"))
+        self.assertEqual(duplicate["kind"], "duplicate")
+        trusted = TrustedPersistenceReadback.from_reconciled_result(
+            duplicate, assigned_request, [created_event, assignment_event],
+            idempotency_key="idem-1")
+        self.assertEqual(trusted.audit_reference, created_event["event_id"])
+        outcome = map_request_persistence_outcome(
+            duplicate, idempotency_key="idem-1", reconciliation="complete",
+            trusted_readback=trusted)
+        self.assertEqual(outcome["state"], "duplicate")
+        self.assertEqual(outcome["request_reference"], assigned_request["request_id"])
+
+        original_proof = TrustedPersistenceReadback.from_reconciled_result(
+            result, request, [created_event], idempotency_key="idem-1")
+        with self.assertRaisesRegex(ContractValidationError, "trusted_readback"):
+            map_request_persistence_outcome(
+                duplicate, idempotency_key="idem-1", reconciliation="complete",
+                trusted_readback=original_proof)
+
+        for altered_creation in (
+                {**created_event, "commit_state": "pending"},
+                {**created_event, "operation_signature": "0" * 64}):
+            with self.subTest(altered_creation=altered_creation):
+                with self.assertRaises(ContractValidationError):
+                    TrustedPersistenceReadback.from_reconciled_result(
+                        duplicate, assigned_request,
+                        [altered_creation, assignment_event],
+                        idempotency_key="idem-1")
 
         with self.assertRaisesRegex(ContractValidationError, "trusted_readback"):
             validate_request_outcome({

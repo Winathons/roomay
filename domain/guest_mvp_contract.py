@@ -16,11 +16,12 @@ from uuid import UUID
 from .service_requests import (
     RequestError,
     TRANSITIONS,
+    creation_event_identity,
     event_row_payload,
     reconcile_write,
     validate_request,
 )
-from .staff_actions import ACTION_TARGETS
+from .staff_actions import ACTION_TARGETS, audit_history_is_consistent
 
 
 CONTRACT_VERSION = "roomay.guest-mvp.v1"
@@ -63,73 +64,89 @@ class ContractValidationError(ValueError):
 
 @dataclass(frozen=True, init=False)
 class TrustedPersistenceReadback:
-    """Domain-validated evidence supplied by an authorized read adapter."""
+    """Domain-validated evidence bound to one result and authorized read scope."""
 
+    result_kind: str
+    operation_id: str
+    operation_signature: str
     request_reference: str
     audit_reference: str
     idempotency_key: str
+    hotel_id: str
+    stay_id: str
+    room_id: str
+    guest_id: str
     commit_state: str
 
-    def __init__(self, request_reference, audit_reference, idempotency_key,
-                 commit_state, *, _token=None):
+    def __init__(self, binding, audit_event, idempotency_key, *, _token=None):
         if _token is not _READBACK_TOKEN:
             raise TypeError("trusted_readback_must_come_from_domain_rows")
-        object.__setattr__(self, "request_reference", request_reference)
-        object.__setattr__(self, "audit_reference", audit_reference)
+        request = binding["request"]
+        object.__setattr__(self, "result_kind", binding["result_kind"])
+        object.__setattr__(self, "operation_id", binding["operation_id"])
+        object.__setattr__(self, "operation_signature", binding["operation_signature"])
+        object.__setattr__(self, "request_reference", request["request_id"])
+        object.__setattr__(self, "audit_reference", audit_event["event_id"])
         object.__setattr__(self, "idempotency_key", idempotency_key)
-        object.__setattr__(self, "commit_state", commit_state)
+        for field in ("hotel_id", "stay_id", "room_id", "guest_id"):
+            object.__setattr__(self, field, request[field])
+        object.__setattr__(self, "commit_state", audit_event["commit_state"])
 
     @classmethod
     def from_reconciled_result(cls, result, persisted_request,
                                persisted_events, *, idempotency_key):
-        """Create proof only after the canonical reconciliation check passes."""
+        """Validate canonical read rows against this result and its operation.
+
+        The caller must obtain rows and the scope binding from its authorized
+        server-side reader. This pure check validates consistency; it cannot
+        establish platform provenance for arbitrary dictionaries.
+        """
         key = _required_text(idempotency_key, "idempotency_key")
         try:
-            if not isinstance(result, dict) or result.get("kind") not in {
-                    "created", "duplicate"}:
-                raise ContractValidationError("invalid_request_result")
-            if result["kind"] == "created":
+            binding = _persistence_result_binding(result, key)
+            expected_request = binding["request"]
+            if persisted_request != expected_request:
+                raise ContractValidationError("persistence_readback_mismatch")
+            validate_request(persisted_request)
+            if binding["result_kind"] == "created":
                 state = reconcile_write(
-                    result.get("plan"), persisted_request, persisted_events)
+                    result["plan"], persisted_request, persisted_events)
                 if state != "complete":
                     raise ContractValidationError("persistence_not_complete")
                 expected_event = result["plan"]["event"]
                 matches = [event for event in persisted_events
                            if event.get("operation_id") == expected_event["operation_id"]]
             else:
-                expected_request = result.get("request")
-                validate_request(expected_request)
-                validate_request(persisted_request)
-                if persisted_request != expected_request:
-                    raise ContractValidationError("persistence_readback_mismatch")
+                if not audit_history_is_consistent(persisted_request, persisted_events):
+                    raise ContractValidationError("audit_history_inconsistent")
+                identity = binding["creation_event_identity"]
                 matches = [event for event in persisted_events
-                           if event.get("event_id") == persisted_request["last_event_id"]]
+                           if event.get("event_id") == identity["event_id"]
+                           and event.get("operation_id") == identity["operation_id"]]
             if len(matches) != 1:
                 raise ContractValidationError("invalid_persistence_readback")
             persisted_event = matches[0]
-            validate_request(persisted_request)
             event_row_payload(persisted_event, 0)
         except (RequestError, TypeError, KeyError, AttributeError):
             raise ContractValidationError(
                 "invalid_persistence_readback") from None
-        if persisted_request.get("idempotency_key") != key:
-            raise ContractValidationError("idempotency_conflict")
-        request_reference = persisted_request.get("request_id")
-        audit_reference = persisted_event.get("event_id")
-        if (persisted_event.get("request_id") != request_reference
-                or persisted_request.get("last_event_id") != audit_reference
-                or persisted_event.get("hotel_id") != persisted_request.get("hotel_id")
-                or persisted_event.get("sequence") != persisted_request.get("version")
+        expected_event = binding["creation_event_identity"]
+        if (persisted_event.get("event_id") != expected_event["event_id"]
+                or persisted_event.get("operation_id") != expected_event["operation_id"]
                 or persisted_event.get("operation_signature")
-                != persisted_request.get("last_operation_signature")
-                or persisted_event.get("to_status") != persisted_request.get("status")
+                != expected_event["operation_signature"]
+                or persisted_event.get("request_id") != expected_event["request_id"]
+                or persisted_event.get("hotel_id") != expected_event["hotel_id"]
+                or persisted_event.get("event_type") != "created"
+                or persisted_event.get("sequence") != 1
+                or persisted_event.get("from_status") is not None
+                or persisted_event.get("to_status") != "received"
                 or persisted_event.get("commit_state") != "committed"):
             raise ContractValidationError("request_audit_reference_mismatch")
         return cls(
-            request_reference,
-            audit_reference,
+            binding,
+            persisted_event,
             key,
-            persisted_event.get("commit_state"),
             _token=_READBACK_TOKEN,
         )
 
@@ -149,6 +166,69 @@ def _canonical_uuid(value, field: str) -> str:
     except (AttributeError, TypeError, ValueError):
         raise ContractValidationError("invalid_contract", field) from None
     return value
+
+
+def _persistence_result_binding(result: dict, idempotency_key: str) -> dict:
+    """Return the domain operation and complete stay scope being reported."""
+    if not isinstance(result, dict) or result.get("kind") not in {
+            "created", "duplicate"}:
+        raise ContractValidationError("invalid_request_result")
+    request = result.get("request")
+    try:
+        validate_request(request)
+        if request.get("idempotency_key") != idempotency_key:
+            raise ContractValidationError("idempotency_conflict")
+        identity = creation_event_identity(request)
+        if result["kind"] == "created":
+            plan = result.get("plan")
+            if (not isinstance(plan, dict)
+                    or set(plan) != {"base_request", "target_request", "event"}
+                    or plan["base_request"] is not None
+                    or plan["target_request"] != request):
+                raise ContractValidationError("invalid_request_result")
+            event = plan["event"]
+            if (not isinstance(event, dict)
+                    or any(event.get(key) != value
+                           for key, value in identity.items())
+                    or event.get("event_type") != "created"
+                    or event.get("sequence") != 1
+                    or event.get("from_status") is not None
+                    or event.get("to_status") != "received"):
+                raise ContractValidationError("invalid_request_operation")
+        else:
+            if result.get("plan") is not None:
+                raise ContractValidationError("invalid_request_result")
+            supplied_identity = result.get("creation_event_identity")
+            if supplied_identity != identity:
+                raise ContractValidationError("invalid_request_operation")
+        return {
+            "result_kind": result["kind"],
+            "request": request,
+            "creation_event_identity": identity,
+            **identity,
+        }
+    except (RequestError, TypeError, KeyError, AttributeError):
+        raise ContractValidationError("invalid_request_result") from None
+
+
+def _validate_readback_binding(binding, idempotency_key, trusted_readback):
+    if not isinstance(trusted_readback, TrustedPersistenceReadback):
+        raise ContractValidationError("trusted_readback_required")
+    expected = {
+        "result_kind": binding["result_kind"],
+        "operation_id": binding["operation_id"],
+        "operation_signature": binding["operation_signature"],
+        "request_reference": binding["request_id"],
+        "audit_reference": binding["event_id"],
+        "idempotency_key": idempotency_key,
+        "hotel_id": binding["hotel_id"],
+        "stay_id": binding["request"]["stay_id"],
+        "room_id": binding["request"]["room_id"],
+        "guest_id": binding["request"]["guest_id"],
+    }
+    if any(getattr(trusted_readback, field) != value
+           for field, value in expected.items()):
+        raise ContractValidationError("trusted_readback_mismatch")
 
 
 def _require_failure(value, field: str = "failure") -> dict:
@@ -187,12 +267,20 @@ def validate_rfc3339(value: str, field: str = "timestamp") -> str:
 
 
 def validate_hotel_information(payload: dict) -> dict:
-    """Enforce the success/failure union for a schema-valid hotel answer."""
+    """Validate the complete hotel-information payload without schema bypass."""
     if not isinstance(payload, dict):
         raise ContractValidationError("invalid_contract", "payload")
+    if set(payload) - {"question", "answer_state", "answer", "failure"}:
+        raise ContractValidationError("invalid_contract", "payload")
+    question = payload.get("question")
+    if not isinstance(question, str) or not question.strip() or len(question) > 1000:
+        raise ContractValidationError("invalid_hotel_information", "question")
     state = payload.get("answer_state")
     answer = payload.get("answer")
     has_answer = isinstance(answer, str) and bool(answer.strip())
+    if "answer" in payload and (
+            not isinstance(answer, str) or not has_answer or len(answer) > 1200):
+        raise ContractValidationError("invalid_hotel_information", "answer")
     has_failure = "failure" in payload
     if state == "answered":
         if not has_answer or has_failure:
@@ -210,7 +298,7 @@ def validate_hotel_information(payload: dict) -> dict:
 
 
 def validate_request_outcome(
-        payload: dict, *,
+        payload: dict, *, result: dict | None = None,
         trusted_readback: TrustedPersistenceReadback | None = None) -> dict:
     """Enforce persistence truth using domain-validated evidence."""
     if not isinstance(payload, dict):
@@ -220,6 +308,11 @@ def validate_request_outcome(
     if state in {"created", "duplicate"}:
         if not isinstance(trusted_readback, TrustedPersistenceReadback):
             raise ContractValidationError("trusted_readback_required")
+        binding = _persistence_result_binding(result, payload["idempotency_key"])
+        if binding["result_kind"] != state:
+            raise ContractValidationError("trusted_readback_mismatch")
+        _validate_readback_binding(
+            binding, payload["idempotency_key"], trusted_readback)
         if payload.get("persisted") is not True:
             raise ContractValidationError("invalid_persistence_outcome", "persisted")
         request_reference = _required_text(
@@ -288,16 +381,17 @@ def map_request_persistence_outcome(
     ambiguous steps become ``uncertain``;
     they must be reconciled with the original idempotency key.
     """
-    if not isinstance(result, dict) or result.get("kind") not in {"created", "duplicate"}:
-        raise ContractValidationError("invalid_request_result")
     key = _required_text(idempotency_key, "idempotency_key")
+    binding = _persistence_result_binding(result, key)
+    if trusted_readback is not None:
+        _validate_readback_binding(binding, key, trusted_readback)
     if reconciliation == "complete":
         if not isinstance(trusted_readback, TrustedPersistenceReadback):
             return _uncertain_outcome(key)
         if trusted_readback.commit_state != "committed":
             return _uncertain_outcome(key)
         outcome = {
-            "state": result["kind"],
+            "state": binding["result_kind"],
             "persisted": True,
             "idempotency_key": key,
             "request_reference": trusted_readback.request_reference,
@@ -307,7 +401,8 @@ def map_request_persistence_outcome(
                 "verified": True,
             },
         }
-        return validate_request_outcome(outcome, trusted_readback=trusted_readback)
+        return validate_request_outcome(
+            outcome, result=result, trusted_readback=trusted_readback)
     if reconciliation in _PENDING_RECONCILIATIONS or reconciliation is None:
         return _uncertain_outcome(key)
     if reconciliation == "unavailable":
