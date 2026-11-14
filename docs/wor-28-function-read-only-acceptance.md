@@ -71,6 +71,92 @@ phase-action context from the development runner. A real installed action
 would require a separately approved supported Workpeg path; no such invocation
 is authorized or verified by this PR.
 
+### Separate development path: own row-save hook (not this action)
+
+The same official dev-install guide documents a different local Function path:
+with an eligible dev install and listener, a save made by the owner on that
+owner's dev page can invoke a Function hook on the owner's computer. This is a
+real row-save operation, not a phase action. Dev-page tables are isolated in a
+Workpeg-generated `dv-<business-specific-uuid>` namespace, separate from the
+released Peg tables and other businesses. A listener needs the owner's private
+`WORKPEG_PK`; `--with docker` is the documented default and requires Docker.
+The guide also says dev Function routes can answer 404 when the platform's
+`DEV_FUNCTIONS_ENABLED` is off.
+
+The current PR entrypoint is **not compatible with that row-save envelope**:
+it requires `context.phase == "post_save_hook"` and an empty payload. The
+official save-hook envelope instead contains platform-provided table, staff,
+row, metadata, business and token context plus the saved row's `data` as the
+payload; it does not carry the manifest action's `phase` field. A save-hook
+acceptance would need a separately constrained test-only handler path. For a
+`pre_save_hook`, the Function's return replaces the row data; a
+`post_save_hook` runs after the row is already stored and its return is
+ignored. The current `workpeg.json` declares no Function or action. No hook is
+registered and no listener has been started.
+
+Even after that test-only path is reviewed, a dev install proves access only
+to its generated test tables. It must not be presented as proof that the
+Function token can read the nine existing canonical tables in
+`roomay_hotel_v1` and `roomay_requests_v1`, or that a manifest phase action
+works. The current docs do not establish that the dev token can reach those
+non-dev namespaces. Only a separately approved invocation may establish what
+the platform actually authorizes.
+
+### Proposed owner-approved mutation — not approved or executed
+
+If the owner chooses the row-save route after the test-only handler is
+reviewed, the single proposed operation is:
+
+* **Business/Peg:** the owner selects the existing approved `roomay` Peg in
+  the **Roomay AI development business**, privately confirms the active
+  business, and confirms the Peg is installed for testing. The UUID of that
+  business is not recorded here.
+* **Table:** create exactly one table named `ROOMAY WOR-28 Function
+  Acceptance` through that dev install. Let Workpeg assign the isolated
+  `dv-<uuid>` scope; do not request either canonical Roomay table namespace.
+  The exact generated UUID namespace is not available from this offline
+  checkout. The owner must observe and confirm that the active dev page shows
+  a `dv-…` namespace for Roomay AI before approving creation; stop if the
+  scope cannot be verified. Read it back and verify it before saving a row.
+* **Permission/schema:** owner-only permission `700`; six required text
+  columns: `test_marker`, `token_authorization`, `inventory`, `peg_scope`,
+  `business_scope`, and `actor_presence`. Stop if Workpeg cannot return that
+  exact schema, scope and permission. No guest, stay, reservation, request or
+  audit fields are included.
+* **Hook and row:** the existing PR handler cannot run this test: it is
+  action-only. Before any owner mutation, a reviewed test-only code path must
+  accept only the documented row-save context for this exact table, reject
+  other tables/payload shapes, use the invocation's `context.token` for one
+  metadata GET of `context.table.uuid`, validate the six-column test
+  contract, and return only the marker plus sanitized flags. The table hook
+  must be `pre_save_hook` so validation runs before the test row is committed.
+  Current Workpeg docs specify the hook reference form as
+  `custom.<peg_namespace>:<version>`; for the approved Peg and version 1,
+  the proposed value is `custom.roomay:1`. The owner must confirm that
+  version 1 is included in the dev install before proceeding. The one row
+  would contain only `test_marker=roomay-wor28-readonly-acceptance-v1` on
+  input; the pre-save result would store the sanitized flags in the other
+  five columns. It must not
+  read or write any other row or table. This does not test the manifest phase
+  action or validate the nine canonical schemas.
+* **Cleanup:** no automatic retry, rollback or deletion. Retain the single
+  clearly named test table and row until sanitized evidence is reviewed. The
+  owner may separately approve deleting that table and row from the dev
+  business afterward; do not delete anything automatically.
+
+Before any of these changes, the owner must approve the table creation, the
+one pre-save hook, and the one marker-row save together **after the
+test-only handler has been implemented and reviewed**. Workpeg must confirm
+the dev install is eligible and that the per-invocation token can read the
+test table metadata. The local Workpeg
+0.152.0 CLI cannot start this runner; the isolated 0.162.0 runner is
+available, but no `WORKPEG_PK` is present in this Codex process. Docker is
+installed but its engine was unavailable in this preflight; no listener has
+been started. The owner must privately confirm
+the Peg installation and current Roomay AI business in the dashboard. Stop if
+any condition fails. No approval or live invocation has occurred for this
+proposal.
+
 The Function sends exactly two HTTPS `GET` requests using the platform token,
 to the fixed Workpeg Tables API host and the platform-provided business UUID,
 with the two canonical namespaces. It does not send a caller-supplied
