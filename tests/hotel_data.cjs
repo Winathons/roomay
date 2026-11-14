@@ -253,6 +253,7 @@ test('historical request keeps its original room after a legitimate room change'
     hotel_id: uuid(10010), room_id: uuid(10002), description: 'Original-room request',
     category: 'room_cleaning', department: 'housekeeping', triage_required: false,
     status: 'resolved', last_event_id: uuid(10011),
+    created_at: '2026-11-06T15:00:00+00:00', updated_at: '2026-11-06T15:05:00+00:00',
   }];
   assert.equal(snapshot.stays[0].room_id, uuid(10003));
   assert.equal(snapshot['Roomay Service Requests'][0].room_id, uuid(10002));
