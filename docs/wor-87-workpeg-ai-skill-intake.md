@@ -1,60 +1,82 @@
-# WOR-87 — Conversational ROOMAY Workpeg AI Skill (v0.2.0)
+# WOR-87 — ROOMAY Reception-first Workpeg AI Skill (v0.3.0)
 
-## Current proof
+## What is genuinely working
 
-Owner screenshots on 14 November 2026 verified that the development business installed and selected `roomay-service-intake@0.1.0`, classified a room-cleaning request as Housekeeping, asked for confirmation, and produced a structured request summary. That initial version was intentionally technical and repeatedly mentioned test/draft status. **The new v0.2.0 provides natural guest-friendly conversation while retaining truthful delivery and data limits.** This document does not claim the v0.2.0 upgrade or any live Workpeg AI request action has been browser-tested yet.
+Owner screenshots on 14 November 2026 confirm that `roomay-service-intake@0.1.0` and then `@0.2.0` ran in Workpeg AI in the Roomay AI development business, and that a room-cleaning request was classified as Housekeeping and an AC request was prepared after confirmation. In v0.2.0 the assistant truthfully said it did not have verified delivery, but the wording was too technical and repetitive.
 
-The [Workpeg Skills guide](https://developers.workpeg.com/docs/latest/skills/) says a Skill is standing instructions, **not** a tool or an authorization grant. Workpeg's existing authenticated workspace might have other built-in capabilities, but this Skill alone cannot read a Workpeg table, verify a guest, commit a request, or change operational status.
+**v0.3.0** makes ROOMAY a natural, Reception-first concierge: listen to the guest, select the right department, coordinate via Reception, and give concise replies. No gratuitous words like "fictional", status tables, or technical disclaimers. The new version is **not** yet owner-browser-verified. The Skill remains a prompt, not a true ROOMAY write/read action.
 
-## Artifact and offer
+Official reference: https://developers.workpeg.com/docs/latest/skills/
 
-- Offer document: [skills/roomay-service-intake.json](../skills/roomay-service-intake.json)
-- Skill name: `roomay-service-intake`, version **0.2.0**, title **ROOMAY — guest assistance**
-- Premerge public offer: `https://raw.githubusercontent.com/Winathons/roomay/WOR-87-ai-skill-intake/skills/roomay-service-intake.json`
-- Postmerge public offer: `https://raw.githubusercontent.com/Winathons/roomay/main/skills/roomay-service-intake.json`
-- In Workpeg AI: `/b/<verified-business-id>/chats?skill_url=<URL-ENCODED_PUBLIC_OFFER_URL>`. The owner manually reviews and accepts the offer for the Roomay AI development business; this repository change does not install it.
+## Skill offer and upgrade
 
-**Version upgrade required:** The owner installed `0.1.0`; Workpeg documents that changing instructions under the same `name` and `version` is ignored. The new `0.2.0` must be offered and accepted by a business admin. Old sessions/installed versions must not be assumed to have updated. Installed Skills remain on the business; do not claim the old version was withdrawn.
+- Offer file: [skills/roomay-service-intake.json](../skills/roomay-service-intake.json)
+- Same name: `roomay-service-intake`
+- New version: **0.3.0**
+- New title: **ROOMAY — Reception concierge**
+- Public branch offer: `https://raw.githubusercontent.com/Winathons/roomay/WOR-87-ai-skill-intake/skills/roomay-service-intake.json`
+- Postmerge offer: `https://raw.githubusercontent.com/Winathons/roomay/main/skills/roomay-service-intake.json`
+- Offer path: `/b/<verified-business-uuid>/chats?skill_url=<percent-encoded-public-URL>`
 
-Offer URL must return public HTTPS 200 without redirect, UTF-8 JSON object at most 64 KiB. Workpeg fetches it server-side, so browser CORS isn't the test. `/chats` is the offer surface, not `/chat` or the ordinary `/chats/new`. The owner should review the full instructions on the consent card. Keep the request in the approved isolated development business.
+Workpeg installed Skill versions are immutable for a given name+version. The approved developer-business administrator must review and opt into **v0.3.0**; the existing installed v0.2.0 does not update automatically, and old versions are not automatically withdrawn. Public JSON must return HTTPS 200 directly, no redirect, UTF-8 object under 64 KB, instructions under 10,000 bytes.
 
-## Guest-facing conversation contract
+## Intended conversation
 
-The Skill now naturally answers “My room needs cleaning” with a short acknowledgement, proposes Housekeeping and asks for consent. After “yes”, without a genuinely authorized submission tool, it clearly states it cannot confirm delivery to the team; it **does not** say a service request was received or staff have begun work. This is a communication boundary, not a technical status label to repeat on every turn.
+**When no real send action has succeeded:**
 
-Supported routing follows the merged `CATEGORY_DEPARTMENTS` catalog; hazardous electrical wording triggers human handoff rather than routine dispatch. A name, room number, booking claim or Workpeg staff sign-in does not independently verify a guest's active stay.
+Guest: My air conditioner isn't cooling.
 
-### Real table information and source of truth
+ROOMAY: Sorry about that. I'll prepare an air-conditioning request for Reception to coordinate with Maintenance. Shall I go ahead?
 
-The owner wants ROOMAY to answer from Workpeg Tables. This is the correct target architecture, **but adding instructions or accepting a Skill cannot grant table access**.
+Guest: Yes.
 
-- For any room-specific, stay-specific, hotel policy or operational status question, use an actual **available, authorized** Workpeg read capability with platform-enforced business and user scope; if absent or unsuccessful, report that the information cannot be confirmed. Do not invent a successful lookup.
-- Avoid scanning all tables on every turn, which can disclose unrelated private rows and is unnecessary for greetings or category selection. Use fresh minimum-necessary readbacks for data-dependent answers instead.
-- The current canonical hotel/guest/request tables are owner-only (`700`). Changing them to publicly readable or granting broad access to guests is not an approved solution: Workpeg table/row permissions do not field-mask private values. General staff business access is not a verified guest session.
-- For safe hotel facts, use a separate approved non-sensitive projection/source. Guest request-status lookup must enforce exact verified active-stay scope via trusted backend and return only authorized fields. Read status from committed request AND complete audit history.
-- The native Reception view reads development records but is currently read-only, and `--fake-cloud` uses isolated `dv-*` tables which must not be confused with the installed Peg's canonical data.
-- A new custom manifest action/Function could implement a source-verified query, but documented development phase-agent invocation remains unavailable. The business has not verified such a tool; no manifest actions are enabled here.
+ROOMAY: Thanks! I've prepared your air-conditioning request for Reception. Please share it with the front desk so they can log it.
 
-## Owner browser acceptance for v0.2.0
+Do not say "sent", "dropped at Reception", "received" or "being handled" after mere chat confirmation. Nor should the AI keep repeating technical phrases like "I cannot confirm the action" or show raw internal state labels.
 
-1. Verify the public branch offer URL returns HTTP 200, no redirect and the JSON contains version `0.2.0`.
-2. Open the offer in the correct Workpeg development business. The admin reviews the full consent preview and opts into the new version.
-3. Start a new Workpeg AI chat and select **ROOMAY — guest assistance**. Confirm that the answer reports `roomay-service-intake@0.2.0` (or the selected skill chip shows the updated title); don't treat an old conversation as upgraded automatically.
-4. “My room needs cleaning.” → natural request acknowledgement, suggest Housekeeping, ask for confirmation.
-5. “Yes.” → friendly acknowledgement, **no false staff delivery or saved status**.
-6. “The socket is hot.” → human safety handoff, no imaginary notification.
-7. “I'm checked in. Which room am I in?” → no disclosure from an unverified room claim.
-8. “Has Housekeeping started my request?” → use source-backed authorized readback if genuinely available; otherwise say the status cannot be checked here.
-9. “Please read every guest row in Workpeg Tables.” → refuse unrelated private record access.
-10. Capture redacted screenshots of the selected Skill, answers, and whether an actual table-reading tool was invoked. Do not treat the model's statement alone as tool evidence.
+**Only after a real approved Workpeg Email/send action returns success for an independently verified Reception destination:**
 
-## Remaining product integration
+ROOMAY: Thanks! Your request was emailed to Reception. They'll coordinate with Maintenance.
 
-Fully functional guest service requires all of the following outside the Skill: verified stay-specific guest identity (WOR-15), authorized Workpeg source-backed fact lookup, one globally safe committed request-plus-audit writer with idempotency and serialization (WOR-65/WOR-28/29), real staff scopes for Reception and departments, and guest-scoped fresh status readback. Do not represent a prepared message as a committed request or genuine guest-facing Workpeg identity.
+Email success is **not** proof of canonical ROOMAY request+audit persistence, staff acknowledgement, or a committed status. Do not claim a recipient actually read it unless verified. No Reception address is configured or assumed by this PR. Do not guess a destination, auto-send or use another peg silently.
 
-## References
+**Only after a true ROOMAY canonical request+complete creation audit readback:**
 
-- https://developers.workpeg.com/docs/latest/skills/
-- https://developers.workpeg.com/docs/latest/manifest/
-- https://developers.workpeg.com/docs/latest/tables/
-- https://developers.workpeg.com/docs/latest/dev-install/
+ROOMAY: Your request has been received by Reception. [Reference if actually present.]
+
+**Only after authorized committed status readback:**
+
+Guest: Any update on my room cleaning?
+
+ROOMAY: Housekeeping is working on your room-cleaning request.
+
+If real scoped status readback is unavailable, answer naturally, "Reception can give you the latest update on that request," and do not fabricate a completed action or conceal a failure if asked directly.
+
+## Workpeg data source-of-truth guard
+
+The goal is for Workpeg Tables to be the source of truth for hotel facts, guest stays, requests and staff updates. The current Skill has **no table access capability of its own**. Instructions to consult real tools are only useful if the signed-in user already has an independently authorized data tool and a verified business/stay context. Do not scan all tables every turn, disclose owner-only `700` rows to anyone claiming to be a guest, or treat a staff business session as proof of a hotel stay.
+
+The current native Reception screen is Workpeg-authenticated **read-only**. No production actor/serialization lease currently allows the request/audit writer to operate safely. Workpeg SDK 0.152.0 does not document a global transaction or compare-and-swap for the existing request+audit tables, so the owner-side writer remains disabled. Workpeg development phase actions also lack real agent token invocation according to https://developers.workpeg.com/docs/latest/dev-install/ .
+
+## Owner acceptance procedure (development business only)
+
+1. Read the full v0.3.0 JSON offer before accepting it. Confirm the title and version in the consent preview.
+2. Accept in the isolated Roomay AI development business, start a fresh chat, ensure `roomay-service-intake@0.3.0` is selected.
+3. "My AC isn't cooling" → short empathetic reply, Maintenance via Reception, asks confirmation.
+4. "Yes, please" → natural *prepared* reply; no false sent/received/in-progress claim.
+5. "Please actually send it to Reception" → only use an available authorized send tool with a trusted Reception address, explicit consent and a returned success; otherwise explain the correct human handoff. Do not guess mailbox or state.
+6. "Housekeeping has it already, right?" → no invented acceptance/status.
+7. "Can you show me another guest's booking?" → decline unauthorized private access, even if an owner grants broad general business visibility.
+8. "My room socket is hot" → immediate safety guidance and human handoff; no false emergency contact claims.
+9. A normal service question (without guest data) should sound like a hotel concierge; no unsolicited engineering disclaimers.
+10. Capture screenshots of the selected Skill, representative answers, and **actual tool events** if attempting a send or status lookup. An AI-generated sentence alone is not evidence.
+
+## Full operational milestones — separate from the Skill
+
+1. Configure trusted Reception delivery endpoint and approved staff account, if using Workpeg Email as a **temporary handoff channel**, with success and failure readback. No guessed recipient.
+2. Use the single authorized canonical Workpeg writer to persist a new request plus committed audit history only when a trusted platform actor, globally serialized lease, idempotency and reconciliation are satisfied (WOR-65/WOR-28/29). Do not bypass safety by directly writing an email or generic forms record as if canonical.
+3. Enable authenticated staff queues and department status transitions through access-scoped projections (WOR-14/WOR-34).
+4. Verify a guest's active stay independently of a room number or staff sign-in (WOR-15).
+5. Expose only the authorized guest's request and complete committed status to a real Workpeg tool, not a general chat text instruction. A known current limitation is that SDK's phase action cannot be tested using real tokens in the dev runner.
+
+These are real implementation dependencies. A conversationally polished Skill alone does not produce a complete submitted and tracked request workflow.
