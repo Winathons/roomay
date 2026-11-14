@@ -50,6 +50,7 @@ class HotelData(App):
     housekeeping_request_cards = State([])
     housekeeping_metrics = State([])
     room_filter = State("All rooms")
+    request_filter = State("All requests")
     selected_room = State("")
     selected_request = State("")
     active_view = State("Today")
@@ -104,6 +105,10 @@ class HotelData(App):
     def set_filter(self, value):
         self.room_filter = value
 
+    def set_request_filter(self, value):
+        if value in ["All requests", "New"]:
+            self.request_filter = value
+
     def set_view(self, value):
         if value in ["Today", "Rooms", "Requests"]:
             self.active_view = value
@@ -152,6 +157,13 @@ class HotelData(App):
             return Button(label, on_click=lambda: self.set_filter(value),
                           variant="primary", size="sm")
         return Button(label, on_click=lambda: self.set_filter(value),
+                      variant="outline-gray", size="sm")
+
+    def _request_filter_button(self, label, value):
+        if self.request_filter == value:
+            return Button(label, on_click=lambda: self.set_request_filter(value),
+                          variant="primary", size="sm")
+        return Button(label, on_click=lambda: self.set_request_filter(value),
                       variant="outline-gray", size="sm")
 
     def select_room(self, value):
@@ -1017,7 +1029,7 @@ class HotelData(App):
             Text(metric["label"], variant="label", tone="muted", weight="semibold",
                  style={"letter-spacing": "0.01em"}),
             Text(metric["value"], variant="display", weight="bold",
-                 style={"color": "#103a30", "font-size": "38px",
+                 style={"color": "#181a1a", "font-size": "38px",
                         "line-height": "1.02", "letter-spacing": "-1.4px",
                         "font-variant-numeric": "tabular-nums"}),
             Text(metric["helper"], variant="caption", tone="muted",
@@ -1112,31 +1124,39 @@ class HotelData(App):
 
     def _today_content(self):
         return Column(
-            Column(Text("Today at a glance", variant="heading", weight="bold",
-                        style={"color": "#181a1a", "letter-spacing": "-0.025em"}),
-                   Text("A clear view of today's verified hotel operations.", tone="muted"),
-                   gap=4),
-            Wrap(*[self._metric_card(metric) for metric in self.metrics],
+            Wrap(*[self._metric_card(metric) for metric in self.request_summary],
                  spacing=12, run_spacing=12),
             Container(Column(
-                Row(Column(Text("Recent guest requests", variant="subheading", weight="bold"),
-                           Text("Latest requests from the validated WorkPeg snapshot.",
+                Row(Column(Text("Guest service requests", variant="subheading", weight="bold"),
+                           Text("Requests from the verified WorkPeg snapshot.",
                                 variant="caption", tone="muted"), gap=3),
-                    Button("View all requests", on_click=lambda: self.set_view("Requests"),
+                    Button("Open request workspace", on_click=lambda: self.set_view("Requests"),
                            variant="text", size="sm"),
                     justify="space_between", align="center", gap=10),
+                Wrap(self._request_filter_button("All requests", "All requests"),
+                     self._request_filter_button("New", "New"),
+                     spacing=8, run_spacing=8),
                 Text("No service requests are present in the validated snapshot.",
                      tone="muted", visible=len(self.request_cards) == 0),
                 Table(
                     TableHeader(TableCell(title="REQUEST"), TableCell(title="ROOM"),
                                 TableCell(title="CATEGORY"), TableCell(title="STATUS"),
-                                TableCell(title="DEPARTMENT")),
-                    *[self._request_overview_row(request) for request in self.request_cards[:5]],
-                    page_size=5, hover=True, key="reception-overview-request-table",
+                                TableCell(title="ASSIGNED TO")),
+                    *[self._request_overview_row(request) for request in self.request_cards
+                      if self.request_filter == "All requests" or request["status"] == "received"],
+                    search="Search requests, rooms or guests",
+                    sortable=True, page_size=8, hover=True,
+                    key="reception-overview-request-table",
                 ),
                 gap=12,
             ), padding=18, radius=12, color="#ffffff",
                 style={"border": "1px solid #e8ebe8", "max-width": "100%"}),
+            Column(
+                Text("Hotel operations", variant="subheading", weight="bold"),
+                Text("Verified stays, arrivals, departures and room readiness.",
+                     variant="caption", tone="muted"),
+                Wrap(*[self._metric_card(metric) for metric in self.metrics],
+                     spacing=12, run_spacing=12),
             Wrap(
                 Container(Column(
                     Row(Text("Currently in house", variant="subheading", weight="bold"),
@@ -1188,14 +1208,15 @@ class HotelData(App):
                 gap=4,
             ), padding=15, radius=14, color="#edf3ef",
                 style={"border": "1px solid #dfe9e1"}),
+            gap=16),
             gap=20,
         )
 
     def _rooms_content(self):
         return Column(
-            Column(Text("Rooms & availability", variant="heading", weight="bold",
+            Column(Text("Room information", variant="heading", weight="bold",
                         style={"color": "#181a1a", "letter-spacing": "-0.025em"}),
-                   Text("Occupancy, room readiness and maintenance are shown separately.", tone="muted"),
+                   Text("Verified room inventory, occupancy, readiness and maintenance.", tone="muted"),
                    gap=4),
             Wrap(
                 self._filter_button("All rooms", "All rooms"),
@@ -1234,7 +1255,7 @@ class HotelData(App):
 
     def _requests_content(self):
         return Column(
-            Column(Text("Guest requests", variant="heading", weight="bold",
+            Column(Text("Guest service requests", variant="heading", weight="bold",
                         style={"color": "#181a1a", "font-size": "27px",
                                "letter-spacing": "-0.025em"}),
                    Text("A clear view of what needs your attention.", tone="muted"),
@@ -1276,7 +1297,7 @@ class HotelData(App):
             TableCell(title="Room " + request["room"], subtext=request["guest"]),
             TableCell(title=request["category_label"]),
             TableCell(self._request_status_tag(request)),
-            TableCell(title=request["department_label"], subtext="Staff assignment unavailable"),
+            TableCell(title="Unavailable", subtext="Staff assignment is read only"),
         )
 
     def _request_table_row(self, request):
@@ -1292,7 +1313,7 @@ class HotelData(App):
             TableCell(title="Room " + request["room"], subtext=request["guest"]),
             TableCell(title=request["category_label"]),
             TableCell(self._request_status_tag(request)),
-            TableCell(title=request["department_label"], subtext="Staff assignment not configured"),
+            TableCell(title="Unavailable", subtext="Staff assignment is read only"),
         )
 
     def _request_status_tag(self, request):
@@ -1373,23 +1394,22 @@ class HotelData(App):
     def _sidebar(self):
         return Container(Column(
             Row(
-                Container(Text("R", variant="title", weight="bold",
+                Container(Text("H", variant="title", weight="bold",
                                style={"color": "#ffffff"}),
-                          width=38, height=38, radius=10, color="#181a1a",
+                          width=54, height=54, radius=10, color="#181a1a",
                           style={"display": "grid", "place-items": "center"}),
-                       Column(Text("roomay.", variant="title", weight="bold",
-                            style={"color": "#181a1a", "letter-spacing": "-0.06em"}),
+                       Column(Text("Roomay", variant="title", weight="bold",
+                            style={"color": "#181a1a", "letter-spacing": "-0.04em"}),
                        Text("HOTEL OPERATIONS", variant="caption",
                             style={"color": "#737976", "letter-spacing": "0.07em"}),
                        gap=1),
                 gap=10, align="center",
             ),
             Divider(spacing=10),
-            Text("FRONT DESK", variant="caption", weight="bold",
+            Text("WORKSPACE", variant="caption", weight="bold",
                  style={"color": "#718178", "letter-spacing": "0.1em"}),
-            self._nav_button("Today", "Today"),
-            self._nav_button("Rooms & availability", "Rooms"),
-            self._nav_button("Service requests", "Requests"),
+            self._nav_button("Overview", "Today"),
+            self._nav_button("Rooms", "Rooms"),
             Divider(spacing=10),
             Text("WORKSPACES", variant="caption", weight="bold",
                  style={"color": "#718178", "letter-spacing": "0.1em"}),
@@ -1418,8 +1438,9 @@ class HotelData(App):
                  style={"color": "#687972", "line-height": "1.45"},
                  visible=self.view_state != "loaded"),
             gap=12,
-        ), padding=20, width=232, radius=12, color="#ffffff",
+            ), padding=24, width=232, radius=14, color="#ffffff",
             style={"min-height": "calc(100vh - 48px)", "border": "1px solid #e8ebe8",
+                   "box-sizing": "border-box",
                    "align-self": "stretch"})
 
     def open_housekeeping(self):
@@ -1619,10 +1640,11 @@ class HotelData(App):
                 Column(Text("RECEPTION / FRONT DESK", variant="caption", weight="bold",
                             style={"color": "#718178", "letter-spacing": "0.1em"}),
                        Text(self._page_title(), variant="heading", weight="bold",
-                            style={"color": "#103a30", "font-size": "32px",
-                                   "letter-spacing": "-0.035em"}),
+                            style={"color": "#181a1a", "font-size": "46px",
+                                   "line-height": "1.08", "letter-spacing": "-0.045em"}),
                        Text("A clear view of verified hotel operations.",
-                            variant="caption", tone="muted"), gap=4),
+                            variant="caption", tone="muted",
+                            style={"font-size": "18px", "line-height": "1.5"}), gap=5),
                 Tag("READ ONLY", tone="info", size="sm"),
                 spacing=12, cross_alignment="center",
             ),
@@ -1646,7 +1668,7 @@ class HotelData(App):
                 "#fff4f4", "#e6b8b8", "connection_unavailable"),
             self._loaded_view(),
             gap=18,
-        ), style={"flex": "1 1 600px", "min-width": "280px",
+        ), style={"flex": "1 1 600px", "min-width": "0",
                   "max-width": "100%"})
 
     def _active_content(self):
@@ -1658,7 +1680,11 @@ class HotelData(App):
 
     def _page_title(self):
         if self.view_state == "loaded":
-            return self.active_view
+            if self.active_view == "Today":
+                return "Good evening, Reception"
+            if self.active_view == "Rooms":
+                return "Room information"
+            return "Guest service requests"
         return "Reception workspace"
 
     def _refresh_control(self):
@@ -1688,4 +1714,5 @@ class HotelData(App):
             return Authenticated(self._housekeeping_content())
         return Authenticated(Container(Wrap(self._sidebar(), self._main_content(), spacing=22, run_spacing=18,
                 cross_alignment="start"), padding=24, color="#f8f9f7",
-                style={"min-height": "100vh", "max-width": "1600px", "margin": "0 auto"}))
+                style={"min-height": "100vh", "max-width": "1600px", "margin": "0 auto",
+                       "box-sizing": "border-box"}))

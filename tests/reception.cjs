@@ -82,7 +82,7 @@ const visit = (node, predicate, found = []) => {
 };
 const tree = app.build();
 const todayMarkup = JSON.stringify(tree);
-assert.match(todayMarkup, /Today at a glance/);
+assert.match(todayMarkup, /Good evening, Reception/);
 for (const label of [
   'In house', 'Arrivals', 'Scheduled departures today', 'Overdue active stays',
   'Ready for check-in', 'Needs cleaning', 'Maintenance-blocked rooms',
@@ -98,10 +98,10 @@ assert.match(todayMarkup, /font-size/);
 assert.match(todayMarkup, /38px/);
 assert.match(todayMarkup, /#f8f9f7/);
 const navButtons = visit(tree, node => node.type === 'button' &&
-  ['Today', 'Rooms & availability', 'Service requests'].includes(node.props.label));
-assert.equal(navButtons.length, 3);
+  ['Overview', 'Rooms'].includes(node.props.label));
+assert.equal(navButtons.length, 2);
 assert.deepEqual(navButtons.map(node => node.props.icon),
-  ['layout-dashboard', 'bed', 'clipboard-list']);
+  ['layout-dashboard', 'bed']);
 for (const [index, button] of navButtons.entries()) {
   assert.equal(button.props.variant, 'ghost-gray');
   assert.equal(button.props.style[':rest'].color, index === 0 ? '#181a1a' : '#515653');
@@ -135,7 +135,7 @@ navButtons[1].props.handler();
 assert.equal(app.state.active_view, 'Rooms');
 app.state.active_view = 'Rooms';
 const roomsTree = app.build();
-assert.match(JSON.stringify(roomsTree), /Rooms & availability/);
+assert.match(JSON.stringify(roomsTree), /Room information/);
 assert.match(JSON.stringify(roomsTree), /Room board/);
 assert.match(JSON.stringify(roomsTree), /Select a room to inspect details/);
 const detailButtons = visit(roomsTree, node => node.type === 'button' && node.props.label === 'View details');
@@ -180,7 +180,7 @@ assert.equal(overdue.state.overdue_departure_cards.length, 1);
 assert.equal(overdue.state.metrics.find(item => item.label === 'Overdue active stays').value, 1);
 
 const rendered = JSON.stringify(overdue.build());
-assert.match(rendered, /Today/);
+assert.match(rendered, /Good evening, Reception/);
 assert.match(rendered, /WORKPEG SNAPSHOT/);
 assert.match(rendered, /OVERDUE/);
 assert.match(rendered, /This workspace is read only/);
@@ -243,11 +243,20 @@ assert.deepEqual(sliceApp.state.request_summary.map(item => [item.label, item.va
 ]);
 const overviewTree = sliceApp.build();
 const overviewMarkup = JSON.stringify(overviewTree);
-assert.match(overviewMarkup, /Recent guest requests/);
-assert.match(overviewMarkup, /Latest requests from the validated WorkPeg snapshot/);
+assert.match(overviewMarkup, /Guest service requests/);
+assert.match(overviewMarkup, /Requests from the verified WorkPeg snapshot/);
 const overviewRequests = visit(overviewTree, node => node.type === 'button' &&
   node.props.label.includes('Synthetic WOR-60') && node.props.label.includes('request for Room 205.'));
 assert.equal(overviewRequests.length, 2, 'overview preview links to both existing requests');
+const newRequestFilter = visit(overviewTree, node => node.type === 'button' &&
+  node.props.label === 'New');
+assert.equal(newRequestFilter.length, 1);
+newRequestFilter[0].props.handler();
+assert.equal(sliceApp.state.request_filter, 'New');
+const newRequests = visit(sliceApp.build(), node => node.type === 'button' &&
+  node.props.label.includes('Synthetic WOR-60') && node.props.label.includes('request for Room 205.'));
+assert.equal(newRequests.length, 1, 'New filter shows only received requests');
+sliceApp.set_request_filter('All requests');
 overviewRequests[1].props.handler();
 assert.equal(sliceApp.state.selected_request, id(113), 'each row opens its own request');
 assert.equal(sliceApp.state.active_view, 'Requests');
@@ -265,12 +274,12 @@ assert.match(roomsSliceTree, /Room guidance is not included in the authorized ho
 sliceApp.state.active_view = 'Requests';
 const requestsTree = sliceApp.build();
 const requestsMarkup = JSON.stringify(requestsTree);
-assert.match(requestsMarkup, /Guest requests/);
+assert.match(requestsMarkup, /Guest service requests/);
 assert.match(requestsMarkup, /REQUEST/);
 assert.match(requestsMarkup, /DEPARTMENT/);
 assert.match(requestsMarkup, /Search requests, rooms or guests/);
 assert.match(requestsMarkup, /Synthetic WOR-60 extra-towels request for Room 205/);
-assert.match(requestsMarkup, /Staff assignment not configured/);
+assert.match(requestsMarkup, /Staff assignment is read only/);
 assert.match(requestsMarkup, /Open requests/);
 assert.match(requestsMarkup, /Resolved today/);
 const requestButton = visit(requestsTree, node => node.type === 'button' &&
