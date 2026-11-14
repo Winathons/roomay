@@ -29,6 +29,30 @@ _EMERGENCY_TERMS = (
     "someone is injured", "electric shock", "sparking", "gas smell",
 )
 _URGENT_TERMS = ("urgent", "urgently", "asap", "immediately", "right now")
+_PLUMBING_TERMS = (
+    "plumbing", "leak", "leaking", "pipe burst", "burst pipe",
+    "water dey leak", "tap is dripping", "tap is leaking", "tap not working",
+    "no water in the shower", "no hot water", "water is not running",
+    "water isn't running", "water is not coming", "water isn't coming",
+    "water stopped running", "water pressure",
+)
+_CATEGORY_TITLES = {
+    "extra_towels": "Extra towels",
+    "linen": "Linen request",
+    "room_cleaning": "Room cleaning",
+    "toiletries": "Toiletries request",
+    "plumbing": "Plumbing issue",
+    "electrical": "Electrical issue",
+    "air_conditioning": "Air conditioning issue",
+    "room_equipment": "Room equipment issue",
+    "room_service": "Room service request",
+    "dining": "Dining request",
+    "minibar": "Minibar request",
+    "transport": "Transport request",
+    "wake_up_call": "Wake-up call request",
+    "billing_question": "Billing question",
+    "general_help": "Reception assistance",
+}
 
 
 class IntakeError(ValueError):
@@ -139,13 +163,37 @@ def is_explicit_hotel_problem(text):
         return False
     lowered = text.casefold()
     return any(term in lowered for term in (
-        "loud vibration", "bad smell", "smells bad", "smell is bad",
-        "something is broken", "something is not working", "there is a problem",
-        "there's a problem", "there is an issue", "there's an issue",
-        "i have a problem", "i have an issue", "something is wrong",
+        "loud vibration", "hallway smells bad", "bad smell in my room",
+        "bad smell in the room", "smells bad in my room", "smells bad in the room",
+        "something is broken in my room", "something is not working in my room",
+        "there's a problem with my room", "there is a problem with my room",
+        "there is an issue with my room", "there's an issue with my room",
+        "problem with the room", "issue with the room",
+        "problem with my stay", "issue with my stay",
+        "something is wrong with my room", "something is wrong in the room",
+        "i want to report", "complaint about my room", "complain about my room",
+        "i have a problem with my room", "i have an issue with my room",
         "wifi is down", "wi-fi is down", "internet is down", "internet not working",
         "shower is cold", "shower is not working", "toilet is blocked",
-        "room smells", "smells bad", "too noisy", "water pressure",
+        "room smells", "smells bad", "too noisy", "noisy room", "water pressure",
+        "water is not running", "water isn't running", "no water in the shower",
+        "no hot water", "tap not working", "tap is leaking", "water dey leak",
+        "curtain is torn", "furniture is broken", "light is flickering",
+    ))
+
+
+def _is_water_delivery_request(lowered):
+    """Recognize a request for drinking water without misrouting plumbing issues."""
+    if "water" not in lowered or any(term in lowered for term in _PLUMBING_TERMS):
+        return False
+    return bool(re.search(
+        r"\b(?:bottled|drinking)\s+water\b"
+        r"|\bwater\s+bottles?\b"
+        r"|\b(?:bring|send|deliver|get|have|order|request|need|want|fetch)"
+        r"\b.{0,32}\bwater\b"
+        r"|\bwater\b.{0,18}\b(?:please|abeg)\b"
+        r"|\b(?:please|abeg)\b.{0,24}\bwater\b",
+        lowered,
     ))
 
 
@@ -176,12 +224,31 @@ def classify_text(text):
     urgency = _urgency(original)
     if _hotel_information_question(lowered):
         return _intent("room_enquiry", "general_help", urgency, room_number)
-    if (re.search(r"\b(?:ac|a/c)\b", lowered) or any(term in lowered for term in (
-            "air conditioning", "air conditioner", "aircon", "faulty ac",
-            "no dey cool", "not cooling", "isn't cooling"))):
+    mentions_ac = bool(re.search(
+        r"\b(?:ac|a/c|air conditioning|air conditioner|aircon)\b", lowered))
+    ac_problem = any(term in lowered for term in (
+        "faulty", "not cooling", "isn't cooling", "is not cooling", "no dey cool",
+        "trouble", "malfunction", "not working", "stopped working", "broken", "won't turn on",
+        "not turning on", "not switching on", "too hot", "too cold",
+    ))
+    if mentions_ac and ac_problem:
         return _intent("service_request", "air_conditioning", urgency, room_number)
-    if any(term in lowered for term in ("towel", "towels", "linen", "bedsheet", "bed sheet")):
+    towel_request = any(term in lowered for term in (
+        "extra towel", "extra towels", "more towel", "more towels",
+        "bring towel", "bring towels", "send towel", "send towels",
+        "need a towel", "need towels", "want a towel", "want towels",
+        "get me a towel", "get me towels", "request towels", "out of towels",
+        "towels please",
+    ))
+    if "towel" in lowered and towel_request:
         return _intent("service_request", "extra_towels", urgency, room_number)
+    linen_request = any(term in lowered for term in (
+        "fresh linen", "extra linen", "more linen", "change the linen",
+        "change linen", "fresh bedsheet", "fresh bed sheet", "new bedsheet",
+        "new bed sheet", "bed sheets please",
+    ))
+    if any(term in lowered for term in ("linen", "bedsheet", "bed sheet")) and linen_request:
+        return _intent("service_request", "linen", urgency, room_number)
     if any(term in lowered for term in ("room cleaning", "clean my room", "clean the room",
                                         "room is dirty", "room looks dirty")):
         return _intent("service_request", "room_cleaning", urgency, room_number)
@@ -196,10 +263,11 @@ def classify_text(text):
     if any(term in lowered for term in ("bring breakfast", "send breakfast", "order breakfast",
                                         "bring food", "send food", "order food")):
         return _intent("service_request", "dining", urgency, room_number)
-    if any(term in lowered for term in (
-            "plumbing", "leak", "leaking", "pipe burst", "burst pipe",
-            "water dey leak", "tap is dripping")):
+    if any(term in lowered for term in _PLUMBING_TERMS):
         return _intent("service_request", "plumbing", urgency, room_number)
+    if _is_water_delivery_request(lowered):
+        # The canonical catalog routes room-service items to Food & Beverage.
+        return _intent("service_request", "room_service", urgency, room_number)
     return _intent("unknown", "unknown", urgency, room_number)
 
 
@@ -235,6 +303,11 @@ def validate_intent_output(text, candidate):
     canonical, expected_department, triage = route_category(category)
     if department != expected_department:
         raise IntakeError("incorrect_department")
+    deterministic = classify_text(original)
+    if (deterministic["intent"] in {"service_request", "room_enquiry"}
+            and (kind != deterministic["intent"]
+                 or canonical != deterministic["category"])):
+        raise IntakeError("classifier_conflicts_with_supported_signal")
     if kind == "service_request" and (category == "unknown" or triage):
         raise IntakeError("invalid_classifier_output")
     if kind == "room_enquiry" and category != "general_help":
@@ -393,14 +466,18 @@ def handle_conversation_turn(
             "That room doesn't match the stay I can verify. Please contact Reception for assistance.",
             intent, "guest_room_mismatch",
         )
+    if intent["intent"] == "unknown" and not is_explicit_hotel_problem(original):
+        return _result(
+            "needs_clarification",
+            "Could you describe the hotel issue or service you need help with?",
+            intent=intent, clarification="hotel_request_details",
+        )
     # The room ID and number come only from the trusted active stay. A spoken
     # or typed room number is a consistency check, never authentication.
-    intent = {**intent, "room_number": authoritative_room_number}
-    if intent["intent"] == "unknown" and len(original.split()) <= 3:
-        return _result(
-            "needs_clarification", "Could you briefly describe what is happening?",
-            intent=intent, clarification="problem_description",
-        )
+    water_delivery = _is_water_delivery_request(original.casefold())
+    title = ("Water request" if intent["category"] == "room_service" and water_delivery
+             else _CATEGORY_TITLES.get(intent["category"], "General guest concern"))
+    intent = {**intent, "room_number": authoritative_room_number, "title": title}
     if type(confirmed) is not bool:
         return _result("unavailable", "Please confirm the request with Reception.",
                        intent=intent, failure_code="invalid_confirmation")
@@ -410,7 +487,9 @@ def handle_conversation_turn(
                   "the " + department + " team")
         return _result(
             "awaiting_confirmation",
-            "I can prepare this request for " + detail + ". It will not be sent or saved yet. Shall I prepare it?",
+            "I understood this as: " + title + ". Details: “" + original +
+            "”. I can prepare it for " + detail +
+            ". It will not be sent or saved yet. Shall I prepare it?",
             intent=intent,
         )
     try:
@@ -434,6 +513,11 @@ def handle_conversation_turn(
                 "guest_id": access_context.guest_id,
                 "origin": "guest",
                 "category": intent["category"],
+                # The existing schema has no separate title field. Known
+                # categories use a server-derived display detail; an unknown
+                # complaint keeps the guest's original wording in category_detail.
+                "category_detail": (original if intent["category"] == "unknown"
+                                    else intent["title"]),
                 "description": original,
                 "urgency": intent["urgency"],
                 "idempotency_key": idempotency_key,

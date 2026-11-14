@@ -144,6 +144,7 @@ class GuestActionGateway:
                             "unavailable", "Confirmation could not be created. Contact Reception.")
                     proposal = {
                         "handle": handle,
+                        "title": intent.get("title", self._label(intent.get("category"))),
                         "description": normalized_text,
                         "category": self._label(intent.get("category")),
                         "department": self._label(intent.get("department")),
@@ -196,6 +197,7 @@ class GuestActionGateway:
             if outcome.get("state") == "prepared":
                 intent = outcome.get("internal", {}).get("intent", {})
                 result["proposal"] = {
+                    "title": intent.get("title", self._label(intent.get("category"))),
                     "description": pending["text"],
                     "category": self._label(intent.get("category")),
                     "department": self._label(intent.get("department")),

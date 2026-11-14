@@ -1,8 +1,33 @@
 # WOR-25 — Workpeg tester and release handoff
 
-Updated: November 12, 2026. This runbook describes the current Workpeg SDK
+Updated: November 14, 2026. This runbook describes the current Workpeg SDK
 0.152.0 development path and the separate, incomplete hosted release path. It
 does not publish, install, or write to Workpeg.
+
+## Approved MVP and source precedence
+
+The [Roomay project](https://linear.app/workpeg/project/roomay-workpeg-hospitality-hackathon-7b7a7ce4b3b9)
+(updated 14 November 2026) and the current brief in
+[WOR-25](https://linear.app/workpeg/issue/WOR-25/document-deployment-workpeg-publishing-and-handoff-procedure)
+supersede historical staging, SDK 0.149.1 and broad hotel-management instructions.
+Use protected `main` and reviewed issue branches. Leave Linear status unchanged
+for this documentation task.
+
+The active MVP is verified stay/room-code access through WorkPeg AI, scoped
+room guidance, guest complaints/requests committed with audit to WorkPeg Tables,
+and receptionist assignment/status updates followed by guest saved-status
+readback. Manually initiated progress/feedback email requires a confirmed,
+supported capability. WorkPeg Tables remain the sole operational authority.
+Booking, check-in/out, standalone Next.js guest-web, voice, WhatsApp and automatic
+staff dispatch are deferred. Existing prototypes are not release deliverables.
+Shared contracts belong to WOR-77; this runbook neither defines nor changes them.
+
+| Evidence level | What it establishes | What it does not establish |
+| --- | --- | --- |
+| Offline tests/build | Synthetic policy/controller behavior and compiled artifact safety at a recorded commit | Staff sessions, hosted grants, canonical delivery or live AI |
+| Installed Peg readback | Authorized session can read expected fictional canonical rows and refresh | Writes, independent staff access or the guest-to-reception workflow |
+| Local `--fake-cloud` | Authenticated local development UI against real APIs, with dev-table isolation | Installed Peg canonical data or a published release |
+| Hosted MVP acceptance (WOR-89) | Independently verified guest → WorkPeg AI → canonical request/audit → receptionist update → guest readback | Cannot be replaced by mocks, a local queue, or another database |
 
 ## Current product boundary
 
@@ -10,7 +35,9 @@ The approved Peg namespace is `roomay`; the manifest is [workpeg.json](../workpe
 It currently contains the namespace only: there is no Function configured for
 the read-only Reception application. The compiler writes local UI assets to
 `ui/dist/`.
-The compiled production Workpeg router currently exposes exactly:
+The compiled production Workpeg router registers `/`, `/b/[business_id]/reception`,
+and `/b/[business_id]/reception/[workspace]`. The workspace parameter accepts only
+the default view or `housekeeping`; other values fail closed. The supported views are:
 
 - `/` — a short Reception availability message.
 - `/b/<business_id>/reception` — the authenticated, read-only Reception
@@ -95,7 +122,7 @@ If port 443 is occupied, stop the conflicting local service or postpone the
 dev-install check; the Workpeg API rejects alternate ports for this origin.
 
 ```powershell
-Set-Location C:\Users\HomePC\Desktop\roomay-workspace\roomay
+Set-Location 'C:\path\to\roomay' # Replace with your checkout path.
 
 # Confirm this checkout uses the exact repository pin (0.152.0).
 & .\.venv\Scripts\python.exe -m pip show workpeg
@@ -147,7 +174,8 @@ The Workpeg build has Today, Rooms & Availability, and Service Requests inside
 the Reception route. It is read-only. It shows explicit loading, empty
 inventory, authentication required (401), access denied (403), unavailable,
 and complete-records-loaded states. A partial or invalid snapshot is not shown
-as loaded. It has no guest portal, Housekeeping workspace, QA role switcher,
+as loaded. Its Housekeeping preview is owner-only and read-only, not a department inbox.
+It has no guest portal, authorized department workflow, QA role switcher,
 booking/check-in flow, or real request mutation.
 
 | Observation | Meaning / next check |
@@ -165,7 +193,7 @@ separate loopback server and port so it does not collide with the Workpeg
 dev-install listener on 443:
 
 ```powershell
-Set-Location C:\Users\HomePC\Desktop\roomay-workspace\roomay
+Set-Location 'C:\path\to\roomay' # Replace with your checkout path.
 & .\.venv\Scripts\python.exe -m tools.guest_chat_demo --port 8765 --enable-local-qa
 ```
 
@@ -177,7 +205,30 @@ origin and never expose it on the LAN or public internet.
 
 ## Offline release checks
 
-From the repository root, using the existing pinned environment:
+Use the repository root containing `workpeg.json`. Create a private virtual
+environment and install the repository pin; never upgrade Workpeg implicitly.
+Windows setup: `py -3.13 -m venv .venv`, then
+`.\.venv\Scripts\python.exe -m pip install -r requirements-dev.txt`.
+For macOS/Linux:
+
+```bash
+python3 -m venv .venv
+. .venv/bin/activate
+python -m pip install -r requirements-dev.txt
+python -m unittest discover -s tests -v
+python -m compileall -q ui function domain tests
+workpeg ui build ui/
+workpeg doctor . --offline
+python -m unittest tests.test_release_candidate -v
+git diff --check
+```
+
+Use Node 24 for compiled-controller scenarios. Python 3.13.5 is the previously
+verified developer setup; Python 3.12 is used by repository CI and was verified
+below. Docker/PostgreSQL integration checks are separate from this minimal
+setup; report skipped tests rather than claiming full CI equivalence.
+
+Windows PowerShell, using the pinned environment:
 
 ```powershell
 & .\.venv\Scripts\python.exe -m unittest discover -s tests -v
@@ -194,8 +245,9 @@ hosted persistence.
 
 ## Workpeg packaging and publishing status
 
-Verified against the installed `workpeg==0.152.0` CLI help and the official
-manifest, project, function, CDN, and architecture documentation:
+The capability boundary below is pinned to installed `workpeg==0.152.0` CLI
+help. Current online documentation describes newer SDK features; it is not a
+versioned guarantee for this checkout:
 
 | Step | Supported now | Effect |
 | --- | --- | --- |
@@ -204,14 +256,15 @@ manifest, project, function, CDN, and architecture documentation:
 | Prepare project manifest | `workpeg.json` | Keeps existing namespace `roomay`. No identity changes. |
 | Upload static CDN assets | `workpeg cdn submit ./ui/dist/` | Requires `WORKPEG_PK` and uploads public static assets. It is not a complete UI/manifest release. Not run. |
 | Build/submit a Function | `workpeg function build` / `workpeg function submit <version>` | Available for Function projects; submission requires `WORKPEG_PK`. Function `main` versions have per-version review/approval; Roomay Reception does not invoke a Function. Not run. |
-| Submit complete UI + manifest Peg release / create PegStore version | No `workpeg project submit` or UI-release command in SDK 0.152.0 | Official docs list complete project submission/PegStore workflow as not yet available in this CLI. |
+| Submit complete UI + manifest Peg release / create PegStore version | No `workpeg project submit` or UI-release command in SDK 0.152.0 | Installed `project --help` lists only `create`; `ui --help` has no submit command. Current online docs describe a newer whole-project submission workflow, not available in this pin. |
 | Install for testing | Developer dashboard “Install for testing” (optional, owner/admin action) | The owner reports Roomay is already installed for testing in Roomay AI. This is not a published/reviewed PegStore release. |
 | Review/approve/install release | PegStore/dashboard/platform process | Exact complete UI-only release procedure still needs Workpeg confirmation; no release is created by `ui build`, CDN upload, or local dev install. |
 
 Do not upload `ui/dist/` to CDN as a substitute for a reviewed Peg release.
 CDN files are public assets. `workpeg.json` identity is `roomay`; never
 register a replacement Peg or create another development business. Before a
-release, Workpeg must provide the supported UI-only release submission path,
+release, the owner and Workpeg must confirm a version-compatible UI-only
+release submission path,
 review steps, version immutability/update procedure, and authorized-business
 installation instructions. The owner must approve any token creation, upload,
 submission, release, install, permissions change, or hosted data write
@@ -233,18 +286,151 @@ separately.
       or screenshots containing personal data.
 - [ ] Obtain Workpeg's supported complete UI/manifest Peg release and
       approval/install procedure before any hosted release action.
-- [ ] Keep WOR-28, WOR-29, WOR-14, WOR-15, WOR-61 and WOR-62 open until their
-      actual access, authorization, persistence, audit, and staff permission
-      acceptance is independently met.
+- [ ] Verify the outstanding access, authorization, persistence, audit and
+      staff-permission acceptance in WOR-28, WOR-29, WOR-14 and WOR-15 against
+      their current scope and evidence. WOR-61's offline security investigation
+      and WOR-62's architecture-decision/backend-verification phase are Done;
+      do not reopen them for hosted acceptance. Follow the transferred live
+      integration blockers in WOR-69, implementation in WOR-65, and hosted MVP
+      acceptance in WOR-89. Done on WOR-61/WOR-62 does not prove live OIDC,
+      canonical WorkPeg delivery or guest/staff readback.
+
+## Release gates and deployment approval
+
+All gates apply to the exact candidate commit and artifact; a green build alone
+is not release approval.
+
+1. Record the reviewed `main` SHA, SDK/Python/Node versions, build results and
+   artifact checksum. Inspect the compiled routes, read-only helper allowlist,
+   diagnostic/fixture exclusion and compiled-artifact credential-marker checks
+   via the release-candidate tests. These checks inspect emitted artifact text
+   for known credential patterns; they are not comprehensive repository-wide
+   secret scanning and do not prove that the repository contains no secrets.
+   Do not relax those tests to enable unapproved writes.
+2. Check the GitHub `Workpeg UI build` workflow result and reviewer approval.
+   Verify current branch-rule enforcement with the repository owner; historical
+   observations in [WOR-68](wor-68-ci-enforcement.md) are not current proof.
+   This task does not change repository settings.
+3. Obtain installed-Peg readback and independent account/permission evidence.
+   Record owner, restricted staff, unauthenticated and wrong-business outcomes
+   through the supported test process. A missing identity or test mechanism is
+   **blocked**, not pass. Keep `700` permissions; do not grant access to pass QA.
+4. Before calling this an MVP release, complete WOR-89 with a fictional active
+   stay: verified code → correctly scoped facts → guest-confirmed structured
+   request → one canonical WorkPeg request plus committed audit → receptionist
+   assignment/update → guest reads saved status. Verify retries/duplicates,
+   invalid or expired identity, cross-room denial and failure reporting.
+   Confirm manually initiated email capability and delivery separately. No
+   live tests or writes are authorized by this runbook.
+5. Obtain a separate explicit owner approval identifying the candidate SHA,
+   artifact checksum, SDK, target business, release version, approved actions,
+   operator, acceptance evidence and rollback target. Record it in the release
+   record without credentials. Token issuance/use, upload, submission and
+   installation each need authorization; this documentation PR grants none.
+6. Confirm with Workpeg the supported UI-only packaging/review/install path for
+   the pinned SDK, version behavior and supported rollback operation. If an
+   upgrade is required, propose and verify it separately. Do not submit the
+   dormant Function or use CDN upload as a substitute.
+
+### Secrets and sanitized handoff record
+
+No SDK token is required for offline checks or fake-cloud. Publishing credentials
+such as `WORKPEG_PK` are not staff sessions or Tables API credentials. If later
+authorized, the owner supplies them through an approved secret store or private
+operator environment, never source, browser code, command arguments, screenshots,
+logs, chat or PR text. Do not print environment contents or share staff sessions;
+each tester uses their own account. If exposure is suspected, stop release,
+notify the owner privately and have the owner revoke/rotate the credential before
+resuming; never paste the value into the incident record.
+
+Record: candidate SHA and checksum; tool versions; exact command/result and
+skips; evidence level; date/operator; fictional scenario; sanitized outcome
+(loaded/denied/missing/unavailable); approval reference; rollback target; open
+blockers. Keep business/record identifiers, guest details and credentials out of
+public evidence. Share access instructions privately, not shared passwords.
+
+## Rollback and failed-release procedure
+
+- **Before upload/install:** stop the release if any gate fails. Retain the
+  last accepted installed version. Fix through a new reviewed PR to `main`;
+  do not reset protected main or rewrite another developer's work.
+- **Local dev server:** stop with Ctrl+C and use `workpeg ui dev-clean ui/`
+  for SDK-managed hosts/certificate cleanup. This is local cleanup, not hosted
+  rollback or data restoration.
+- **After an authorized install fails:** the operator pauses further release
+  actions, records sanitized symptoms and the exact version, and notifies the
+  owner. The owner must approve the supported platform operation to restore
+  the last accepted version. No tested downgrade/reinstall command exists in
+  this handoff; obtain Workpeg confirmation before relying on one. If rollback
+  is unsupported, keep acceptance blocked and obtain an approved recovery plan.
+- Restore only the recorded, previously reviewed artifact/version through that
+  confirmed process. Treat immutable versions as immutable; do not overwrite
+  them. Reverting Git alone does not revert a hosted Peg. Any source rollback
+  uses a reviewed revert PR and a separately approved release.
+- After recovery, repeat installed-Peg readback and the relevant permission and
+  MVP checks, recording results before resuming. Artifact rollback does not
+  roll back tables, permissions or audit. Data recovery/migrations need a
+  separate owner-approved plan; never delete or reseed records as rollback.
 
 ## Remaining product blockers
 
-The Workpeg application is an owner-scoped read-only Reception surface. Real
-guest identity/session verification, department-level authorization,
-request/staff mutations with committed audit, safe concurrency, and a verified
-non-owner permission model are not delivered by this UI. The guest and
-Housekeeping journeys remain local QA only. Aliameen's WOR-61/WOR-62 source of
-truth and Workpeg integration decisions and Yusuf's WOR-17 guest identity
-contract must land before those paths can be connected without duplicate
-writers or broader table permissions.
+Installed readback remains owner-reported, not independently verified here.
+Non-owner/department access, verified guest identity, supported AI actions,
+idempotent canonical request/audit commits, receptionist mutations and guest
+status readback remain hosted acceptance gates (WOR-28/29, WOR-15/17,
+WOR-18/64/87, WOR-34, WOR-65/69/77 and WOR-89). Manually initiated email
+(WOR-88), complete pinned-SDK release/install approval and a tested platform
+rollback path also remain unverified. Local QA and dormant backend/voice code
+do not satisfy these gates. Do not reopen deferred booking or guest-web scope.
 
+## SDK evidence and documentation drift
+
+Read on 14 November 2026:
+
+- [Current project guide](https://developers.workpeg.com/docs/latest/projects/)
+  now documents `workpeg project submit`, whole-project release metadata and
+  newer SDK behavior (including references to 0.161.0). The previous assertion
+  that the current official guide has no whole-project path is stale.
+- [Manifest guide](https://developers.workpeg.com/docs/latest/manifest/) and
+  [Function guide](https://developers.workpeg.com/docs/latest/functions/) describe
+  current packaging and token boundaries. Do not transplant newer manifest
+  fields or commands into this 0.152.0 candidate without compatibility review.
+- Installed 0.152.0 `project --help`, `ui --help`, `ui serve --help`,
+  `function --help` and `cdn --help` confirm the command matrix above. These
+  were read-only help calls; no token, submission or install was attempted.
+- For the Windows JavaScript MIME issue, see the
+  [0.152.0 compatibility note](workpeg-sdk-0152-compatibility.md). From the
+  repository root the wrapper is
+  `.\.venv\Scripts\python.exe tools\workpeg_serve_compat.py ui/ --fake-cloud`.
+  Its browser retest remains owner-operated; all real-service restrictions above
+  still apply.
+
+## Offline verification record — 14 November 2026
+
+Baseline: protected `origin/main` at
+`1545ef91ab1ac83de73cde18bf6997c204dbf249`; clean new checkout and isolated
+`WOR-25-release-handoff-docs` branch. Only this Markdown file changed.
+Environment: Linux, Python 3.12.14, Node v24.22.1, Workpeg 0.152.0.
+Commands ran from the repository root with `.venv/bin` first on `PATH`:
+
+| Exact command | Result |
+| --- | --- |
+| `python -m venv .venv` | Passed |
+| `.venv/bin/python -m pip install -r requirements-dev.txt` | Passed; installed Workpeg 0.152.0 |
+| `python -m unittest discover -s tests -v` | 566 tests, OK, 29 skipped (537 passed) |
+| `python -m compileall -q ui function domain tests` | Passed |
+| `workpeg ui build ui/` | Passed; built `ui/dist` |
+| `workpeg doctor . --offline` | No issues; 15 checks, 6 skipped |
+| `python -m unittest tests.test_release_candidate -v` | 9 tests passed; fresh temporary compiled artifact checked |
+| `git diff --check` | Passed |
+
+The 29 suite skips comprise 24 PostgreSQL backend tests, two PostgreSQL intake
+tests (no isolated database configured), two opt-in Docker voice smokes and one
+Gunicorn smoke (optional runtime not installed). Those dormant prototype checks
+were not enabled for this documentation task. Doctor skips are not hosted proof;
+its heuristic labels the directory a Function project despite the UI-only
+manifest, so that label is not deployment authorization.
+
+No fake-cloud server, installed-Peg retest, WorkPeg table/permission change,
+SDK token issuance, live AI/email service, publishing or hosted rollback was
+run. Full GitHub CI and independent hosted MVP acceptance remain separate gates.
