@@ -40,6 +40,9 @@ class ChallengeEvidence:
 
     challenge_id: str
     proof: object
+    # Set only by the trusted request adapter from server-observed network
+    # identity. Never parse it from guest JSON or an untrusted forwarded header.
+    trusted_source_key: str | None = None
 
 
 @dataclass(frozen=True)
@@ -49,6 +52,11 @@ class GuestSubject:
     business_id: str
     hotel_id: str
     guest_id: str
+    # Challenges issued for a particular active stay bind these values too.
+    # Legacy provider adapters may omit them; production challenge issuance
+    # must include both so a re-check-in or room move requires a new challenge.
+    stay_id: str | None = None
+    room_id: str | None = None
 
 
 @dataclass(frozen=True)
@@ -128,6 +136,10 @@ class GuestSessionAuthority:
         if any(not isinstance(item, str) or not item.strip()
                for item in (value.business_id, value.hotel_id, value.guest_id)):
             raise GuestSessionError("verification_required")
+        if ((value.stay_id is None) != (value.room_id is None)
+                or any(item is not None and (not isinstance(item, str) or not item.strip())
+                       for item in (value.stay_id, value.room_id))):
+            raise GuestSessionError("verification_required")
         return value
 
     def _validate_stay(self, subject, value, *, expected=None, actor_id="verified-guest-session"):
@@ -198,6 +210,8 @@ class GuestSessionAuthority:
                 raise GuestSessionError("challenge_replayed")
             try:
                 subject = self._verify_evidence(evidence)
+            except GuestSessionError:
+                raise
             except Exception:
                 raise GuestSessionError("verification_failed") from None
             if not isinstance(subject, GuestSubject):
@@ -210,7 +224,9 @@ class GuestSessionAuthority:
                 resolved = self._resolve_stay(subject)
             except Exception:
                 raise GuestSessionError("stay_unavailable") from None
-            self._validate_stay(subject, resolved)
+            expected = ((subject.stay_id, subject.room_id)
+                        if subject.stay_id is not None else None)
+            self._validate_stay(subject, resolved, expected=expected)
             if len(self._sessions) >= self._max_sessions:
                 raise GuestSessionError("session_capacity_reached")
             token = self._token_factory()
