@@ -6,6 +6,7 @@ import {
   type GuestSessionStatus,
 } from "./guestAccess";
 import type { ComponentType } from "react";
+import { enforceSessionExpiry, scheduleSessionExpiry } from "./sessionExpiry.js";
 
 type Props = { accessAdapter?: GuestAccessAdapter };
 
@@ -26,7 +27,7 @@ export function GuestMvp({ accessAdapter = unavailableGuestAccessAdapter }: Prop
   const refreshStatus = async () => {
     setChecking(true);
     try {
-      setStatus(await accessAdapter.getSessionStatus());
+      setStatus(enforceSessionExpiry(await accessAdapter.getSessionStatus()));
     } catch {
       setStatus({ state: "unavailable" });
     } finally {
@@ -38,18 +39,32 @@ export function GuestMvp({ accessAdapter = unavailableGuestAccessAdapter }: Prop
     let current = true;
     setChecking(true);
     accessAdapter.getSessionStatus().then(
-      value => { if (current) setStatus(value); },
+      value => { if (current) setStatus(enforceSessionExpiry(value)); },
       () => { if (current) setStatus({ state: "unavailable" }); },
     ).finally(() => { if (current) setChecking(false); });
     return () => { current = false; };
   }, [accessAdapter]);
+
+  useEffect(() => {
+    if (status.state !== "authenticated") return;
+    const expiryTimer = scheduleSessionExpiry(status.expiresAt, () => setStatus({ state: "expired" }));
+    const checkAfterVisibilityChange = () => {
+      if (document.visibilityState === "visible") expiryTimer.check();
+    };
+
+    document.addEventListener("visibilitychange", checkAfterVisibilityChange);
+    return () => {
+      expiryTimer.cancel();
+      document.removeEventListener("visibilitychange", checkAfterVisibilityChange);
+    };
+  }, [status]);
 
   const verify = async (event: FormEvent) => {
     event.preventDefault();
     if (!code.trim() || busy) return;
     setBusy(true);
     try {
-      setStatus(await accessAdapter.verify({ response: code.trim() }));
+      setStatus(enforceSessionExpiry(await accessAdapter.verify({ response: code.trim() })));
     } catch {
       setStatus({ state: "unavailable" });
     } finally {
