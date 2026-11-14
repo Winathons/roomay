@@ -18,8 +18,10 @@ from domain.fixtures import synthetic_hotel
 ROOT = Path(__file__).resolve().parents[1]
 RELEASE_ROUTES = [
     "/",
+    "/b/[business_id]",
     "/b/[business_id]/reception",
     "/b/[business_id]/reception/[workspace]",
+    "/b/[business_id]/stay",
 ]
 # Match the actual compiled Workpeg SDK 0.152.0 route declarations. Fail if
 # the compiler format changes rather than accepting an uninspected bundle.
@@ -110,8 +112,10 @@ class ReleaseGuardRegressionTests(unittest.TestCase):
     @staticmethod
     def safe_fixture():
         app = (
-            '{path:"/",app:Home},{path:"/b/[business_id]/reception",app:HotelData}'
+            '{path:"/",app:Home},{path:"/b/[business_id]",app:WorkspaceHome}'
+            ',{path:"/b/[business_id]/reception",app:HotelData}'
             ',{path:"/b/[business_id]/reception/[workspace]",app:HotelData}'
+            ',{path:"/b/[business_id]/stay",app:GuestAccessUnavailable}'
             ';Workpeg.routeParam("workspace");Workpeg.contains(["","housekeeping"],Workpeg.routeParam("workspace"))'
             ';Workpeg.wpGetTables();Workpeg.wpGetRows()'
         )

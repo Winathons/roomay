@@ -17,7 +17,7 @@ const compiledIcons = fs.readFileSync(path.join(output, 'icons.css'), 'utf8');
 assert.match(releaseHtml, /fonts\.googleapis\.com\/css2\?family=Inter/);
 assert.match(compiledApp, /--color-brand-primary/);
 assert.match(compiledApp, /--font-base/);
-for (const icon of ['layout-dashboard', 'bed', 'clipboard-list', 'eye', 'refresh', 'brush']) {
+for (const icon of ['layout-dashboard', 'bed', 'clipboard-list', 'eye', 'refresh', 'brush', 'home', 'user']) {
   assert.match(compiledIcons, new RegExp(`\\.ti-${icon}(?:\\s|\\{)`));
 }
 vm.runInThisContext(fs.readFileSync(path.join(output, 'workpeg-runtime.js'), 'utf8'));
@@ -34,7 +34,32 @@ assert.ok(registeredRoutes.some(route =>
   'housekeeping workspace is business scoped and uses the same validated reader');
 const Home = registeredRoutes.find(route => route.path === '/').app;
 const homeTree = JSON.stringify(new Home().build());
-assert.match(homeTree, /Roomay reception is available inside an authenticated Workpeg business\./);
+assert.match(homeTree, /Hotel operations in Workpeg/);
+assert.match(homeTree, /does not guess or hardcode it/);
+assert.doesNotMatch(homeTree, /Roomay reception is available inside an authenticated Workpeg business/);
+
+const WorkspaceHome = registeredRoutes.find(route => route.path === '/b/[business_id]').app;
+assert.equal(typeof WorkspaceHome, 'function', 'business-scoped workspace home is registered');
+const businessRoutes = registeredRoutes.filter(route => route.path.startsWith('/b/[business_id]'));
+assert.ok(businessRoutes.length >= 4 && businessRoutes.every(route => route.shell),
+  'business routes share the Workpeg Scaffold shell');
+Workpeg.bizUrl = path => `/b/00000000-0000-4000-8000-000000000034${path === '/' ? '' : path}`;
+const workspaceTree = JSON.stringify(new WorkspaceHome().build());
+assert.match(workspaceTree, /Reception/);
+assert.match(workspaceTree, /Guest stay access/);
+assert.match(workspaceTree, /chats\/new/);
+assert.match(workspaceTree, /not registered custom AI actions/);
+assert.doesNotMatch(workspaceTree, /create a request|request was submitted|saved successfully/i);
+
+const guestRoute = registeredRoutes.find(route => route.path === '/b/[business_id]/stay');
+assert.ok(guestRoute, 'missing business-scoped guest URL is now an explicit safe route');
+assert.notEqual(guestRoute.app, ReceptionTest, 'guest status does not reuse the staff records reader');
+const guestTree = JSON.stringify(new guestRoute.app().build());
+assert.match(guestTree, /Guest stay access is unavailable/);
+assert.match(guestTree, /does not verify a hotel guest/);
+assert.match(guestTree, /No room, guest, reservation, stay, or request records were loaded/);
+assert.match(guestTree, /No request was created/);
+assert.doesNotMatch(guestTree, /Amara|Room 205|guest_id|stay_id/i);
 Workpeg.stateHandler = () => ({});
 Workpeg.routeParam = name => name === 'workspace' ? routeWorkspace :
   '00000000-0000-4000-8000-000000000034';

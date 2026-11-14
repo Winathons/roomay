@@ -1,4 +1,5 @@
 """Domain projection and compiled receptionist regression tests."""
+import json
 import shutil
 import subprocess
 import tempfile
@@ -110,8 +111,17 @@ class ReceptionProjectionTests(unittest.TestCase):
 
     def test_release_router_exposes_only_real_business_reception(self):
         source = (ROOT / "ui" / "main.py").read_text(encoding="utf-8")
-        self.assertIn('Route("/b/[business_id]/reception", HotelData)', source)
-        self.assertIn('Route("/b/[business_id]/reception/[workspace]", HotelData)', source)
+        self.assertIn('Route("/", Home)', source)
+        self.assertIn('Shell(AppShell, "/b/[business_id]", [', source)
+        self.assertIn('Route("/", WorkspaceHome)', source)
+        self.assertIn('Route("/reception", HotelData)', source)
+        self.assertIn('Route("/reception/[workspace]", HotelData)', source)
+        self.assertIn('Route("/stay", GuestAccessUnavailable)', source)
+        self.assertIn('href=biz_url("/chats/new")', source)
+        self.assertIn('NavItem("Reception", biz_url("/reception")', source)
+        self.assertIn('NavItem("Guest access status", biz_url("/stay")', source)
+        self.assertNotIn("HotelData", source.split("class GuestAccessUnavailable", 1)[1].split("class Main", 1)[0])
+        self.assertNotIn("business_id =", source)
         self.assertIn('route.workspace not in ["", "housekeeping"]',
                       (ROOT / "ui" / "hotel_data.py").read_text(encoding="utf-8"))
         for forbidden in ("/demo/reception", "/dev-smoke", "/hotel-data", "ReceptionDemo"):
@@ -119,6 +129,8 @@ class ReceptionProjectionTests(unittest.TestCase):
         ui_source = (ROOT / "ui" / "hotel_data.py").read_text(encoding="utf-8")
         for forbidden in ("create_table", "add_row", "update_row", "WORKPEG_PK"):
             self.assertNotIn(forbidden, ui_source)
+        manifest = json.loads((ROOT / "workpeg.json").read_text(encoding="utf-8"))
+        self.assertEqual(manifest, {"namespace": "roomay"})
 
     def test_compiled_reception_controller(self):
         self.assertIsNotNone(shutil.which("node"), "Node is required")

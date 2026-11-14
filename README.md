@@ -4,7 +4,7 @@ Roomay is a Workpeg-native hotel operations product for Reception, room
 inventory, stays, housekeeping, maintenance and guest service. The repository
 uses the Workpeg Python UI SDK, pinned to `workpeg==0.152.0`.
 
-**Current verified boundary (November 12, 2026):** The owner reports that the
+**Current verified boundary (November 14, 2026):** The owner reports that the
 approved `roomay` Peg is installed for testing in the isolated Roomay AI
 development business and its read-only Reception route has loaded the existing
 fictional hotel records. The tables remain owner-only (`700`). The Workpeg UI
@@ -14,11 +14,23 @@ does not represent a published production release.
 
 ## Workspaces
 
-The compiled Workpeg release router registers only:
+The compiled Workpeg release router registers:
 
-- `/` — Reception availability message.
+- `/` — unscoped launch guidance; it does not select or hardcode a business.
+- `/b/<business_id>` — native workspace home inside the Workpeg-selected
+  business, with Reception, guest-access status, and a link to Workpeg AI.
 - `/b/<business_id>/reception` — authenticated, read-only Reception UI with
   Today, Rooms & Availability, and Service Requests views.
+- `/b/<business_id>/stay` — explicit guest-access-unavailable state. This route
+  does not read room, guest, reservation, stay or request records because a
+  Workpeg staff session is not guest verification.
+
+Workpeg's reserved `/b/<business_id>/chats/new` route opens its built-in AI
+chat. The Roomay manifest currently declares no custom AI actions, and no
+trusted hotel-facts source or guest-action integration is enabled there. Treat
+the chat as general Workpeg AI only; it cannot read Roomay facts, submit hotel
+requests or report their status. The native Reception route remains the only
+verified Roomay Workpeg data view.
 
 The isolated localhost QA journey in `tools/guest_chat_demo.py` has
 `/__qa/`, `/stay`, `/staff/reception`, and `/staff/housekeeping` using synthetic
