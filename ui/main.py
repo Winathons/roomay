@@ -83,23 +83,23 @@ class WorkspaceHome(App):
                     Column(
                         Text("Workpeg AI chat", variant="heading", weight="semibold"),
                         Text(
-                            "Workpeg's built-in chat can be opened for general "
-                            "assistance. ROOMAY has not registered custom AI "
-                            "actions or a verified hotel-facts source, so this "
-                            "chat cannot look up Roomay stays, submit a request, "
-                            "or report an operational status.",
+                            "Use Workpeg AI for hotel assistance. With the "
+                            "optional ROOMAY concierge Skill, Reception is "
+                            "the coordination point for service requests. "
+                            "Actual handoff and status updates depend on "
+                            "authorized Workpeg operations and verified records.",
                             tone="muted",
                         ),
                         Link("Open Workpeg AI chat", href=biz_url("/chats/new")),
                         Text(
-                            "ROOMAY can guide a natural hotel-help conversation, "
-                            "suggest the right department, and clarify requests. "
-                            "The optional AI Skill does not verify guest identity "
-                            "or grant access to hotel records or request writes.",
+                            "ROOMAY suggests the right department and helps "
+                            "prepare requests for Reception. Skill instructions "
+                            "alone do not grant guest identity, table access, "
+                            "or request-writing permissions.",
                             tone="muted",
                         ),
                         Link(
-                            "Offer ROOMAY guest assistance Skill (admin approval)",
+                            "Offer ROOMAY Reception concierge Skill (admin approval)",
                             href=biz_url("/chats?skill_url=https%3A%2F%2Fraw.githubusercontent.com%2FWinathons%2Froomay%2Fmain%2Fskills%2Froomay-service-intake.json"),
                         ),
                         gap=12,
