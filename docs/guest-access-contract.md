@@ -6,17 +6,24 @@ login implementation, hosted permission policy, or proof of identity.
 
 ## Security boundary
 
-`domain/guest_access.py` accepts a `ChallengeEvidence` receipt containing only
-an opaque challenge ID and proof. It accepts no business, hotel, guest, stay or
-room identifiers from the challenge payload. An injected server-side
-`verify_evidence` capability validates the provider receipt, recipient, expiry,
-attempt limits and replay policy, then returns a trusted `GuestSubject` resolved
-from its authoritative challenge record. The authority then asks an injected
-trusted resolver for current records and validates the canonical hotel
-snapshot, business binding, trusted hotel mapping, one active registered stay,
-and its occupant-to-room relationship through `domain/access_control.py`.
-Roomay derives the guest, business, hotel, stay, and room from those records;
-none is accepted as a request-body claim.
+`domain/guest_challenges.py` provides provider-neutral challenge issuance and
+verification ports. `GuestChallengeService.issue` accepts a server-resolved
+`GuestSubject` bound to a specific active stay and room, then resolves that
+subject's on-file contact through `GuestContactResolver`; the browser cannot
+choose a recipient. `ChallengeEvidence` carries only an opaque challenge ID,
+proof, and a server-derived source rate key. The request adapter must construct
+it from trusted ingress data and never parse the rate key from guest JSON or
+untrusted forwarded headers. The provider verifies proof possession; the
+challenge record supplies the identity and stay scope. No identity claims are
+accepted from the proof or request body.
+
+The service applies five attempts per challenge, three issuance attempts per
+source/contact per hour, and ten verification attempts per source/contact per
+15 minutes by default. The included store and limiter are bounded,
+thread-safe, in-memory development/test ports. Their operations cannot enforce
+limits across workers or survive a process restart. `GuestChallengeStore` and
+`GuestRateLimiter` define the atomic adapter boundary; no durable adapter or
+provider delivery is implemented here.
 
 The authority creates a random opaque bearer value and stores only its SHA-256
 digest with the pinned guest/stay/room scope. The token is short-lived (15
@@ -91,12 +98,26 @@ from user input.
 The offline contract is deliberately dependency-injected:
 
 ```python
+challenge_service = GuestChallengeService(
+    provider=approved_challenge_provider,
+    contact_resolver=trusted_on_file_contact_resolver,
+    store=InMemoryGuestChallengeStore(),  # process-local, test only
+    rate_limiter=InMemoryGuestRateLimiter(),  # process-local, test only
+)
 authority = GuestSessionAuthority(
-    # Returns GuestSubject resolved from the server-side challenge record.
-    verify_evidence=server_challenge_verifier,
+    # Loads and atomically consumes identity from the challenge record.
+    verify_evidence=challenge_service.verify_evidence,
     resolve_stay=trusted_workpeg_guest_stay_reader,
 )
-token = authority.complete_challenge(verified_evidence)
+issued = challenge_service.issue(
+    server_resolved_subject_with_stay_scope,
+    trusted_source_key=server_derived_source_key,
+)
+token = authority.complete_challenge(ChallengeEvidence(
+    challenge_id=issued.challenge_id,
+    proof=provider_response,
+    trusted_source_key=server_derived_source_key,
+))
 result = action_gateway.handle_guest_action(
     session_token=token,
     channel="typed_chat",  # or "vapi", set by the trusted channel adapter
@@ -106,19 +127,18 @@ result = action_gateway.handle_guest_action(
 )
 ```
 
-The example names are interface placeholders, not implemented Workpeg APIs.
-For a future server, `verify_evidence` must verify a provider-signed or
-otherwise trusted one-time receipt, enforce a persistent rate/attempt budget,
-and return a `GuestSubject` from its server-side challenge record. The trusted
-adapter must rate-limit both verification attempts and challenge issuance by a
-server-derived source/recipient key; a client-selected challenge ID alone is
-not a brute-force control. `resolve_stay` must read the authenticated
-business and current guest/stay rows using documented, least-privilege Workpeg
-capabilities, validate all row relationships, and supply a trusted
-business-to-hotel mapping. The guest's token should be held in an `HttpOnly`,
-`Secure`, `SameSite` cookie or equivalent protected Vapi session context; add
-CSRF protection, durable revocation, and safe security logging. Do not
-expose server claims or token values to model prompts.
+The example provider and Workpeg names are interface placeholders, not
+implemented APIs. A production deployment needs provider-signed or otherwise
+trusted one-time proof, atomic durable challenge consumption, shared persistent
+rate limits and attempts, and a session store with durable revocation. Its
+trusted source key must be derived from a verified ingress/proxy configuration;
+the contact resolver must use an existing verified on-file contact.
+`resolve_stay` must read current guest/stay rows using an approved
+least-privilege capability, validate all row relationships, and supply the
+trusted business-to-hotel mapping. The guest token should be held in an
+`HttpOnly`, `Secure`, `SameSite` cookie or equivalent protected Vapi context
+with CSRF protection and safe security logging. Never expose server claims or
+token values to model prompts.
 
 The Vapi adapter should pass a transcript and trusted call/event ID to this same
 action gateway. It must not trust caller ID or model-selected tool names. Typed
@@ -127,24 +147,23 @@ domain contracts.
 
 ## Tests and limits
 
-`tests/test_guest_access.py` uses only the synthetic hotel fixture and mocked
-challenge/stay adapters. It covers forged and replayed challenge evidence,
-forged/expired session tokens, wrong business and hotel mapping, missing or
-checked-out stays, departed occupants, room/stay changes, duplicate message
-delivery, conflicting idempotency IDs, cross-session/forged confirmation,
-prompt injection, arbitrary operations, malformed model output, provider
-failure, and guest-view privacy.
+`tests/test_guest_challenges.py` and `tests/test_guest_access.py` use synthetic
+subjects and a fake provider. They cover on-file contact resolution, source and
+recipient rate limits, bounded proof attempts, expiry, replay, provider outage,
+concurrent verification, challenge-bound stay/room, wrong business/hotel/guest
+scope, session expiry/revocation, checkout and room changes, and fail-closed
+stay-reader errors. There is no restart-recovery test because the included
+challenge store, limiter, session state, and revocation state are process-local.
 
-No guest account, contact challenge, invitation sender, public route, production
-authentication, Workpeg write, or hosted authorization was implemented or
-tested by this domain contract. The standalone `apps/guest-mvp` consumes a
-typed `GuestAccessAdapter`; its default adapter reports `unavailable` and makes
-no network request. Until a reviewed backend is connected, the static guest
-journey is a separate development-only offline preview and never establishes
-authentication. The SDK and project have not verified a Workpeg guest
-authentication or public Function invocation API; do not invent one. This
-authority is process-local and loses sessions on restart, so it is not suitable
-for multi-process production deployment.
+No real contact challenge, public route, production authentication, Workpeg
+write, or hosted authorization was implemented or tested. The standalone
+`apps/guest-mvp` consumes a typed `GuestAccessAdapter`; its default adapter
+reports `unavailable` and makes no network request. Until a reviewed backend is
+connected, the static guest journey is a separate development-only offline
+preview and never establishes authentication. Current Workpeg capability
+inspection and the installed-SDK record show no approved guest authentication
+or public Function invocation API; do not invent one. The in-memory ports are
+not suitable for multi-process production deployment.
 
 ## Requirements before real guest sessions
 

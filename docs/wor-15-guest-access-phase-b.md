@@ -19,18 +19,19 @@ business ID, hotel ID, stay ID, or room ID field. It uses no localStorage or URL
 for session state. A future server should keep the session in a
 Secure/HttpOnly/SameSite cookie and return status without bearer credentials.
 
-`domain/guest_access.py` remains an offline domain contract. Challenge receipts
-now carry only opaque proof and challenge ID. The verifier must return a
-`GuestSubject` derived from its server-side challenge record; browser claims
-cannot select business, hotel, or guest identity. Successful proof is consumed
-before the stay read, and the authority can revoke a process-local session on
-logout. Existing active-stay, occupant, business, hotel, room, expiry and
-per-action revalidation rules remain in force. The injected verifier owns
-provider-specific challenge expiry, recipient binding, persistent attempt
-limits, and rate limiting at both challenge issuance and verification.
+`domain/guest_access.py` remains the stay-scoped session authority and
+`domain/guest_challenges.py` now adds provider-neutral challenge issuance,
+verification, one-time consumption, source/contact throttling, and bounded
+attempts. A challenge is bound to the server-resolved guest, business, hotel,
+stay, and room. `GuestSessionAuthority` compares that bound stay/room to the
+fresh resolution before session issuance, then revalidates active occupancy on
+every action. See [the trusted-verification backend phase](wor-15-trusted-verification-backend.md)
+for ports, limits, concurrency guarantees, and durable-storage blockers.
 
 ## Existing code reused
 
+- `GuestChallengeService` for provider/contact/storage/limiter ports with
+  in-memory test adapters only.
 - `GuestSessionAuthority` for opaque 15-minute stay-scoped sessions and fresh
   stay resolution on protected use.
 - `domain/access_control.py` for business, hotel, guest, active-stay and room
@@ -42,11 +43,10 @@ limits, and rate limiting at both challenge issuance and verification.
   cookie, expiry, revocation, rate-quota and request flows; that backend is not
   wired to this React app and remains guarded by local-only configuration.
 
-The open [WOR-77 PR #86](https://github.com/Winathons/roomay/pull/86) defines
-`roomay.guest-mvp.v1` request/action projections. It is not merged into `main`
-and does not define identity verification, a session endpoint, or a public
-WorkPeg API. This access adapter stays a separate authentication boundary and
-does not copy or modify the unmerged schema.
+The merged [WOR-77 PR #86](https://github.com/Winathons/roomay/pull/86) defines
+`roomay.guest-mvp.v1` request/action projections. It does not define a public
+WorkPeg API. Guest verification and session issuance remain a separate boundary
+from those request/action contracts.
 
 ## WorkPeg integration gate
 
@@ -88,11 +88,11 @@ and the UI directs the guest to reception.
 
 ## Verification limits
 
-The local Python authority is in-memory and test-only; process restart loses its
-sessions and revocation state. The rate-limit regression tests use a synthetic
-verifier to prove the authority honors provider refusal, not to claim a real
-provider or distributed limiter. No Workpeg tables, identities, real contacts,
-or real guest data are accessed in this phase.
+Challenge, rate-limit, session, and revocation state use bounded in-memory
+test adapters; process restart loses that state. Thread-level race tests prove
+one successful challenge consume within a process. They do not prove a real
+provider, distributed rate limiting, durable replay protection, Workpeg tables,
+real contacts, or hosted guest data access.
 
 ## Browser evidence
 
