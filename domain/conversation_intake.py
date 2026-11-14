@@ -37,13 +37,13 @@ _ELECTRICAL_HAZARD_PATTERNS = (
     # without turning every routine socket failure into an emergency.
     re.compile(
         r"\b(?:socket|power\s+outlet|outlet|plug(?:\s+point)?)\b"
-        r".{0,48}\b(?:buzz(?:ing|es)?|very\s+hot|hot\s+to\s+touch|"
-        r"overheating|smells?\s+(?:burnt|like\s+burning)|burning\s+smell|"
+        r".{0,48}\b(?:buzz(?:ing|es)?|(?:very\s+)?hot(?:\s+to\s+touch)?|"
+        r"overheating|burning|smells?\s+(?:burnt|like\s+burning)|burning\s+smell|"
         r"smoke|sparks?|sparking)\b", re.I,
     ),
     re.compile(
-        r"\b(?:buzz(?:ing|es)?|very\s+hot|hot\s+to\s+touch|overheating|"
-        r"smells?\s+(?:burnt|like\s+burning)|burning\s+smell|smoke|"
+        r"\b(?:buzz(?:ing|es)?|(?:very\s+)?hot(?:\s+to\s+touch)?|overheating|"
+        r"burning|smells?\s+(?:burnt|like\s+burning)|burning\s+smell|smoke|"
         r"sparks?|sparking)\b.{0,48}\b(?:socket|power\s+outlet|outlet|"
         r"plug(?:\s+point)?)\b", re.I,
     ),

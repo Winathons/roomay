@@ -118,6 +118,10 @@ class ConversationIntakeTests(unittest.TestCase):
             "My power outlet is very hot.",
             "The socket smells burnt.",
             "Sparks are coming from the plug.",
+            "The socket is hot.",
+            "The outlet feels hot.",
+            "My socket is burning.",
+            "The plug smells burnt.",
         ):
             with self.subTest(text=text):
                 result = self.turn(text, confirmed=True)
