@@ -42,8 +42,11 @@ creating a second service-request model:
    The category and department must agree with the existing canonical route.
    A room number must be present in the original text; the model cannot invent
    or infer it. The assistant cannot supply a guest identity, stay ID, status,
-   authorization claim, request ID, or replacement description. The original
-   guest text is retained as the eventual request description.
+   authorization claim, title, request ID, or replacement description. A
+   deterministic title is derived from the validated canonical category and the
+   original guest text is retained verbatim as the request description. For an
+   unknown complaint, the guest's original text is retained in `category_detail`
+   as well, matching the existing service-request contract.
 3. `handle_conversation_turn()` accepts channel (`typed_chat` or `vapi`), stable
    conversation and turn IDs, a trusted timestamp, optional classifier result,
    guest confirmation, a trusted `AccessContext`, and `ConversationScope`.
@@ -79,10 +82,16 @@ domain request UUID as a guest-facing reference.
 - Faulty or non-cooling AC → `air_conditioning` → Maintenance.
 - Extra towels / linen → `extra_towels` → Housekeeping.
 - A leaking pipe or plumbing issue → `plumbing` → Maintenance.
+- A request for drinking/bottled water → canonical `room_service` → Food & Beverage;
+  water leaks, pressure or unavailable hot water remain plumbing issues.
 - Room availability/rate/enquiry → Reception human handoff; no availability,
   reservation, or booking confirmation is made.
-- A sufficiently described but unknown problem → canonical `unknown` →
-  Reception with `triage_required=True`, after confirmation.
+- A clearly stated but uncategorized hotel complaint → canonical `unknown` →
+  Reception with `triage_required=True`, after confirmation. Unknown text that
+  does not clearly describe a hotel issue gets a clarification prompt and cannot
+  become a request merely because it is long.
+- Confirmation previews show a server-derived category title and the guest's
+  exact description. A model cannot author the title or replace the description.
 - Emergency language is checked before any classifier result. It triggers an
   urgent human handoff. Any classifier result marked urgent also hands off to a
   person. It does **not** create an `escalated` service request or claim that

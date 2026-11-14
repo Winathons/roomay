@@ -226,11 +226,13 @@ def _same_creation(existing, candidate):
 def create_request(snapshot, draft, actor, staff_directory, existing_requests, *,
                    at, request_id=None):
     """Validate and plan a request creation, or identify an exact retry."""
-    allowed = {
+    required = {
         "hotel_id", "stay_id", "room_id", "guest_id", "origin", "category",
         "description", "urgency", "idempotency_key", "sensitive",
     }
-    if not isinstance(draft, dict) or set(draft) - allowed or set(draft) != allowed:
+    allowed = required | {"category_detail"}
+    if (not isinstance(draft, dict) or set(draft) - allowed
+            or not required <= set(draft)):
         raise RequestError("invalid_request_draft")
     hotel_id = _uuid(draft["hotel_id"], "invalid_hotel_id")
     stay_id = _uuid(draft["stay_id"], "invalid_stay_id")
@@ -257,6 +259,10 @@ def create_request(snapshot, draft, actor, staff_directory, existing_requests, *
             {"incident_manager", "hotel_manager"} & set(trusted["roles"])):
         raise AuthorizationError("sensitive_classification_requires_authority")
     category, department, triage = route_category(draft["category"])
+    category_detail = _text(
+        draft.get("category_detail", draft["category"]),
+        "invalid_category_detail", 200,
+    )
     description = _text(draft["description"], "invalid_description", 1000)
     idempotency_key = _text(draft["idempotency_key"], "invalid_idempotency_key", 200)
     created = _at(at)
@@ -270,7 +276,7 @@ def create_request(snapshot, draft, actor, staff_directory, existing_requests, *
         "guest_id": guest_id,
         "origin": draft["origin"],
         "category": category,
-        "category_detail": _text(draft["category"], "invalid_category", 200),
+        "category_detail": category_detail,
         "department": department,
         "description": description,
         "urgency": draft["urgency"],
