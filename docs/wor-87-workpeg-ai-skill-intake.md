@@ -1,4 +1,4 @@
-# WOR-87 — Reception-first ROOMAY hotel concierge Skill v0.4.0
+# WOR-87 — Reception-first ROOMAY hotel concierge Skill v0.5.0
 
 ## Actual Workpeg acceptance
 
@@ -42,7 +42,7 @@ The current Workpeg native Reception screen reads the development hotel snapshot
 
 - Skill file: `skills/roomay-service-intake.json`
 - Name: `roomay-service-intake`
-- Version: **0.4.0**
+- Version: **0.5.0**
 - Title: **ROOMAY — hotel concierge**
 - Public branch offer: `https://raw.githubusercontent.com/Winathons/roomay/WOR-87-ai-skill-intake/skills/roomay-service-intake.json`
 - Postmerge offer: `https://raw.githubusercontent.com/Winathons/roomay/main/skills/roomay-service-intake.json`
@@ -51,8 +51,8 @@ Offer path: `/b/<verified-business-uuid>/chats?skill_url=<percent-encoded-public
 
 ## Browser acceptance
 
-1. Verify public JSON is reachable, and the offer version is `0.4.0`.
-2. Select the approved v0.4.0 Skill in a **new** Workpeg AI chat.
+1. Verify public JSON is reachable, and the offer version is `0.5.0`.
+2. Select the approved v0.5.0 Skill in a **new** Workpeg AI chat.
 3. Test an AC problem, extra towels, billing question and room cleaning: short friendly answer, proposed route through Reception and a single confirmation question.
 4. After "yes", check that the assistant ends naturally and does **not** tell the guest to contact the front desk or falsely claim a sent/saved request.
 5. Ask "Was it really sent?" — should truthfully report the actual result.
@@ -69,3 +69,9 @@ Offer path: `/b/<verified-business-uuid>/chats?skill_url=<percent-encoded-public
 **Phase 3:** Connect a trusted guest stay and a request-scoped status-read tool; build an authenticated guest surface. The SDK's `on_table_change` can refresh authorized native Peg UI pages when underlying rows change (https://developers.workpeg.com/docs/latest/table-changes/). It does not alone give Workpeg's built-in AI chat that data or automatically message guests.
 
 Do not open private owner-only hotel tables to unverified guest accounts or confuse a Workpeg staff sign-in with active hotel stay verification.
+
+## Natural Housekeeping wording in v0.5.0
+
+After the guest confirms extra towels **without a proven delivery**, the Skill may say: “Thanks! I've noted your extra-towels request for Housekeeping.” This does not claim the department received or accepted the request.
+
+After actual authorized, scoped, committed status readback proves **in_progress**, the Skill may say: “The Housekeeping team is attending to your request.” A proposed department, guest confirmation, received row, or even an assigned request by itself is not evidence of active work. An older Workpeg AI Skill version will not automatically update.
