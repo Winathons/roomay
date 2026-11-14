@@ -577,6 +577,11 @@ class HotelData(App):
         for request in loaded["Roomay Service Requests"]:
             if request["request_id"] in request_ids:
                 return self.fail("Duplicate service request identity.")
+            created_epoch = self.instant_epoch(request.get("created_at"))
+            updated_epoch = self.instant_epoch(request.get("updated_at"))
+            if (created_epoch is None or updated_epoch is None
+                    or updated_epoch < created_epoch):
+                return self.fail("Service request creation or update timestamp is invalid.")
             request_ids.append(request["request_id"])
             requests_by_id[request["request_id"]] = request
             category_departments = {
@@ -869,6 +874,7 @@ class HotelData(App):
                 "status_label": status_display.get(request["status"], request["status"]),
                 "urgency_label": urgency_display.get(request["urgency"], request["urgency"]),
                 "urgency": request["urgency"], "status": request["status"],
+                "updated_epoch": self.instant_epoch(request.get("updated_at")),
                 "room": room_numbers.get(request["room_id"], "Unknown"),
                 "guest": guest, "audit_status": audit_status, "audit_tone": audit_tone,
                 "audit_history": [{
@@ -880,6 +886,16 @@ class HotelData(App):
                     "commit_state": event["commit_state"],
                 } for event in audit_history],
             })
+        # The compiled list sort accepts primitive keys only. A fixed-width,
+        # inverted epoch key sorts newest updates first; the ID breaks ties.
+        request_sort_keys = []
+        request_by_sort_key = {}
+        for request in request_cards:
+            sort_key = str(8000000000000000 - request["updated_epoch"]) + request["request_id"]
+            request_sort_keys.append(sort_key)
+            request_by_sort_key[sort_key] = request
+        request_sort_keys.sort()
+        request_cards = [request_by_sort_key[key] for key in request_sort_keys]
         open_statuses = ["received", "assigned", "acknowledged", "in_progress",
                          "reopened", "escalated"]
         self.metrics = [
@@ -902,7 +918,9 @@ class HotelData(App):
                            if request["status"] in ["received", "assigned", "acknowledged",
                                                      "in_progress", "reopened", "escalated"]]
         resolved_today = [request for request in request_cards
-                          if any(event["to_status"] == "resolved"
+                          if request["audit_tone"] == "neutral"
+                          and any(event["to_status"] == "resolved"
+                                 and event["commit_state"] == "committed"
                                  and event["occurred_at"][:10] == self.operational_date
                                  for event in request["audit_history"])]
         self.request_summary = [
