@@ -8,7 +8,8 @@ is exposed rather than mislabelled as a persisted hotel timezone.
 """
 from workpeg.ui import (
     App, Authenticated, Button, Column, Container, Divider, Row, State, Tab,
-    Tabs, Tag, Text, TextInput, Wrap, dates, route, set_interval, workpeg,
+    Table, TableCell, TableHeader, TableRow, Tabs, Tag, Text, TextInput, Wrap,
+    dates, route, set_interval, workpeg,
     navigate,
 )
 
@@ -42,12 +43,16 @@ class HotelData(App):
     in_house_cards = State([])
     room_cards = State([])
     request_cards = State([])
+    request_summary = State([])
+    selected_request_card = State({})
     overdue_departure_cards = State([])
     housekeeping_room_cards = State([])
     housekeeping_request_cards = State([])
     housekeeping_metrics = State([])
     room_filter = State("All rooms")
+    request_filter = State("All requests")
     selected_room = State("")
+    selected_request = State("")
     active_view = State("Today")
     date_error = State("")
     show_business_id = State(False)
@@ -100,6 +105,10 @@ class HotelData(App):
     def set_filter(self, value):
         self.room_filter = value
 
+    def set_request_filter(self, value):
+        if value in ["All requests", "New"]:
+            self.request_filter = value
+
     def set_view(self, value):
         if value in ["Today", "Rooms", "Requests"]:
             self.active_view = value
@@ -120,28 +129,28 @@ class HotelData(App):
                           variant="ghost-gray", full_width=True, icon=icon,
                           icon_position="left",
                           style={"justify-content": "flex-start", "text-align": "left",
-                                 "border-radius": "10px", "font-weight": "700",
-                                 ":rest": {"color": "#174c3d", "background-color": "#e5efe8"},
-                                 ":hover": {"color": "#103a30", "background-color": "#eaf2ed"},
-                                 ":focus-visible": {"color": "#103a30",
-                                                    "background-color": "#eaf2ed",
-                                                    "outline": "2px solid #174c3d",
+                                 "border-radius": "8px", "font-weight": "700",
+                                 ":rest": {"color": "#181a1a", "background-color": "#f0f1ef"},
+                                 ":hover": {"color": "#181a1a", "background-color": "#e8eae7"},
+                                 ":focus-visible": {"color": "#181a1a",
+                                                    "background-color": "#e8eae7",
+                                                    "outline": "2px solid #181a1a",
                                                     "outline-offset": "2px"},
-                                 ":active": {"color": "#103a30",
-                                             "background-color": "#d8e8dc"}})
+                                 ":active": {"color": "#181a1a",
+                                             "background-color": "#e0e2df"}})
         return Button(label, on_click=lambda: self.set_view(view),
                       variant="ghost-gray", full_width=True, icon=icon,
                       icon_position="left",
                       style={"justify-content": "flex-start", "text-align": "left",
-                             "border-radius": "10px", "font-weight": "600",
-                             ":rest": {"color": "#53675c", "background-color": "transparent"},
-                             ":hover": {"color": "#103a30", "background-color": "#eaf2ed"},
-                             ":focus-visible": {"color": "#103a30",
-                                                "background-color": "#eaf2ed",
-                                                "outline": "2px solid #174c3d",
+                             "border-radius": "8px", "font-weight": "600",
+                             ":rest": {"color": "#515653", "background-color": "transparent"},
+                             ":hover": {"color": "#181a1a", "background-color": "#f0f1ef"},
+                             ":focus-visible": {"color": "#181a1a",
+                                                "background-color": "#f0f1ef",
+                                                "outline": "2px solid #181a1a",
                                                 "outline-offset": "2px"},
-                             ":active": {"color": "#103a30",
-                                         "background-color": "#d8e8dc"}})
+                             ":active": {"color": "#181a1a",
+                                         "background-color": "#e8eae7"}})
 
     def _filter_button(self, label, value):
         if self.room_filter == value:
@@ -150,8 +159,28 @@ class HotelData(App):
         return Button(label, on_click=lambda: self.set_filter(value),
                       variant="outline-gray", size="sm")
 
+    def _request_filter_button(self, label, value):
+        if self.request_filter == value:
+            return Button(label, on_click=lambda: self.set_request_filter(value),
+                          variant="primary", size="sm")
+        return Button(label, on_click=lambda: self.set_request_filter(value),
+                      variant="outline-gray", size="sm")
+
     def select_room(self, value):
         self.selected_room = value
+
+    def select_request(self, value):
+        self.selected_request = value
+        self.selected_request_card = next((request for request in self.request_cards
+                                            if request["request_id"] == value), {})
+
+    def clear_selected_request(self):
+        self.selected_request = ""
+        self.selected_request_card = {}
+
+    def open_request_detail(self, value):
+        self.select_request(value)
+        self.active_view = "Requests"
 
     def valid_uuid(self, value):
         if str(value) != value or len(value) != 36:
@@ -548,6 +577,11 @@ class HotelData(App):
         for request in loaded["Roomay Service Requests"]:
             if request["request_id"] in request_ids:
                 return self.fail("Duplicate service request identity.")
+            created_epoch = self.instant_epoch(request.get("created_at"))
+            updated_epoch = self.instant_epoch(request.get("updated_at"))
+            if (created_epoch is None or updated_epoch is None
+                    or updated_epoch < created_epoch):
+                return self.fail("Service request creation or update timestamp is invalid.")
             request_ids.append(request["request_id"])
             requests_by_id[request["request_id"]] = request
             category_departments = {
@@ -840,6 +874,7 @@ class HotelData(App):
                 "status_label": status_display.get(request["status"], request["status"]),
                 "urgency_label": urgency_display.get(request["urgency"], request["urgency"]),
                 "urgency": request["urgency"], "status": request["status"],
+                "updated_epoch": self.instant_epoch(request.get("updated_at")),
                 "room": room_numbers.get(request["room_id"], "Unknown"),
                 "guest": guest, "audit_status": audit_status, "audit_tone": audit_tone,
                 "audit_history": [{
@@ -851,6 +886,16 @@ class HotelData(App):
                     "commit_state": event["commit_state"],
                 } for event in audit_history],
             })
+        # The compiled list sort accepts primitive keys only. A fixed-width,
+        # inverted epoch key sorts newest updates first; the ID breaks ties.
+        request_sort_keys = []
+        request_by_sort_key = {}
+        for request in request_cards:
+            sort_key = str(8000000000000000 - request["updated_epoch"]) + request["request_id"]
+            request_sort_keys.append(sort_key)
+            request_by_sort_key[sort_key] = request
+        request_sort_keys.sort()
+        request_cards = [request_by_sort_key[key] for key in request_sort_keys]
         open_statuses = ["received", "assigned", "acknowledged", "in_progress",
                          "reopened", "escalated"]
         self.metrics = [
@@ -869,6 +914,26 @@ class HotelData(App):
         self.in_house_cards = in_house
         self.room_cards = room_cards
         self.request_cards = request_cards
+        active_requests = [request for request in request_cards
+                           if request["status"] in ["received", "assigned", "acknowledged",
+                                                     "in_progress", "reopened", "escalated"]]
+        resolved_today = [request for request in request_cards
+                          if request["audit_tone"] == "neutral"
+                          and any(event["to_status"] == "resolved"
+                                 and event["commit_state"] == "committed"
+                                 and event["occurred_at"][:10] == self.operational_date
+                                 for event in request["audit_history"])]
+        self.request_summary = [
+            {"label": "Open requests", "value": len(active_requests), "helper": "All active issues"},
+            {"label": "New requests", "value": len([request for request in request_cards
+                                                        if request["status"] == "received"]),
+             "helper": "Awaiting review"},
+            {"label": "In progress", "value": len([request for request in request_cards
+                                                       if request["status"] == "in_progress"]),
+             "helper": "Being handled"},
+            {"label": "Resolved today", "value": len(resolved_today),
+             "helper": "Audit events on operational date"},
+        ]
         self.housekeeping_room_cards = [room for room in room_cards
                                        if room["housekeeping"] != "ready"]
         self.housekeeping_request_cards = [request for request in request_cards
@@ -885,6 +950,12 @@ class HotelData(App):
         ]
         if room_cards and not any(room["number"] == self.selected_room for room in room_cards):
             self.selected_room = room_cards[0]["number"]
+        if not any(request["request_id"] == self.selected_request for request in request_cards):
+            self.selected_request = ""
+            self.selected_request_card = {}
+        else:
+            self.selected_request_card = next((request for request in request_cards
+                                               if request["request_id"] == self.selected_request), {})
 
     async def load_snapshot(self):
         if self.busy:
@@ -976,17 +1047,16 @@ class HotelData(App):
             Text(metric["label"], variant="label", tone="muted", weight="semibold",
                  style={"letter-spacing": "0.01em"}),
             Text(metric["value"], variant="display", weight="bold",
-                 style={"color": "#103a30", "font-size": "38px",
+                 style={"color": "#181a1a", "font-size": "38px",
                         "line-height": "1.02", "letter-spacing": "-1.4px",
                         "font-variant-numeric": "tabular-nums"}),
             Text(metric["helper"], variant="caption", tone="muted",
                  style={"line-height": "1.45"}),
             gap=7,
-        ), padding=18, width=184, radius=16, color="#ffffff",
-            style={"flex": "1 1 168px", "min-width": "145px",
+        ), padding=18, width=248, radius=14, color="#ffffff",
+            style={"flex": "1 1 200px", "min-width": "150px",
                    "max-width": "100%", "border": "1px solid #e2e9e4",
-                   "box-shadow": "0 8px 22px rgba(25, 43, 39, 0.04)",
-                   "min-height": "128px"})
+                   "min-height": "112px"})
 
     def _room_card(self, room):
         return Container(Column(
@@ -1005,10 +1075,10 @@ class HotelData(App):
                    variant="outline-gray", size="sm", icon="eye",
                    icon_position="left"),
             gap=9,
-        ), padding=17, width=228, radius=16, color="#ffffff",
-            style={"flex": "1 1 205px", "min-height": "210px",
+        ), padding=17, width=228, radius=12, color="#ffffff",
+            style={"flex": "1 1 205px", "min-height": "190px",
                    "min-width": "0", "border": "1px solid #e2e9e4",
-                   "box-shadow": "0 8px 22px rgba(25, 43, 39, 0.035)"})
+                   })
 
     def _housekeeping_badge(self, room):
         if room["housekeeping"] == "ready":
@@ -1027,24 +1097,33 @@ class HotelData(App):
 
     def _room_detail(self, room):
         return Container(Column(
-            Row(Text(f"Room {room['number']} details", variant="subheading", weight="bold"),
-                Tag("READ ONLY", tone="info", size="sm"),
+            Row(Column(Text(f"Room {room['number']}", variant="title", weight="bold"),
+                       Text(room["room_type"], variant="caption", tone="muted"), gap=3),
+                Tag("READ ONLY", tone="neutral", size="sm"),
                 justify="space_between", align="center", gap=12),
-            Text(room["room_type"], weight="semibold",
+            Divider(spacing=5),
+            Text("Room status", variant="caption", tone="muted"),
+            Text(room["occupancy"], weight="semibold",
                  style={"overflow-wrap": "anywhere", "word-break": "break-word"}),
-            Text(room['occupancy'], variant="label", tone="muted"),
+            Row(Text("Housekeeping", variant="caption", tone="muted"),
+                self._housekeeping_badge(room), justify="space_between", align="center", gap=8),
+            Row(Text("Maintenance", variant="caption", tone="muted"),
+                self._maintenance_badge(room), justify="space_between", align="center", gap=8),
+            Divider(spacing=5),
+            Text("Reservation", variant="caption", tone="muted"),
+            Text(room["reservation_status"] or "No linked reservation", weight="medium"),
+            Text("Physical stay", variant="caption", tone="muted"),
+            Text(room["stay_status"] or "No active stay", weight="medium"),
+            Text("Registered guests", variant="caption", tone="muted",
+                 visible=room["guest"] != ""),
             self._room_guest(room),
-            Text(f"Reservation: {room['reservation_status'] or 'None'} - Physical stay: {room['stay_status'] or 'None'}",
-                 variant="caption", tone="muted"),
-            Text(f"Housekeeping: {room['housekeeping']} - Maintenance: {room['maintenance']}",
-                 variant="caption", tone="muted"),
             Text(room["maintenance_reason"], tone="warning", visible=room["maintenance_reason"] != ""),
-            Text("Booking, assignment and check-in writes are unavailable in this read-only workspace.",
+            Text("Room guidance is not included in the authorized hotel table contract.",
                  variant="caption", tone="muted"),
-            gap=9,
-        ), padding=18, width=260, radius=16, color="#f0f5f1",
-            style={"flex": "0 1 270px", "border": "1px solid #d8e5dc",
-                   "min-width": "230px", "max-width": "100%"})
+            gap=10,
+        ), padding=22, width=360, radius=12, color="#ffffff",
+            style={"flex": "0 1 360px", "border": "1px solid #e8ebe8",
+                   "min-width": "260px", "max-width": "100%"})
 
     def _room_inspector(self):
         return Column(
@@ -1055,20 +1134,47 @@ class HotelData(App):
                 Text("Select a room to inspect its verified operational details.",
                      variant="caption", tone="muted"),
                 gap=8,
-            ), padding=18, width=260, radius=16, color="#f0f5f1",
-                style={"border": "1px solid #d8e5dc", "max-width": "100%"},
+            ), padding=22, width=360, radius=12, color="#ffffff",
+                style={"border": "1px solid #e8ebe8", "max-width": "100%"},
                 visible=self.selected_room == ""),
             gap=0,
         )
 
     def _today_content(self):
         return Column(
-            Column(Text("Today at a glance", variant="heading", weight="bold",
-                        style={"color": "#103a30", "letter-spacing": "-0.025em"}),
-                   Text("A clear view of today's verified hotel operations.", tone="muted"),
-                   gap=4),
-            Wrap(*[self._metric_card(metric) for metric in self.metrics],
+            Wrap(*[self._metric_card(metric) for metric in self.request_summary],
                  spacing=12, run_spacing=12),
+            Container(Column(
+                Row(Column(Text("Guest service requests", variant="subheading", weight="bold"),
+                           Text("Requests from the verified WorkPeg snapshot.",
+                                variant="caption", tone="muted"), gap=3),
+                    Button("Open request workspace", on_click=lambda: self.set_view("Requests"),
+                           variant="text", size="sm"),
+                    justify="space_between", align="center", gap=10),
+                Wrap(self._request_filter_button("All requests", "All requests"),
+                     self._request_filter_button("New", "New"),
+                     spacing=8, run_spacing=8),
+                Text("No service requests are present in the validated snapshot.",
+                     tone="muted", visible=len(self.request_cards) == 0),
+                Table(
+                    TableHeader(TableCell(title="REQUEST"), TableCell(title="ROOM"),
+                                TableCell(title="CATEGORY"), TableCell(title="STATUS"),
+                                TableCell(title="ASSIGNED TO")),
+                    *[self._request_overview_row(request) for request in self.request_cards
+                      if self.request_filter == "All requests" or request["status"] == "received"],
+                    search="Search requests, rooms or guests",
+                    sortable=True, page_size=8, hover=True,
+                    key="reception-overview-request-table",
+                ),
+                gap=12,
+            ), padding=18, radius=12, color="#ffffff",
+                style={"border": "1px solid #e8ebe8", "max-width": "100%"}),
+            Column(
+                Text("Hotel operations", variant="subheading", weight="bold"),
+                Text("Verified stays, arrivals, departures and room readiness.",
+                     variant="caption", tone="muted"),
+                Wrap(*[self._metric_card(metric) for metric in self.metrics],
+                     spacing=12, run_spacing=12),
             Wrap(
                 Container(Column(
                     Row(Text("Currently in house", variant="subheading", weight="bold"),
@@ -1120,14 +1226,15 @@ class HotelData(App):
                 gap=4,
             ), padding=15, radius=14, color="#edf3ef",
                 style={"border": "1px solid #dfe9e1"}),
+            gap=16),
             gap=20,
         )
 
     def _rooms_content(self):
         return Column(
-            Column(Text("Rooms & availability", variant="heading", weight="bold",
-                        style={"color": "#103a30", "letter-spacing": "-0.025em"}),
-                   Text("Occupancy, room readiness and maintenance are shown separately.", tone="muted"),
+            Column(Text("Room information", variant="heading", weight="bold",
+                        style={"color": "#181a1a", "letter-spacing": "-0.025em"}),
+                   Text("Verified room inventory, occupancy, readiness and maintenance.", tone="muted"),
                    gap=4),
             Wrap(
                 self._filter_button("All rooms", "All rooms"),
@@ -1166,34 +1273,151 @@ class HotelData(App):
 
     def _requests_content(self):
         return Column(
-            Column(Text("Guest service requests", variant="heading", weight="bold"),
-                   Text("Read-only records. Lifecycle actions require verified staff authorization and committed audit writes.", tone="muted"),
+            Column(Text("Guest service requests", variant="heading", weight="bold",
+                        style={"color": "#181a1a", "font-size": "27px",
+                               "letter-spacing": "-0.025em"}),
+                   Text("A clear view of what needs your attention.", tone="muted"),
                    gap=4),
-            Text("No service requests", tone="muted", visible=len(self.request_cards) == 0),
-            Wrap(*[
-                Container(Column(
-                    Wrap(Tag(request["department_label"], tone="success", size="sm"),
-                         Tag(request["status_label"], tone="neutral", size="sm"),
-                         Tag(request["urgency_label"], tone="warning", size="sm"),
-                         spacing=6, run_spacing=6),
-                    Text(request["description"], weight="semibold"),
-                    Text("Request category: " + request["category_label"],
-                         variant="caption", tone="muted"),
-                    Text("Guest: " + request["guest"] + " - Room " + request["room"],
-                         variant="caption", weight="medium"),
-                    self._audit_note(request),
-                    Column(*[Text(f"Audit {event['sequence']}: {event['event_type']} - {event['from_status'] or 'start'} -> {event['to_status']} - {event['commit_state']} - {event['occurred_at']}",
-                                  variant="caption", tone="muted")
-                             for event in request["audit_history"]], gap=5),
-                    gap=10,
-                ), padding=18, width=360, radius=18, color="#ffffff",
-                    style={"flex": "1 1 330px", "min-width": "0",
-                           "border": "1px solid #e2e9e4",
-                           "box-shadow": "0 8px 24px rgba(25, 43, 39, 0.035)"})
-                for request in self.request_cards
-            ], spacing=12, run_spacing=12),
+            Wrap(
+                *[self._metric_card(metric) for metric in self.request_summary],
+                spacing=12, run_spacing=12,
+            ),
+            Text("No service requests are present in the validated snapshot.", tone="muted",
+                 visible=len(self.request_cards) == 0),
+            Wrap(
+                Container(Table(
+                    TableHeader(TableCell(title="REQUEST"), TableCell(title="ROOM"),
+                                TableCell(title="CATEGORY"), TableCell(title="STATUS"),
+                                TableCell(title="DEPARTMENT")),
+                    *[self._request_table_row(request) for request in self.request_cards],
+                    search="Search requests, rooms or guests",
+                    sortable=True, page_size=8, hover=True,
+                    key="reception-guest-request-table",
+                ), padding=0, width=700, radius=12, color="#ffffff",
+                    style={"flex": "1 1 620px", "min-width": "0", "max-width": "100%",
+                           "border": "1px solid #e8ebe8", "overflow": "hidden"}),
+                self._request_detail(self.selected_request_card),
+                spacing=12, run_spacing=12, cross_alignment="start",
+            ),
             gap=18,
         )
+
+    def _request_overview_row(self, request):
+        return TableRow(
+            TableCell(Button(request["description"],
+                             on_click=lambda: self.open_request_detail(request["request_id"]),
+                             variant="text", size="sm",
+                             style={"justify-content": "flex-start", "text-align": "left",
+                                    "white-space": "normal", "font-weight": "600",
+                                    ":focus-visible": {"outline": "2px solid #181a1a",
+                                                       "outline-offset": "2px"}}),
+                      title="", subtext="Open read-only request details"),
+            TableCell(title="Room " + request["room"], subtext=request["guest"]),
+            TableCell(title=request["category_label"]),
+            TableCell(self._request_status_tag(request)),
+            TableCell(title="Unavailable", subtext="Staff assignment is read only"),
+        )
+
+    def _request_table_row(self, request):
+        return TableRow(
+            TableCell(Button(request["description"],
+                             on_click=lambda: self.select_request(request["request_id"]),
+                             variant="text", size="sm",
+                             style={"justify-content": "flex-start", "text-align": "left",
+                                    "white-space": "normal", "font-weight": "600",
+                                    ":focus-visible": {"outline": "2px solid #181a1a",
+                                                       "outline-offset": "2px"}}),
+                      title="", subtext="Open read-only request details"),
+            TableCell(title="Room " + request["room"], subtext=request["guest"]),
+            TableCell(title=request["category_label"]),
+            TableCell(self._request_status_tag(request)),
+            TableCell(title="Unavailable", subtext="Staff assignment is read only"),
+        )
+
+    def _request_status_tag(self, request):
+        if request["status"] == "received":
+            return Tag(request["status_label"], tone="info", size="sm")
+        if request["status"] in ["assigned", "acknowledged", "in_progress", "reopened", "escalated"]:
+            return Tag(request["status_label"], tone="warning", size="sm")
+        if request["status"] == "resolved":
+            return Tag(request["status_label"], tone="success", size="sm")
+        return Tag(request["status_label"], tone="neutral", size="sm")
+
+    def _request_detail(self, request):
+        if not request:
+            return Container(Column(
+                Text("Request details", variant="subheading", weight="bold"),
+                Text("Select a request to review its verified details and audit history.",
+                     variant="caption", tone="muted"),
+                Text("Request status and assignment are read-only here.",
+                     variant="caption", tone="muted"),
+                gap=12,
+            ), padding=22, width=360, radius=12, color="#ffffff",
+                style={"flex": "0 1 360px", "min-width": "260px", "max-width": "100%",
+                       "border": "1px solid #e8ebe8"})
+
+        return Container(Column(
+            Row(Text("Request details", variant="subheading", weight="bold"),
+                Wrap(
+                    Button("Refresh status", on_click=self.load_snapshot,
+                           variant="outline-gray", size="sm"),
+                    Button("Back to requests", on_click=self.clear_selected_request,
+                           variant="text", size="sm"),
+                    spacing=6, run_spacing=6,
+                ),
+                justify="space_between", align="center", gap=8),
+            Row(self._request_status_tag(request),
+                Tag(request["urgency_label"], tone="warning", size="sm"),
+                justify="start", align="center", gap=6),
+            Divider(spacing=5),
+            Text("Issue details", variant="label", weight="semibold"),
+            Text(request["description"], style={"overflow-wrap": "anywhere", "word-break": "break-word"}),
+            Row(Column(Text("Room", variant="caption", tone="muted"),
+                       Text(request["room"], weight="semibold"), gap=3),
+                Column(Text("Category", variant="caption", tone="muted"),
+                       Text(request["category_label"], weight="semibold"), gap=3),
+                justify="space_between", align="start", gap=12),
+            Row(Column(Text("Guest", variant="caption", tone="muted"),
+                       Text(request["guest"], weight="medium"), gap=3),
+                Column(Text("Department", variant="caption", tone="muted"),
+                       Text(request["department_label"], weight="medium"), gap=3),
+                justify="space_between", align="start", gap=12),
+            self._audit_note(request),
+            Text("Audit history", variant="label", weight="semibold"),
+            Text("No audit events are visible for this request.", variant="caption", tone="muted",
+                 visible=len(request["audit_history"]) == 0),
+            Column(*[Text(f"{event['sequence']} · {event['event_type']} · {event['to_status']} · {event['commit_state']} · {event['occurred_at']}",
+                          variant="caption", tone="muted",
+                          style={"overflow-wrap": "anywhere", "word-break": "break-word"})
+                     for event in request["audit_history"]], gap=6),
+            self._request_action_readiness(),
+            gap=12,
+        ), padding=22, width=360, radius=12, color="#ffffff",
+            style={"flex": "0 1 360px", "min-width": "260px", "max-width": "100%",
+                   "border": "1px solid #e8ebe8"})
+
+    def _request_action_readiness(self):
+        """Show the planned staff workflow without presenting no-op controls."""
+        return Container(Column(
+            Text("Staff actions", variant="label", weight="semibold"),
+            Row(Text("Assign request", variant="caption"),
+                Tag("Unavailable", tone="neutral", size="sm"),
+                justify="space_between", align="center", gap=8),
+            Row(Text("Acknowledge", variant="caption"),
+                Tag("Unavailable", tone="neutral", size="sm"),
+                justify="space_between", align="center", gap=8),
+            Row(Text("Mark in progress", variant="caption"),
+                Tag("Unavailable", tone="neutral", size="sm"),
+                justify="space_between", align="center", gap=8),
+            Row(Text("Resolve request", variant="caption"),
+                Tag("Unavailable", tone="neutral", size="sm"),
+                justify="space_between", align="center", gap=8),
+            Text("Staff identity, role permissions, serialized request and audit writes, and independent Workpeg readback must be verified before these actions can be enabled.",
+                 variant="caption", tone="muted",
+                 style={"overflow-wrap": "anywhere", "word-break": "break-word"}),
+            gap=8,
+        ), padding=12, radius=10, color="#f3f5f2",
+            style={"border": "1px solid #e8ebe8"})
 
     def _audit_note(self, request):
         if request["audit_tone"] == "warning":
@@ -1214,23 +1438,22 @@ class HotelData(App):
     def _sidebar(self):
         return Container(Column(
             Row(
-                Container(Text("R", variant="title", weight="bold",
+                Container(Text("H", variant="title", weight="bold",
                                style={"color": "#ffffff"}),
-                          width=38, height=38, radius=12, color="#174c3d",
+                          width=54, height=54, radius=10, color="#181a1a",
                           style={"display": "grid", "place-items": "center"}),
-                Column(Text("roomay.", variant="title", weight="bold",
-                            style={"color": "#192b27", "letter-spacing": "-0.06em"}),
+                       Column(Text("Roomay", variant="title", weight="bold",
+                            style={"color": "#181a1a", "letter-spacing": "-0.04em"}),
                        Text("HOTEL OPERATIONS", variant="caption",
-                            style={"color": "#687972", "letter-spacing": "0.07em"}),
+                            style={"color": "#737976", "letter-spacing": "0.07em"}),
                        gap=1),
                 gap=10, align="center",
             ),
             Divider(spacing=10),
-            Text("FRONT DESK", variant="caption", weight="bold",
+            Text("WORKSPACE", variant="caption", weight="bold",
                  style={"color": "#718178", "letter-spacing": "0.1em"}),
-            self._nav_button("Today", "Today"),
-            self._nav_button("Rooms & availability", "Rooms"),
-            self._nav_button("Service requests", "Requests"),
+            self._nav_button("Overview", "Today"),
+            self._nav_button("Rooms", "Rooms"),
             Divider(spacing=10),
             Text("WORKSPACES", variant="caption", weight="bold",
                  style={"color": "#718178", "letter-spacing": "0.1em"}),
@@ -1259,9 +1482,9 @@ class HotelData(App):
                  style={"color": "#687972", "line-height": "1.45"},
                  visible=self.view_state != "loaded"),
             gap=12,
-        ), padding=20, width=250, radius=20, color="#fbfcf9",
-            style={"min-height": "calc(100vh - 40px)", "border": "1px solid #e2e9e4",
-                   "box-shadow": "0 10px 30px rgba(25, 43, 39, 0.045)",
+            ), padding=24, width=232, radius=14, color="#ffffff",
+            style={"min-height": "calc(100vh - 48px)", "border": "1px solid #e8ebe8",
+                   "box-sizing": "border-box",
                    "align-self": "stretch"})
 
     def open_housekeeping(self):
@@ -1461,10 +1684,11 @@ class HotelData(App):
                 Column(Text("RECEPTION / FRONT DESK", variant="caption", weight="bold",
                             style={"color": "#718178", "letter-spacing": "0.1em"}),
                        Text(self._page_title(), variant="heading", weight="bold",
-                            style={"color": "#103a30", "font-size": "32px",
-                                   "letter-spacing": "-0.035em"}),
+                            style={"color": "#181a1a", "font-size": "46px",
+                                   "line-height": "1.08", "letter-spacing": "-0.045em"}),
                        Text("A clear view of verified hotel operations.",
-                            variant="caption", tone="muted"), gap=4),
+                            variant="caption", tone="muted",
+                            style={"font-size": "18px", "line-height": "1.5"}), gap=5),
                 Tag("READ ONLY", tone="info", size="sm"),
                 spacing=12, cross_alignment="center",
             ),
@@ -1488,7 +1712,7 @@ class HotelData(App):
                 "#fff4f4", "#e6b8b8", "connection_unavailable"),
             self._loaded_view(),
             gap=18,
-        ), style={"flex": "1 1 600px", "min-width": "280px",
+        ), style={"flex": "1 1 600px", "min-width": "0",
                   "max-width": "100%"})
 
     def _active_content(self):
@@ -1500,7 +1724,11 @@ class HotelData(App):
 
     def _page_title(self):
         if self.view_state == "loaded":
-            return self.active_view
+            if self.active_view == "Today":
+                return "Good evening, Reception"
+            if self.active_view == "Rooms":
+                return "Room information"
+            return "Guest service requests"
         return "Reception workspace"
 
     def _refresh_control(self):
@@ -1529,5 +1757,6 @@ class HotelData(App):
         if route.workspace == "housekeeping":
             return Authenticated(self._housekeeping_content())
         return Authenticated(Container(Wrap(self._sidebar(), self._main_content(), spacing=22, run_spacing=18,
-                cross_alignment="start"), padding=24, color="#f7f8f3",
-                style={"min-height": "100vh", "max-width": "1600px", "margin": "0 auto"}))
+                cross_alignment="start"), padding=24, color="#f8f9f7",
+                style={"min-height": "100vh", "max-width": "1600px", "margin": "0 auto",
+                       "box-sizing": "border-box"}))
