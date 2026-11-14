@@ -44,7 +44,7 @@ class RoomaySkillOfferTests(unittest.TestCase):
 
     def test_no_guest_homework_after_confirmation(self):
         guidance = self.instructions.lower()
-        self.assertIn("thanks! i've noted your air-conditioning request here", guidance)
+        self.assertIn("thanks! i've noted your extra-towels request for housekeeping", guidance)
         self.assertIn("do not tell the guest to share it with the front desk", guidance)
         self.assertIn("end the message there", guidance)
         self.assertIn("no real authorized send/save", guidance)
